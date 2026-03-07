@@ -18,10 +18,12 @@ function formatGameTime(raw) {
 
 function isGameLocked(game_time) {
   if (!game_time) return false;
-  return new Date() >= new Date(game_time);
+  const tipoff = new Date(game_time);
+  const fiveMinBefore = new Date(tipoff.getTime() - 5 * 60 * 1000);
+  return new Date() >= fiveMinBefore;
 }
 
-function PickButtons({ game, user, userPick, onPick }) {
+function PickButtons({ game, user, userPick, onPick, onChangePick }) {
   const locked = isGameLocked(game.game_time);
   const { away, home } = game;
 
@@ -41,12 +43,21 @@ function PickButtons({ game, user, userPick, onPick }) {
     const won  = userPick.result === 'W';
     const lost = userPick.result === 'L';
     const pending = !userPick.result;
+    const canChange = pending && !locked;
     return (
       <div style={{ marginTop: 14, padding: "12px 14px", background: pending ? "rgba(59,130,246,0.06)" : won ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)", borderRadius: 8, border: `1px solid ${pending ? "rgba(59,130,246,0.2)" : won ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}` }}>
-        <div style={{ fontSize: 10, color: "#4a5568", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Your Pick</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <div style={{ fontSize: 10, color: "#4a5568", textTransform: "uppercase", letterSpacing: "0.06em" }}>Your Pick</div>
+          {canChange && (
+            <span onClick={() => onChangePick()} style={{ fontSize: 10, color: "#f59e0b", cursor: "pointer", fontWeight: 600 }}>
+              ✏ Change
+            </span>
+          )}
+        </div>
         <div style={{ fontSize: 13, fontWeight: 700, color: pending ? "#60a5fa" : won ? "#22c55e" : "#ef4444" }}>
           {pending ? `⏳ ${userPick.picked_team}` : won ? `✅ ${userPick.picked_team} — HIT` : `❌ ${userPick.picked_team} — MISS`}
         </div>
+        {canChange && <div style={{ fontSize: 10, color: "#4a5568", marginTop: 4 }}>Locks 5 min before tip-off</div>}
       </div>
     );
   }
@@ -109,16 +120,31 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
   async function handlePick(team) {
     if (!user || pickLoading || isGameLocked(game_time)) return;
     setPickLoading(true);
-    const { data, error } = await supabase.from('game_picks').insert({
-      user_id:     user.id,
-      game_id:     String(gameId),
-      slate_date:  slateDate,
-      matchup,
-      picked_team: team,
-      game_time:   game_time || null,
-    }).select().single();
-    if (!error && data) setUserPick(data);
+    if (userPick) {
+      // Update existing pick
+      const { data, error } = await supabase.from('game_picks')
+        .update({ picked_team: team })
+        .eq('id', userPick.id)
+        .select().single();
+      if (!error && data) setUserPick(data);
+    } else {
+      // Insert new pick
+      const { data, error } = await supabase.from('game_picks').insert({
+        user_id:     user.id,
+        game_id:     String(gameId),
+        slate_date:  slateDate,
+        matchup,
+        picked_team: team,
+        game_time:   game_time || null,
+      }).select().single();
+      if (!error && data) setUserPick(data);
+    }
     setPickLoading(false);
+  }
+
+  function handleChangePick() {
+    // Temporarily clear userPick from display to show buttons again
+    setUserPick(null);
   }
 
   const existingBet = betLog?.find(b => b.matchup === matchup);
@@ -234,7 +260,7 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
           )}
 
           {/* Pick buttons */}
-          <PickButtons game={game} user={user} userPick={userPick} onPick={handlePick} />
+          <PickButtons game={game} user={user} userPick={userPick} onPick={handlePick} onChangePick={handleChangePick} />
 
           {/* Bet logger */}
           <div style={{ marginTop: 10 }}>

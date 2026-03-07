@@ -7,11 +7,9 @@ import { B2BTierCard, SpreadMismatchCard } from './B2BTierCard';
 import { LoginModal } from '../common/LoginModal';
 import { RecordWidget } from '../common/RecordWidget';
 
-// ── Pick a free game of the day ───────────────────────────────────────────────
-// Uses date as seed so it's consistent all day but changes daily
 function getFreeGame(games) {
   if (!games?.length) return null;
-  const eligible = games.filter(g => g.edge.confidence === "HIGH" || g.edge.confidence === "MODERATE");
+  const eligible = games.filter(g => g.edge?.confidence === "HIGH" || g.edge?.confidence === "MODERATE");
   if (!eligible.length) return games[0];
   const today = new Date().toISOString().split('T')[0];
   const seed = today.split('-').reduce((s, n) => s + parseInt(n), 0);
@@ -71,9 +69,14 @@ export default function NBADashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const games = slate?.games || [];
-  const sorted = [...games].sort((a, b) => sortBy === "score" ? Math.abs(b.edge.score) - Math.abs(a.edge.score) : 0);
-  const highConf = sorted.filter(g => g.edge.confidence === "HIGH");
+  const sorted = [...(slate?.games || [])].map(g => ({
+    ...g,
+    edge: g.edge || g.edge_data || {},
+    away: g.away || g.away_data || {},
+    home: g.home || g.home_data || {},
+  })).sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
+
+  const highConf = sorted.filter(g => g.edge?.confidence === "HIGH");
   const freeGame = getFreeGame(sorted);
 
   useEffect(() => {
@@ -114,10 +117,8 @@ export default function NBADashboard() {
         </div>
       )}
 
-      {/* Record widget — everyone sees this */}
       <RecordWidget slate={slate} />
 
-      {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
           <span style={{ fontSize: 26 }}>🏀</span>
@@ -140,14 +141,12 @@ export default function NBADashboard() {
         </div>
       </div>
 
-      {/* Headline — everyone sees */}
       {slate?.headline && (
         <div style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 10, padding: "14px 18px", marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#60a5fa" }}>🚨 HEADLINE: {slate.headline}</div>
         </div>
       )}
 
-      {/* Yesterday's results — everyone sees */}
       {slate?.yesterday_results?.length > 0 && (
         <div style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.15)", borderRadius: 10, padding: "14px 18px", marginBottom: 14 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#22c55e", marginBottom: 4 }}>
@@ -168,7 +167,6 @@ export default function NBADashboard() {
         </div>
       )}
 
-      {/* ── LOGGED IN ── */}
       {user && (
         <>
           <BettingLog betLog={betLog} />
@@ -177,10 +175,10 @@ export default function NBADashboard() {
               <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", marginBottom: 4, textTransform: "uppercase" }}>🔥 High Confidence Tonight</div>
               {highConf.map((g, i) => (
                 <div key={i} style={{ fontSize: 13, color: "#fca5a5", marginBottom: 3 }}>
-                  {g.matchup} → <strong>{g.edge.lean}</strong> (score: {g.edge.score})
-                  {g.edge.ou_lean && <span style={{ marginLeft: 8, color: "#a855f7" }}>· {g.edge.ou_lean}</span>}
-                  {g.away.b2b && <span style={{ marginLeft: 6, color: "#f59e0b" }}>· {g.away.team} B2B</span>}
-                  {g.home.b2b && <span style={{ marginLeft: 6, color: "#f59e0b" }}>· {g.home.team} B2B</span>}
+                  {g.matchup} → <strong>{g.edge?.lean}</strong> (score: {g.edge?.score})
+                  {g.edge?.ou_lean && <span style={{ marginLeft: 8, color: "#a855f7" }}>· {g.edge?.ou_lean}</span>}
+                  {g.away?.b2b && <span style={{ marginLeft: 6, color: "#f59e0b" }}>· {g.away?.team} B2B</span>}
+                  {g.home?.b2b && <span style={{ marginLeft: 6, color: "#f59e0b" }}>· {g.home?.team} B2B</span>}
                 </div>
               ))}
             </div>
@@ -195,10 +193,8 @@ export default function NBADashboard() {
         </>
       )}
 
-      {/* ── LOGGED OUT ── */}
       {!user && (
         <>
-          {/* Free pick of the day */}
           {freeGame && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
@@ -209,7 +205,6 @@ export default function NBADashboard() {
             </div>
           )}
 
-          {/* Locked games */}
           <div style={{ marginBottom: 8 }}>
             <div style={{ fontSize: 11, color: "#4a5568", marginBottom: 8 }}>
               🔒 {sorted.length - 1} more games —{" "}
@@ -228,7 +223,7 @@ export default function NBADashboard() {
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9" }}>{g.matchup}</span>
                       <Pill text={g.game_time} color="#6b7280" />
-                      {(g.away.b2b || g.home.b2b) && <Pill text={`${g.away.b2b ? g.away.team : g.home.team} B2B`} color="#f59e0b" />}
+                      {(g.away?.b2b || g.home?.b2b) && <Pill text={`${g.away?.b2b ? g.away?.team : g.home?.team} B2B`} color="#f59e0b" />}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 11, color: "#6b7280" }}>{g.spread}</span>
@@ -242,7 +237,6 @@ export default function NBADashboard() {
             </div>
           </div>
 
-          {/* CTA */}
           <div style={{ marginTop: 20, padding: "20px", background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.12)", borderRadius: 12, textAlign: "center" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9", marginBottom: 6 }}>Unlock all {sorted.length} games tonight</div>
             <div style={{ fontSize: 11, color: "#4a5568", marginBottom: 16 }}>Free account · No credit card · Just Google sign in</div>

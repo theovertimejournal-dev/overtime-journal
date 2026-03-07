@@ -2,7 +2,20 @@ import { Pill } from '../common/Pill';
 import { NBATeamColumn } from './NBATeamColumn';
 import { NBAEdgeSignals } from './NBAEdgeSignals';
 
-const CONFIDENCE_COLORS = { HIGH: "#ef4444", MODERATE: "#f59e0b", LOW: "#6b7280" };
+const CONFIDENCE_COLORS = { SHARP: "#ef4444", LEAN: "#f59e0b", INFO: "#6b7280" };
+
+function formatGameTime(raw) {
+  if (!raw) return '';
+  try {
+    return new Date(raw).toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit',
+      timeZone: 'America/New_York', hour12: true
+    }) + ' ET';
+  } catch {
+    return raw;
+  }
+}
+
 
 export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
   // Null guard — if game data isn't fully normalized yet, render nothing
@@ -28,7 +41,7 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9" }}>{matchup}</span>
-            <Pill text={game_time} color="#6b7280" />
+            <Pill text={formatGameTime(game_time)} color="#6b7280" />
             {(away?.b2b || home?.b2b) && (
               <Pill text={`${away?.b2b ? away.team : home.team} B2B`} color="#f59e0b" />
             )}

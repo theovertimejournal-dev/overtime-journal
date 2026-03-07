@@ -9,7 +9,7 @@ import { RecordWidget } from '../common/RecordWidget';
 
 function getFreeGame(games) {
   if (!games?.length) return null;
-  const eligible = games.filter(g => g.edge?.confidence === "HIGH" || g.edge?.confidence === "MODERATE");
+  const eligible = games.filter(g => g.edge?.confidence === "SHARP" || g.edge?.confidence === "LEAN");
   if (!eligible.length) return games[0];
   const today = new Date().toISOString().split('T')[0];
   const seed = today.split('-').reduce((s, n) => s + parseInt(n), 0);
@@ -71,7 +71,7 @@ export default function NBADashboard() {
 
  const sorted = [...(slate?.games || [])].sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
 
-  const highConf = sorted.filter(g => g.edge?.confidence === "HIGH");
+  const sharpConf = sorted.filter(g => g.edge?.confidence === "SHARP");
   const freeGame = getFreeGame(sorted);
 
   useEffect(() => {
@@ -116,9 +116,21 @@ export default function NBADashboard() {
 
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
-          <span style={{ fontSize: 26 }}>🏀</span>
+          <span style={{
+            fontSize: 26,
+            display: "inline-block",
+            animation: "spinBall 3s linear infinite",
+          }}>🏀</span>
+          <style>{`@keyframes spinBall { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: "#f1f5f9", letterSpacing: "-0.03em" }}>NBA Bench Edge Analyzer</h1>
           <Pill text="v1.2" color="#ef4444" />
+          <span
+            onClick={() => window.location.href = '/arcade'}
+            title="🕹 Play NBA Jam"
+            style={{ fontSize: 16, cursor: "pointer", opacity: 0.5, transition: "opacity 0.2s" }}
+            onMouseEnter={e => e.currentTarget.style.opacity = 1}
+            onMouseLeave={e => e.currentTarget.style.opacity = 0.5}
+          >🕹</span>
         </div>
         <p style={{ fontSize: 11, color: "#4a5568", margin: "0 0 12px" }}>Bench Net Rating · B2B Fatigue · Close Games · 3PT Variance · Injuries · Bet Tracking</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -165,10 +177,10 @@ export default function NBADashboard() {
       {user && (
         <>
           <BettingLog betLog={betLog} />
-          {highConf.length > 0 && (
+          {sharpConf.length > 0 && (
             <div style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.12)", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", marginBottom: 4, textTransform: "uppercase" }}>🔥 High Confidence Tonight</div>
-              {highConf.map((g, i) => (
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", marginBottom: 4, textTransform: "uppercase" }}>🔥 Sharp Edges Tonight</div>
+              {sharpConf.map((g, i) => (
                 <div key={i} style={{ fontSize: 13, color: "#fca5a5", marginBottom: 3 }}>
                   {g.matchup} → <strong>{g.edge?.lean}</strong> (score: {g.edge?.score})
                   {g.edge?.ou_lean && <span style={{ marginLeft: 8, color: "#a855f7" }}>· {g.edge?.ou_lean}</span>}
@@ -242,9 +254,15 @@ export default function NBADashboard() {
         </>
       )}
 
-      <div style={{ marginTop: 28, padding: "14px 0", borderTop: "1px solid rgba(255,255,255,0.04)", fontSize: 10, color: "#374151", lineHeight: 1.8 }}>
-        <strong style={{ color: "#4a5568" }}>Score:</strong> Positive = lean strength. <strong style={{ color: "#4a5568" }}>Bench Net:</strong> Pts per 100 poss when bench is on. <strong style={{ color: "#4a5568" }}>Close:</strong> Games decided by ≤3 pts.
-        <br />⚠ For informational purposes only. Gamble responsibly. 1-800-GAMBLER.
+      <div style={{ marginTop: 28, padding: "16px 0", borderTop: "1px solid rgba(255,255,255,0.04)", fontSize: 10, color: "#374151", lineHeight: 2 }}>
+        <strong style={{ color: "#4a5568" }}>Score:</strong> Positive = lean strength (HOME favored). &nbsp;
+        <strong style={{ color: "#4a5568" }}>SHARP:</strong> Score ≥14. &nbsp;
+        <strong style={{ color: "#4a5568" }}>LEAN:</strong> Score 8–13. &nbsp;
+        <strong style={{ color: "#4a5568" }}>INFO:</strong> Score &lt;8. &nbsp;
+        <strong style={{ color: "#4a5568" }}>Close:</strong> Games decided by ≤5 pts L10.
+        <br />
+        <span style={{ color: "#ef4444", fontWeight: 600 }}>⚠ DISCLAIMER:</span>
+        {" "}All analysis on OTJ is for <strong style={{ color: "#4a5568" }}>informational and entertainment purposes only</strong>. Nothing here constitutes financial, betting, or investment advice. Past performance does not guarantee future results. Always gamble responsibly and within your means. If you or someone you know has a gambling problem, call <strong style={{ color: "#4a5568" }}>1-800-GAMBLER</strong>.
       </div>
     </div>
   );

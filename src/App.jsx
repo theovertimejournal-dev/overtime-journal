@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import NBADashboard from './components/nba/NBADashboard';
+import { AuthButton } from './components/common/AuthButton';
 
 // ── Sport tab nav ──────────────────────────────────────────────────────────────
 function SportTabs() {
@@ -44,6 +45,8 @@ function SportTabs() {
 
       {/* Right links */}
       <NavLink to="/board" style={({ isActive }) => tabStyle(isActive)}>🏆 Leaderboard</NavLink>
+      <NavLink to="/board" style={({ isActive }) => tabStyle(isActive)}>🏆 Leaderboard</NavLink>
+<AuthButton />
     </nav>
   );
 }

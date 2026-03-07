@@ -1,6 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import NBADashboard from './components/nba/NBADashboard';
 import { AuthButton } from './components/common/AuthButton';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
+import Record from './pages/Record';
+
 
 // ── Sport tab nav ──────────────────────────────────────────────────────────────
 function SportTabs() {
@@ -87,6 +91,12 @@ export default function App() {
           <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
           <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />
           <Route path="/board" element={<ComingSoon sport="Leaderboard" emoji="🏆" phase="Phase 1 Step 6" />} />
+          <Route path="/privacy" element={<Privacy />} />
+<Route path="/terms" element={<Terms />} />
+<Route path="/record" element={<Record />} />
+```
+
+
         </Routes>
       </div>
     </BrowserRouter>

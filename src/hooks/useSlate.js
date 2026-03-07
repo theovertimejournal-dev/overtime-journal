@@ -48,25 +48,38 @@ export function useSlate(sport = 'nba', date = null) {
       setLoading(true);
       setError(null);
       try {
-        const { data, error: sbError } = await supabase
+        // Fetch slate row — yesterday_results is a jsonb column, NOT a joined table
+        const { data: slateData, error: slateError } = await supabase
           .from('slates')
-          .select(`*, games(*), yesterday_results(*)`)
+          .select('*')
           .eq('sport', sport)
           .eq('date', targetDate)
           .single();
 
-        if (sbError || !data) {
-          console.info('[useSlate] No Supabase data found — using mock data');
+        if (slateError || !slateData) {
+          console.info('[useSlate] No Supabase slate found — using mock data');
           setSlate(MOCK_NBA_SLATE);
           setSource('mock');
-        } else {
-          setSlate({
-            ...data,
-            games: (data.games || []).map(normalizeGame),
-            yesterday_results: data.yesterday_results || [],
-          });
-          setSource('supabase');
+          return;
         }
+
+        // Fetch related games rows separately
+        const { data: gamesData, error: gamesError } = await supabase
+          .from('games')
+          .select('*')
+          .eq('slate_id', slateData.id);
+
+        if (gamesError) {
+          console.warn('[useSlate] Games fetch failed:', gamesError.message);
+        }
+
+        setSlate({
+          ...slateData,
+          games: (gamesData || []).map(normalizeGame),
+          yesterday_results: slateData.yesterday_results || [],
+        });
+        setSource('supabase');
+
       } catch (err) {
         console.warn('[useSlate] Fetch failed, using mock:', err.message);
         setSlate(MOCK_NBA_SLATE);

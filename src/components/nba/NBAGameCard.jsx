@@ -5,6 +5,9 @@ import { NBAEdgeSignals } from './NBAEdgeSignals';
 const CONFIDENCE_COLORS = { HIGH: "#ef4444", MODERATE: "#f59e0b", LOW: "#6b7280" };
 
 export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
+  // Null guard — if game data isn't fully normalized yet, render nothing
+  if (!game || !game.away || !game.home || !game.edge) return null;
+
   const { away, home, edge, spread, total, win_prob, matchup, venue, game_time } = game;
   const cc = CONFIDENCE_COLORS[edge.confidence] || "#6b7280";
 
@@ -26,8 +29,8 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9" }}>{matchup}</span>
             <Pill text={game_time} color="#6b7280" />
-            {(away.b2b || home.b2b) && (
-              <Pill text={`${away.b2b ? away.team : home.team} B2B`} color="#f59e0b" />
+            {(away?.b2b || home?.b2b) && (
+              <Pill text={`${away?.b2b ? away.team : home.team} B2B`} color="#f59e0b" />
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -52,9 +55,11 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
           <div style={{ fontSize: 11, color: "#6b7280" }}>Spread: <span style={{ color: "#e2e8f0" }}>{spread}</span></div>
           <div style={{ fontSize: 11, color: "#6b7280" }}>Total: <span style={{ color: "#e2e8f0" }}>O/U {total}</span></div>
           {edge.ou_lean && <div style={{ fontSize: 11, color: "#a855f7" }}>O/U Lean: <strong>{edge.ou_lean}</strong></div>}
-          <div style={{ fontSize: 11, color: "#6b7280" }}>
-            Win Prob: <span style={{ color: "#e2e8f0" }}>{away.team} {win_prob.away}% / {home.team} {win_prob.home}%</span>
-          </div>
+          {win_prob && (
+            <div style={{ fontSize: 11, color: "#6b7280" }}>
+              Win Prob: <span style={{ color: "#e2e8f0" }}>{away.team} {win_prob.away}% / {home.team} {win_prob.home}%</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -68,12 +73,14 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
           </div>
 
           {/* Edge signals */}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>
-              Edge Signals
+          {edge.signals?.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>
+                Edge Signals
+              </div>
+              <NBAEdgeSignals signals={edge.signals} ouLean={edge.ou_lean} />
             </div>
-            <NBAEdgeSignals signals={edge.signals} ouLean={edge.ou_lean} />
-          </div>
+          )}
 
           {/* Bet logger */}
           <div style={{ marginTop: 14 }}>

@@ -69,12 +69,7 @@ export default function NBADashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const sorted = [...(slate?.games || [])].map(g => ({
-    ...g,
-    edge: g.edge || g.edge_data || {},
-    away: g.away || g.away_data || {},
-    home: g.home || g.home_data || {},
-  })).sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
+ const sorted = [...(slate?.games || [])].sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
 
   const highConf = sorted.filter(g => g.edge?.confidence === "HIGH");
   const freeGame = getFreeGame(sorted);

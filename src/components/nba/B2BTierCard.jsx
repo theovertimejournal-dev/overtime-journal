@@ -61,29 +61,37 @@ export function SpreadMismatchCard({ mismatches }) {
   return (
     <div style={{ background: "rgba(168,85,247,0.05)", border: "1px solid rgba(168,85,247,0.15)", borderRadius: 10, padding: "14px 18px", marginBottom: 14 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7", marginBottom: 4 }}>
-        💰 B2B SPREAD MISMATCH — Where Fatigue Isn't Priced In
+        💰 MARKET STATE — Spread vs Model Analysis
       </div>
       <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 10, lineHeight: 1.6 }}>
-        When a B2B team is <span style={{ color: "#f59e0b", fontWeight: 600 }}>still favored</span>, the spread may not fully account for fatigue. Best value = Tier 1/2 team favored by a thin spread.
+        Where the market spread diverges from our model edge. <span style={{ color: "#ef4444", fontWeight: 600 }}>INFLATED</span> = line too high, fade value. <span style={{ color: "#22c55e", fontWeight: 600 }}>UNDERVALUED</span> = line too low, play value. <span style={{ color: "#f59e0b", fontWeight: 600 }}>B2B NOT PRICED</span> = fatigue tax missing.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {mismatches.map((m, i) => (
           <div key={i} style={{ background: "rgba(0,0,0,0.2)", borderRadius: 8, padding: "10px 14px", borderLeft: `3px solid ${m.verdictColor}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{m.matchup}</span>
-              <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 3, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontWeight: 600 }}>
-                {m.b2b_team} B2B {m.tier}
-              </span>
-              {m.value !== "NONE" && (
+              {m.direction && (
+                <span style={{ fontSize: 9, padding: "1px 8px", borderRadius: 3, background: `${m.verdictColor}15`, border: `1px solid ${m.verdictColor}30`, color: m.verdictColor, fontWeight: 700, letterSpacing: "0.05em" }}>
+                  {m.direction}
+                </span>
+              )}
+              {m.b2b_team && (
+                <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 3, background: "rgba(239,68,68,0.1)", color: "#fca5a5", fontWeight: 600 }}>
+                  {m.b2b_team} B2B {m.tier}
+                </span>
+              )}
+              {m.value && m.value !== "NONE" && (
                 <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 3, background: `${m.verdictColor}15`, color: m.verdictColor, fontWeight: 600 }}>
                   {m.value} VALUE
                 </span>
               )}
             </div>
-            <div style={{ display: "flex", gap: 16, marginBottom: 4, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 16, marginBottom: 6, flexWrap: "wrap" }}>
               <div><div style={{ fontSize: 9, color: "#4a5568" }}>POSTED</div><div style={{ fontSize: 12, fontWeight: 700, color: "#e2e8f0" }}>{m.spread}</div></div>
-              <div><div style={{ fontSize: 9, color: "#4a5568" }}>FATIGUE TAX</div><div style={{ fontSize: 12, fontWeight: 700, color: "#f59e0b" }}>{m.penalty}</div></div>
-              <div><div style={{ fontSize: 9, color: "#4a5568" }}>ADJUSTED</div><div style={{ fontSize: 12, fontWeight: 700, color: "#a855f7" }}>{m.adjusted}</div></div>
+              <div><div style={{ fontSize: 9, color: "#4a5568" }}>MODEL EDGE</div><div style={{ fontSize: 12, fontWeight: 700, color: "#60a5fa" }}>{m.model_edge || m.penalty}</div></div>
+              <div><div style={{ fontSize: 9, color: "#4a5568" }}>GAP</div><div style={{ fontSize: 12, fontWeight: 700, color: m.verdictColor }}>{m.gap || m.adjusted}</div></div>
+              {m.confidence && <div><div style={{ fontSize: 9, color: "#4a5568" }}>CONF</div><div style={{ fontSize: 12, fontWeight: 700, color: m.confidence === "SHARP" ? "#ef4444" : m.confidence === "LEAN" ? "#f59e0b" : "#6b7280" }}>{m.confidence}</div></div>}
             </div>
             <div style={{ fontSize: 10, color: "#94a3b8", lineHeight: 1.5 }}>{m.verdict}</div>
           </div>

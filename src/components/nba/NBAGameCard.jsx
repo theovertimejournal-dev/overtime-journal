@@ -29,6 +29,7 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
   const narrativeKeyAngle   = narrative?.key_angle      || game.narrative_key_angle  || null;
   const narrativeContrarian = narrative?.contrarian_flag|| game.narrative_contrarian || null;
   const narrativeOuLean     = narrative?.ou_lean        || game.narrative_ou_lean    || null;
+  const otjPick             = narrative?.otj_pick       || game.narrative_otj_pick   || null;
 
   const existingBet = betLog?.find(b => b.matchup === matchup);
 
@@ -134,6 +135,22 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
           {narrativeOuLean && !edge.ou_lean && (
             <div style={{ marginTop: 10, fontSize: 11, color: "#a855f7" }}>
               O/U Lean: <strong>{narrativeOuLean}</strong>
+            </div>
+          )}
+
+          {/* OTJ Pick — free for everyone now, paywall later */}
+          {otjPick && (
+            <div style={{ marginTop: 14, padding: "14px 16px", background: "linear-gradient(135deg, rgba(251,191,36,0.07), rgba(239,68,68,0.05))", borderRadius: 10, border: "1px solid rgba(251,191,36,0.2)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#fbbf24", textTransform: "uppercase", letterSpacing: "0.08em" }}>⭐ OTJ Pick</span>
+                <span style={{ fontSize: 9, padding: "1px 7px", borderRadius: 4, background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.25)", color: "#fbbf24", fontWeight: 600 }}>TONIGHT</span>
+              </div>
+              <p style={{ fontSize: 13, color: "#f1f5f9", fontWeight: 600, lineHeight: 1.6, margin: "0 0 8px" }}>
+                {otjPick}
+              </p>
+              <div style={{ fontSize: 10, color: "#4a5568", borderTop: "1px solid rgba(255,255,255,0.04)", paddingTop: 8 }}>
+                💡 <span style={{ color: "#6b7280" }}>Consider both sides — see Market State above for full spread analysis.</span>
+              </div>
             </div>
           )}
 

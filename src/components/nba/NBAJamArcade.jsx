@@ -475,23 +475,132 @@ export default function NBAJamArcade() {
     return ()=>cancelAnimationFrame(animRef.current);
   }, []);
 
-  // ── Touch button ───────────────────────────────────────────────────────────
-  function TBtn({ label, btn, style={} }) {
+  // ── Action Button ──────────────────────────────────────────────────────────
+  function ActionBtn({ label, color, onActive, style={} }) {
     return (
       <div
-        onPointerDown={()=>touchBtn(btn,true)}
-        onPointerUp={()=>touchBtn(btn,false)}
-        onPointerLeave={()=>touchBtn(btn,false)}
+        onPointerDown={()=>onActive(true)}
+        onPointerUp={()=>onActive(false)}
+        onPointerLeave={()=>onActive(false)}
         style={{
-          width:54,height:54,borderRadius:10,
-          background:"rgba(255,255,255,0.07)",
-          border:"2px solid rgba(255,255,255,0.13)",
+          width:54,height:54,borderRadius:12,
+          background:`${color}18`,
+          border:`2px solid ${color}40`,
           display:"flex",alignItems:"center",justifyContent:"center",
-          fontSize:20,color:"#fff",userSelect:"none",cursor:"pointer",
+          fontSize:20,color,userSelect:"none",cursor:"pointer",
           WebkitTapHighlightColor:"transparent",touchAction:"none",
+          fontFamily:PIXEL_FONT,letterSpacing:"0.04em",
+          boxShadow:`0 0 10px ${color}20`,
           ...style,
         }}
       >{label}</div>
+    );
+  }
+
+  // ── Analog Joystick ────────────────────────────────────────────────────────
+  const joystickRef = React.useRef(null);
+  const joystickActive = React.useRef(false);
+  const joystickOrigin = React.useRef({x:0,y:0});
+  const JOYSTICK_RADIUS = 44;
+  const DEAD_ZONE = 0.18;
+
+  const handleJoystick = React.useCallback(() => {}, []); // placeholder — logic inline below
+
+  function Joystick() {
+    const baseRef = React.useRef(null);
+    const [knobPos, setKnobPos] = React.useState({x:0,y:0});
+
+    function getCenter(el) {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width/2, y: r.top + r.height/2 };
+    }
+
+    function onStart(e) {
+      e.preventDefault();
+      joystickActive.current = true;
+      const center = getCenter(baseRef.current);
+      joystickOrigin.current = center;
+    }
+
+    function onMove(e) {
+      if (!joystickActive.current) return;
+      e.preventDefault();
+      const touch = e.touches ? e.touches[0] : e;
+      const dx = touch.clientX - joystickOrigin.current.x;
+      const dy = touch.clientY - joystickOrigin.current.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const clampedDist = Math.min(dist, JOYSTICK_RADIUS);
+      const angle = Math.atan2(dy, dx);
+      const kx = Math.cos(angle) * clampedDist;
+      const ky = Math.sin(angle) * clampedDist;
+      setKnobPos({x:kx, y:ky});
+
+      // Normalize -1 to 1
+      const nx = kx / JOYSTICK_RADIUS;
+      const ny = ky / JOYSTICK_RADIUS;
+      const s = stateRef.current;
+      s.touch.left  = nx < -DEAD_ZONE;
+      s.touch.right = nx >  DEAD_ZONE;
+      s.touch.up    = ny < -DEAD_ZONE;
+      s.touch.down  = ny >  DEAD_ZONE;
+    }
+
+    function onEnd(e) {
+      e.preventDefault();
+      joystickActive.current = false;
+      setKnobPos({x:0,y:0});
+      const s = stateRef.current;
+      s.touch.left = s.touch.right = s.touch.up = s.touch.down = false;
+    }
+
+    const SIZE = JOYSTICK_RADIUS * 2 + 20;
+    const CENTER = SIZE / 2;
+
+    return (
+      <div
+        ref={baseRef}
+        onPointerDown={onStart}
+        onPointerMove={onMove}
+        onPointerUp={onEnd}
+        onPointerLeave={onEnd}
+        onTouchStart={onStart}
+        onTouchMove={onMove}
+        onTouchEnd={onEnd}
+        style={{
+          width:SIZE, height:SIZE, borderRadius:"50%",
+          background:"rgba(255,255,255,0.04)",
+          border:"2px solid rgba(255,255,255,0.10)",
+          position:"relative", flexShrink:0,
+          userSelect:"none", touchAction:"none",
+          WebkitTapHighlightColor:"transparent",
+          boxShadow:"inset 0 2px 8px rgba(0,0,0,0.4)",
+        }}
+      >
+        {/* Guide ring */}
+        <div style={{
+          position:"absolute",
+          top:"50%", left:"50%",
+          width: JOYSTICK_RADIUS*2, height: JOYSTICK_RADIUS*2,
+          borderRadius:"50%",
+          border:"1px dashed rgba(255,255,255,0.07)",
+          transform:"translate(-50%,-50%)",
+          pointerEvents:"none",
+        }}/>
+        {/* Knob */}
+        <div style={{
+          position:"absolute",
+          width:36, height:36, borderRadius:"50%",
+          background:"linear-gradient(135deg, rgba(251,191,36,0.9), rgba(239,68,68,0.7))",
+          border:"2px solid rgba(255,255,255,0.25)",
+          boxShadow:"0 2px 8px rgba(0,0,0,0.5), 0 0 12px rgba(251,191,36,0.3)",
+          top: CENTER - 18 + knobPos.y,
+          left: CENTER - 18 + knobPos.x,
+          transition: joystickActive.current ? "none" : "top 0.12s ease, left 0.12s ease",
+          pointerEvents:"none",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          fontSize:16,
+        }}>🕹</div>
+      </div>
     );
   }
 
@@ -523,7 +632,7 @@ export default function NBAJamArcade() {
             <div style={{fontSize:50,marginBottom:6}}>🏀</div>
             <h2 style={{fontSize:26,color:"#fbbf24",margin:"0 0 8px",textTransform:"uppercase",letterSpacing:"0.06em"}}>OTJ JAM</h2>
             <div style={{fontSize:12,color:"#4a5568",marginBottom:6,textAlign:"center",lineHeight:2}}>
-              <span style={{color:"#6b7280"}}>⬆⬇⬅➡</span> Move &nbsp;|&nbsp;
+              <span style={{color:"#6b7280"}}>🕹 Joystick</span> Move &nbsp;|&nbsp;
               <span style={{color:"#f59e0b"}}>SPACE</span> Shoot &nbsp;|&nbsp;
               <span style={{color:"#60a5fa"}}>X</span> Pass to teammate
             </div>
@@ -551,22 +660,17 @@ export default function NBAJamArcade() {
         />
       </div>
 
-      {/* Mobile controls */}
+      {/* Mobile controls — Joystick + Action Buttons */}
       <div style={{
-        display:"flex",justifyContent:"space-between",alignItems:"flex-end",
-        width:"100%",maxWidth:W,marginTop:10,padding:"0 8px",gap:12,
+        display:"flex",justifyContent:"space-between",alignItems:"center",
+        width:"100%",maxWidth:W,marginTop:12,padding:"0 8px",gap:8,
       }}>
-        {/* D-pad */}
-        <div style={{display:"grid",gridTemplateColumns:"54px 54px 54px",gridTemplateRows:"54px 54px 54px",gap:4}}>
-          <div/><TBtn label="▲" btn="up"/><div/>
-          <TBtn label="◀" btn="left"/>
-          <div style={{width:54,height:54,background:"rgba(255,255,255,0.02)",borderRadius:10}}/>
-          <TBtn label="▶" btn="right"/>
-          <div/><TBtn label="▼" btn="down"/><div/>
-        </div>
+
+        {/* Analog Joystick */}
+        <Joystick onMove={handleJoystick}/>
 
         {/* Center legend */}
-        <div style={{fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2}}>
+        <div style={{fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2.2,flex:1}}>
           <div>Field &gt;25</div>
           <div>3PT &gt;50</div>
           <div>Half &gt;90</div>
@@ -574,13 +678,15 @@ export default function NBAJamArcade() {
         </div>
 
         {/* Action buttons */}
-        <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"center"}}>
-          <TBtn label="🏀" btn="shoot" style={{background:"rgba(239,68,68,0.15)",border:"2px solid rgba(239,68,68,0.3)",color:"#ef4444",width:64,height:64,fontSize:26,borderRadius:14}}/>
-          <TBtn label="↔ PASS" btn="pass" style={{background:"rgba(59,130,246,0.15)",border:"2px solid rgba(59,130,246,0.3)",color:"#60a5fa",width:64,height:40,fontSize:11,letterSpacing:"0.04em"}}/>
+        <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+          <ActionBtn label="🏀" color="#ef4444" onActive={(v)=>touchBtn("shoot",v)}
+            style={{width:68,height:68,fontSize:28,borderRadius:16}}/>
+          <ActionBtn label="↔ PASS" color="#60a5fa" onActive={(v)=>touchBtn("pass",v)}
+            style={{width:68,height:38,fontSize:11}}/>
         </div>
       </div>
 
-      <div style={{marginTop:10,fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2}}>
+      <div style={{marginTop:8,fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2}}>
         ★ = active player &nbsp;·&nbsp; Pass to switch control &nbsp;·&nbsp; 3 buckets in a row = 🔥
       </div>
     </div>

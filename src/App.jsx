@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import NBADashboard from './components/nba/NBADashboard';
+import NBAJamArcade from './components/nba/NBAJamArcade';
 import { AuthButton } from './components/common/AuthButton';
 import { WelcomeModal } from './components/common/WelcomeModal';
 import Privacy from './pages/Privacy';
@@ -89,6 +90,7 @@ export default function App() {
           <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
           <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />
           <Route path="/record" element={<Record />} />
+          <Route path="/arcade" element={<NBAJamArcade />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
         </Routes>

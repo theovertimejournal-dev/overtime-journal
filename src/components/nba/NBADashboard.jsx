@@ -214,7 +214,7 @@ export default function NBADashboard() {
           {slate?.spread_mismatches && <SpreadMismatchCard mismatches={slate.spread_mismatches} />}
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {sorted.map((g, i) => (
-              <NBAGameCard key={i} game={g} isExpanded={expanded[i]} onToggle={() => toggle(i, false)} betLog={betLog} onLogBet={logBet} />
+              <NBAGameCard key={i} game={g} isExpanded={expanded[i]} onToggle={() => toggle(i, false)} betLog={betLog} onLogBet={logBet} user={user} />
             ))}
           </div>
         </>
@@ -237,7 +237,7 @@ export default function NBADashboard() {
                                           "INFO pick today. Sign up to see the good stuff."}
                 </span>
               </div>
-              <NBAGameCard game={freeGame} isExpanded={true} onToggle={() => {}} betLog={[]} onLogBet={() => setShowModal(true)} />
+              <NBAGameCard game={freeGame} isExpanded={true} onToggle={() => {}} betLog={[]} onLogBet={() => setShowModal(true)} user={user} />
             </div>
           )}
 

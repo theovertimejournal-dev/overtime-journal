@@ -71,6 +71,7 @@ export default function App() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [showUsername, setShowUsername] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  const [authTimeout, setAuthTimeout] = useState(false);
 
   // Fetch profile for a given user
   async function fetchProfile(userId) {
@@ -83,7 +84,11 @@ export default function App() {
   }
 
   useEffect(() => {
+    // Fallback — if auth hangs for 3s, render anyway
+    const timeout = setTimeout(() => setAuthTimeout(true), 3000);
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      clearTimeout(timeout);
       const u = session?.user ?? null;
       setUser(u);
       if (!u) {
@@ -119,7 +124,7 @@ export default function App() {
     setShowUsername(false);
   }
 
-  if (!authChecked) return null;
+  if (!authChecked && !authTimeout) return null;
 
   return (
     <BrowserRouter>

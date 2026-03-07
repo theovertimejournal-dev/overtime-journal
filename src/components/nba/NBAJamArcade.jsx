@@ -1,5 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
+// Detect touch/mobile device
+const isMobile = () => (
+  typeof window !== "undefined" &&
+  ("ontouchstart" in window || navigator.maxTouchPoints > 0 || window.matchMedia("(pointer: coarse)").matches)
+);
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 800, H = 480;
 const COURT_COLOR = "#c8773a";
@@ -632,7 +638,7 @@ export default function NBAJamArcade() {
             <div style={{fontSize:50,marginBottom:6}}>🏀</div>
             <h2 style={{fontSize:26,color:"#fbbf24",margin:"0 0 8px",textTransform:"uppercase",letterSpacing:"0.06em"}}>OTJ JAM</h2>
             <div style={{fontSize:12,color:"#4a5568",marginBottom:6,textAlign:"center",lineHeight:2}}>
-              <span style={{color:"#6b7280"}}>🕹 Joystick</span> Move &nbsp;|&nbsp;
+              <span style={{color:"#6b7280"}}>{isMobile() ? "🕹 Joystick" : "⬆⬇⬅➡ Arrow Keys"}</span> Move &nbsp;|&nbsp;
               <span style={{color:"#f59e0b"}}>SPACE</span> Shoot &nbsp;|&nbsp;
               <span style={{color:"#60a5fa"}}>X</span> Pass to teammate
             </div>
@@ -660,31 +666,48 @@ export default function NBAJamArcade() {
         />
       </div>
 
-      {/* Mobile controls — Joystick + Action Buttons */}
-      <div style={{
-        display:"flex",justifyContent:"space-between",alignItems:"center",
-        width:"100%",maxWidth:W,marginTop:12,padding:"0 8px",gap:8,
-      }}>
+      {/* Controls — joystick on mobile, keyboard hint on desktop */}
+      {isMobile() ? (
+        <div style={{
+          display:"flex",justifyContent:"space-between",alignItems:"center",
+          width:"100%",maxWidth:W,marginTop:12,padding:"0 8px",gap:8,
+        }}>
+          {/* Analog Joystick */}
+          <Joystick onMove={handleJoystick}/>
 
-        {/* Analog Joystick */}
-        <Joystick onMove={handleJoystick}/>
+          {/* Center legend */}
+          <div style={{fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2.2,flex:1}}>
+            <div>Field &gt;25</div>
+            <div>3PT &gt;50</div>
+            <div>Half &gt;90</div>
+            <div style={{color:"#374151"}}>🔥 +15</div>
+          </div>
 
-        {/* Center legend */}
-        <div style={{fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2.2,flex:1}}>
-          <div>Field &gt;25</div>
-          <div>3PT &gt;50</div>
-          <div>Half &gt;90</div>
-          <div style={{color:"#374151"}}>🔥 +15</div>
+          {/* Action buttons */}
+          <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
+            <ActionBtn label="🏀" color="#ef4444" onActive={(v)=>touchBtn("shoot",v)}
+              style={{width:68,height:68,fontSize:28,borderRadius:16}}/>
+            <ActionBtn label="↔ PASS" color="#60a5fa" onActive={(v)=>touchBtn("pass",v)}
+              style={{width:68,height:38,fontSize:11}}/>
+          </div>
         </div>
-
-        {/* Action buttons */}
-        <div style={{display:"flex",flexDirection:"column",gap:8,alignItems:"center"}}>
-          <ActionBtn label="🏀" color="#ef4444" onActive={(v)=>touchBtn("shoot",v)}
-            style={{width:68,height:68,fontSize:28,borderRadius:16}}/>
-          <ActionBtn label="↔ PASS" color="#60a5fa" onActive={(v)=>touchBtn("pass",v)}
-            style={{width:68,height:38,fontSize:11}}/>
+      ) : (
+        <div style={{
+          display:"flex",justifyContent:"center",alignItems:"center",
+          width:"100%",maxWidth:W,marginTop:12,gap:24,
+        }}>
+          <div style={{fontSize:11,color:"#374151",textAlign:"center",lineHeight:2.2}}>
+            <div><span style={{color:"#6b7280"}}>⬆⬇⬅➡ Arrow Keys</span> — Move</div>
+            <div><span style={{color:"#f59e0b"}}>SPACE</span> — Shoot &nbsp;|&nbsp; <span style={{color:"#60a5fa"}}>X</span> — Pass</div>
+          </div>
+          <div style={{fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2.2}}>
+            <div>Field &gt;25</div>
+            <div>3PT &gt;50</div>
+            <div>Half &gt;90</div>
+            <div style={{color:"#374151"}}>🔥 +15</div>
+          </div>
         </div>
-      </div>
+      )}
 
       <div style={{marginTop:8,fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2}}>
         ★ = active player &nbsp;·&nbsp; Pass to switch control &nbsp;·&nbsp; 3 buckets in a row = 🔥

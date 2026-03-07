@@ -21,8 +21,14 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
   // Null guard — if game data isn't fully normalized yet, render nothing
   if (!game || !game.away || !game.home || !game.edge) return null;
 
-  const { away, home, edge, spread, total, win_prob, matchup, venue, game_time } = game;
+  const { away, home, edge, spread, total, win_prob, matchup, venue, game_time, narrative } = game;
   const cc = CONFIDENCE_COLORS[edge.confidence] || "#6b7280";
+
+  // Narrative fields — support both nested (pipeline) and flat (Supabase) shapes
+  const narrativeSummary    = narrative?.summary        || game.narrative_summary    || null;
+  const narrativeKeyAngle   = narrative?.key_angle      || game.narrative_key_angle  || null;
+  const narrativeContrarian = narrative?.contrarian_flag|| game.narrative_contrarian || null;
+  const narrativeOuLean     = narrative?.ou_lean        || game.narrative_ou_lean    || null;
 
   const existingBet = betLog?.find(b => b.matchup === matchup);
 
@@ -92,6 +98,42 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet }) {
                 Edge Signals
               </div>
               <NBAEdgeSignals signals={edge.signals} ouLean={edge.ou_lean} />
+            </div>
+          )}
+
+          {/* Claude narrative */}
+          {narrativeSummary && (
+            <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(255,255,255,0.02)", borderRadius: 8, borderLeft: `3px solid ${cc}` }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#4a5568", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                📰 Analysis
+              </div>
+              <p style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7, margin: 0 }}>
+                {narrativeSummary}
+              </p>
+              {narrativeKeyAngle && (
+                <div style={{ marginTop: 8, fontSize: 11, color: "#f1f5f9", fontWeight: 600 }}>
+                  🔑 {narrativeKeyAngle}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Contrarian flag */}
+          {narrativeContrarian && (
+            <div style={{ marginTop: 10, padding: "10px 14px", background: "rgba(168,85,247,0.06)", borderRadius: 8, borderLeft: "3px solid #a855f7" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#a855f7", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                ⚡ Contrarian Flag
+              </div>
+              <p style={{ fontSize: 12, color: "#c4b5fd", lineHeight: 1.7, margin: 0 }}>
+                {narrativeContrarian}
+              </p>
+            </div>
+          )}
+
+          {/* O/U lean from narrative */}
+          {narrativeOuLean && !edge.ou_lean && (
+            <div style={{ marginTop: 10, fontSize: 11, color: "#a855f7" }}>
+              O/U Lean: <strong>{narrativeOuLean}</strong>
             </div>
           )}
 

@@ -1,16 +1,35 @@
+import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
+async function subscribeEmail(email, source) {
+  if (!email || !email.includes('@')) return;
+  await supabase.from('email_subscribers').upsert(
+    { email: email.trim().toLowerCase(), source },
+    { onConflict: 'email', ignoreDuplicates: true }
+  );
+}
+
 export function WelcomeModal({ onClose }) {
+  const [email, setEmail] = useState('');
+  const [wantsEmail, setWantsEmail] = useState(true);
+  const [emailSubmitted, setEmailSubmitted] = useState(false);
+
   const signIn = async () => {
+    if (wantsEmail && email) await subscribeEmail(email, 'welcome_modal');
     await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: window.location.origin }
     });
   };
 
+  const handleEmailOnly = async () => {
+    if (!email || !email.includes('@')) return;
+    await subscribeEmail(email, 'welcome_modal_email_only');
+    setEmailSubmitted(true);
+  };
+
   return (
     <>
-      {/* Backdrop — blurred */}
       <div style={{
         position: "fixed", inset: 0,
         background: "rgba(0,0,0,0.85)",
@@ -18,7 +37,6 @@ export function WelcomeModal({ onClose }) {
         zIndex: 200,
       }} />
 
-      {/* Modal */}
       <div style={{
         position: "fixed",
         top: "50%", left: "50%",
@@ -34,25 +52,22 @@ export function WelcomeModal({ onClose }) {
         boxShadow: "0 0 60px rgba(0,0,0,0.8)",
       }}>
 
-        {/* Logo / Brand */}
         <div style={{ fontSize: 11, color: "#4a5568", textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 10 }}>
           The Overtime Journal
         </div>
 
-        {/* Headline */}
         <div style={{ fontSize: 28, fontWeight: 800, color: "#f1f5f9", lineHeight: 1.2, marginBottom: 8, letterSpacing: "-0.03em" }}>
           Stop guessing.<br />
           <span style={{ color: "#ef4444" }}>Start edging.</span>
         </div>
 
-        {/* Subheadline */}
-        <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.8, marginBottom: 24 }}>
+        <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.8, marginBottom: 20 }}>
           NBA · NHL · MLB · NFL edge analysis.<br />
           Bench metrics, B2B fatigue, spread mismatches — all in one place.
         </div>
 
         {/* Social proof */}
-        <div style={{ display: "flex", justifyContent: "center", gap: 20, marginBottom: 28 }}>
+        <div style={{ display: "flex", justifyContent: "center", gap: 20, marginBottom: 24 }}>
           {[
             { label: "THIS MONTH", value: "11-2" },
             { label: "WIN %", value: "84%" },
@@ -65,26 +80,55 @@ export function WelcomeModal({ onClose }) {
           ))}
         </div>
 
-        {/* Sign in button */}
+        {/* Email field */}
+        <div style={{ marginBottom: 10, textAlign: "left" }}>
+          <input
+            type="email"
+            placeholder="your@email.com (optional)"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            style={{
+              width: "100%", padding: "10px 12px", borderRadius: 8,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              color: "#e2e8f0", fontSize: 12, fontFamily: "inherit",
+              outline: "none", boxSizing: "border-box",
+            }}
+          />
+        </div>
+
+        {/* Email checkbox */}
+        <div
+          onClick={() => setWantsEmail(p => !p)}
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            marginBottom: 18, cursor: "pointer", textAlign: "left"
+          }}
+        >
+          <div style={{
+            width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+            border: `1px solid ${wantsEmail ? "#ef4444" : "rgba(255,255,255,0.15)"}`,
+            background: wantsEmail ? "rgba(239,68,68,0.2)" : "transparent",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {wantsEmail && <span style={{ fontSize: 9, color: "#ef4444" }}>✓</span>}
+          </div>
+          <span style={{ fontSize: 11, color: "#4a5568", lineHeight: 1.4 }}>
+            Email me the daily sharp pick + OTJ updates
+          </span>
+        </div>
+
+        {/* Create account button */}
         <button
           onClick={signIn}
           style={{
-            width: "100%",
-            padding: "14px 0",
-            borderRadius: 10,
+            width: "100%", padding: "14px 0", borderRadius: 10,
             border: "1px solid rgba(255,255,255,0.15)",
             background: "linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))",
-            color: "#f1f5f9",
-            fontSize: 14,
-            fontWeight: 700,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            marginBottom: 10,
-            transition: "all 0.15s ease",
+            color: "#f1f5f9", fontSize: 14, fontWeight: 700,
+            fontFamily: "inherit", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+            marginBottom: 8, transition: "all 0.15s ease",
           }}
           onMouseEnter={e => e.currentTarget.style.background = "linear-gradient(135deg, rgba(239,68,68,0.3), rgba(239,68,68,0.15))"}
           onMouseLeave={e => e.currentTarget.style.background = "linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))"}
@@ -101,23 +145,39 @@ export function WelcomeModal({ onClose }) {
         <button
           onClick={signIn}
           style={{
-            width: "100%",
-            padding: "11px 0",
-            borderRadius: 10,
+            width: "100%", padding: "11px 0", borderRadius: 10,
             border: "1px solid rgba(255,255,255,0.06)",
             background: "rgba(255,255,255,0.03)",
-            color: "#6b7280",
-            fontSize: 12,
-            fontWeight: 600,
-            fontFamily: "inherit",
-            cursor: "pointer",
-            marginBottom: 20,
+            color: "#6b7280", fontSize: 12, fontWeight: 600,
+            fontFamily: "inherit", cursor: "pointer", marginBottom: 14,
           }}
         >
           Sign In
         </button>
 
-        {/* Dismiss */}
+        {/* Email only CTA */}
+        {!emailSubmitted ? (
+          <button
+            onClick={handleEmailOnly}
+            style={{
+              width: "100%", padding: "9px 0", borderRadius: 8,
+              border: "1px solid rgba(255,255,255,0.05)",
+              background: "transparent",
+              color: "#374151", fontSize: 11, fontWeight: 600,
+              fontFamily: "inherit",
+              cursor: email ? "pointer" : "default",
+              opacity: email ? 1 : 0.4,
+              marginBottom: 14,
+            }}
+          >
+            Just email me picks — no account needed
+          </button>
+        ) : (
+          <div style={{ marginBottom: 14, fontSize: 11, color: "#22c55e" }}>
+            ✓ You're on the list — daily picks incoming
+          </div>
+        )}
+
         <div
           onClick={onClose}
           style={{
@@ -132,8 +192,7 @@ export function WelcomeModal({ onClose }) {
           <span>See today's free pick first</span>
         </div>
 
-        {/* Legal */}
-        <div style={{ marginTop: 16, fontSize: 10, color: "#1f2937", lineHeight: 1.6 }}>
+        <div style={{ marginTop: 14, fontSize: 10, color: "#1f2937", lineHeight: 1.6 }}>
           Free forever. No credit card.{" "}
           <a href="/terms" style={{ color: "#374151" }}>Terms</a> ·{" "}
           <a href="/privacy" style={{ color: "#374151" }}>Privacy</a>

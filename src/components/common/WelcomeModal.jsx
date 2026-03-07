@@ -193,7 +193,7 @@ export function WelcomeModal({ onClose }) {
         </div>
 
         <div style={{ marginTop: 14, fontSize: 10, color: "#1f2937", lineHeight: 1.6 }}>
-          Free forever. No credit card.{" "}
+          
           <a href="/terms" style={{ color: "#374151" }}>Terms</a> ·{" "}
           <a href="/privacy" style={{ color: "#374151" }}>Privacy</a>
         </div>

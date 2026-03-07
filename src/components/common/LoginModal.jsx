@@ -180,8 +180,7 @@ export function LoginModal({ onClose }) {
           By signing in you agree to our{" "}
           <a href="/terms" style={{ color: "#374151" }}>Terms</a> and{" "}
           <a href="/privacy" style={{ color: "#374151" }}>Privacy Policy</a>.
-          Free forever. No credit card required.
-        </div>
+                  </div>
       </div>
     </>
   );

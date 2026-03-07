@@ -49,7 +49,7 @@ function SportTabs() {
 
       {/* Right links */}
       <NavLink to="/board" style={({ isActive }) => tabStyle(isActive)}>🏆 Leaderboard</NavLink>
-      <NavLink to="/board" style={({ isActive }) => tabStyle(isActive)}>🏆 Leaderboard</NavLink>
+      
 <AuthButton />
     </nav>
   );

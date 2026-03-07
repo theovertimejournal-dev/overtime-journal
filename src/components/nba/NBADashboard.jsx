@@ -7,13 +7,33 @@ import { B2BTierCard, SpreadMismatchCard } from './B2BTierCard';
 import { LoginModal } from '../common/LoginModal';
 import { RecordWidget } from '../common/RecordWidget';
 
-function getFreeGame(games) {
-  if (!games?.length) return null;
-  const eligible = games.filter(g => g.edge?.confidence === "SHARP" || g.edge?.confidence === "LEAN");
-  if (!eligible.length) return games[0];
-  const today = new Date().toISOString().split('T')[0];
-  const seed = today.split('-').reduce((s, n) => s + parseInt(n), 0);
-  return eligible[seed % eligible.length];
+// Date-seeded RNG — same result for all visitors on a given day, resets tomorrow
+function getDailyTier(dateStr) {
+  // Simple hash from date string → 0-99
+  const hash = dateStr.split('-').reduce((acc, n, i) => acc + parseInt(n) * (i + 7) * 13, 0);
+  const roll = hash % 100;
+  if (roll < 5)  return "SHARP";   // 5% chance
+  if (roll < 30) return "LEAN";    // 25% chance
+  return "INFO";                    // 70% chance
+}
+
+function getFreeGame(games, dateStr) {
+  if (!games?.length) return { game: null, tier: "INFO" };
+  const tier = getDailyTier(dateStr);
+
+  // Try to find a game matching today's tier, cascade down if none exist
+  const tiers = tier === "SHARP" ? ["SHARP","LEAN","INFO"]
+              : tier === "LEAN"  ? ["LEAN","INFO"]
+              :                    ["INFO","LEAN"];
+
+  for (const t of tiers) {
+    const matches = games.filter(g => g.edge?.confidence === t);
+    if (matches.length) {
+      const seed = dateStr.split('-').reduce((s, n) => s + parseInt(n), 0);
+      return { game: matches[seed % matches.length], tier: t };
+    }
+  }
+  return { game: games[0], tier: games[0]?.edge?.confidence || "INFO" };
 }
 
 function BettingLog({ betLog }) {
@@ -72,7 +92,7 @@ export default function NBADashboard() {
  const sorted = [...(slate?.games || [])].sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
 
   const sharpConf = sorted.filter(g => g.edge?.confidence === "SHARP");
-  const freeGame = getFreeGame(sorted);
+  const { game: freeGame, tier: freeTier } = getFreeGame(sorted, today);
 
   useEffect(() => {
     if (!user && freeGame) {
@@ -136,7 +156,7 @@ export default function NBADashboard() {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Pill text={`📅 ${slate?.date}`} color="#6b7280" />
           <Pill text={`${slate?.games_count} games tonight`} color="#6b7280" />
-          {!user && <Pill text={`1 free pick · ${(slate?.games_count || 1) - 1} locked 🔒`} color="#f59e0b" />}
+          {!user && <Pill text={`Today: ${freeTier} free · ${(slate?.games_count || 1) - 1} locked 🔒`} color={freeTier === "SHARP" ? "#ef4444" : freeTier === "LEAN" ? "#f59e0b" : "#6b7280"} />}
           <Pill text={`🔥 ${slate?.cumulative_record} ${slate?.cumulative_note}`} color="#22c55e" />
           {user && (
             <select value={sortBy} onChange={e => setSortBy(e.target.value)}
@@ -204,9 +224,18 @@ export default function NBADashboard() {
         <>
           {freeGame && (
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#22c55e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-                <span>🎁 FREE PICK OF THE DAY</span>
-                <span style={{ fontSize: 10, color: "#4a5568", fontWeight: 400 }}>Full breakdown · Changes daily</span>
+              <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ color: freeTier === "SHARP" ? "#ef4444" : freeTier === "LEAN" ? "#f59e0b" : "#6b7280" }}>
+                  {freeTier === "SHARP" ? "🔥" : freeTier === "LEAN" ? "⚡" : "🎁"} TODAY'S FREE PICK —{" "}
+                  <span style={{ color: freeTier === "SHARP" ? "#ef4444" : freeTier === "LEAN" ? "#f59e0b" : "#6b7280" }}>
+                    {freeTier}
+                  </span>
+                </span>
+                <span style={{ fontSize: 10, color: "#4a5568", fontWeight: 400 }}>
+                  {freeTier === "SHARP" ? "🎉 Lucky day — full SHARP analysis unlocked free" :
+                   freeTier === "LEAN"  ? "Not bad — LEAN pick free today. Come back for SHARP." :
+                                          "INFO pick today. Sign up to see the good stuff."}
+                </span>
               </div>
               <NBAGameCard game={freeGame} isExpanded={true} onToggle={() => {}} betLog={[]} onLogBet={() => setShowModal(true)} />
             </div>

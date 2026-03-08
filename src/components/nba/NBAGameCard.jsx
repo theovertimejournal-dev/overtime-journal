@@ -238,6 +238,40 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
             </div>
           )}
 
+          {/* Plain English Value Box */}
+          {edge.lean && (() => {
+            const leanMl = edge.lean === away.team ? game.ml_away : game.ml_home;
+            const otherMl = edge.lean === away.team ? game.ml_home : game.ml_away;
+            if (!leanMl) return null;
+            const n = parseInt(leanMl);
+            const vegasImplied = n > 0
+              ? Math.round(100 / (n + 100) * 100)
+              : Math.round(Math.abs(n) / (Math.abs(n) + 100) * 100);
+            // OTJ model implied: edge score maps to probability
+            // score of 14+ = ~60%, 8-13 = ~52%, below = ~48%
+            const absScore = Math.abs(edge.score || 0);
+            const otjImplied = absScore >= 14 ? 60 : absScore >= 8 ? 54 : 50;
+            const edgeGap = otjImplied - vegasImplied;
+            const isUnderdog = n > 0;
+            if (Math.abs(edgeGap) < 3) return null; // not enough gap to show
+            const tenTimes = Math.round(otjImplied / 10);
+            const vegasTimes = Math.round(vegasImplied / 10);
+            return (
+              <div style={{ marginTop: 10, padding: "12px 14px", background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.12)", borderRadius: 8, borderLeft: "3px solid #22c55e" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#22c55e", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  🎯 Value Spot — {edge.lean} {n > 0 ? `+${n}` : n}
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>
+                  Vegas prices <strong style={{ color: "#f1f5f9" }}>{edge.lean}</strong> at a <strong style={{ color: "#f1f5f9" }}>{vegasImplied}% chance</strong> to win.
+                  Our model says <strong style={{ color: "#22c55e" }}>{otjImplied}%</strong> — a <strong style={{ color: "#22c55e" }}>+{edgeGap}% edge</strong>.
+                </div>
+                <div style={{ fontSize: 11, color: "#4a5568", marginTop: 6, lineHeight: 1.6, fontStyle: "italic" }}>
+                  What that means: if this game played out 10 times, Vegas is paying you like {edge.lean} wins {vegasTimes} times — we think they win {tenTimes} times. {isUnderdog ? "You're getting underdog odds on a team we think wins more than Vegas says." : "The favorite is even stronger than the price suggests."}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Edge signals */}
           {edge.signals?.length > 0 && (
             <div style={{ marginTop: 14 }}>

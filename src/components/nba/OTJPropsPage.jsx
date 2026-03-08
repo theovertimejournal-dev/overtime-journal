@@ -254,6 +254,37 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
             Avg Min: {prop.minutes_avg} · Opp {prop.pos} DEF: #{prop.opp_pos_rank} · Score: {prop.score}/100
           </div>
 
+          {/* Plain English value box */}
+          {(prop.over_odds || prop.under_odds) && (() => {
+            const leanOdds = prop.lean === 'OVER' ? prop.over_odds : prop.under_odds;
+            if (!leanOdds) return null;
+            const n = parseInt(leanOdds);
+            const vegasImplied = n > 0
+              ? Math.round(100 / (n + 100) * 100)
+              : Math.round(Math.abs(n) / (Math.abs(n) + 100) * 100);
+            // OTJ model implied from score (50-100 scale maps to ~45-65% prob)
+            const otjImplied = Math.round(45 + (prop.score - 50) * 0.4);
+            const edgeGap = otjImplied - vegasImplied;
+            if (Math.abs(edgeGap) < 4) return null;
+            const vegasTimes = Math.round(vegasImplied / 10);
+            const otjTimes = Math.round(otjImplied / 10);
+            const leanWord = prop.lean === 'OVER' ? 'go over' : 'stay under';
+            return (
+              <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.12)', borderRadius: 8, borderLeft: '3px solid #22c55e' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#22c55e', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  🎯 Value Spot — {prop.lean} {prop.line}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
+                  Vegas prices this at a <strong style={{ color: '#f1f5f9' }}>{vegasImplied}% chance</strong> to {leanWord}.
+                  Our model says <strong style={{ color: '#22c55e' }}>{otjImplied}%</strong> — a <strong style={{ color: '#22c55e' }}>+{edgeGap}% edge</strong>.
+                </div>
+                <div style={{ fontSize: 11, color: '#4a5568', marginTop: 6, lineHeight: 1.6, fontStyle: 'italic' }}>
+                  What that means: in 10 similar spots, Vegas pays you like this hits {vegasTimes} times — we think it hits {otjTimes} times. That gap is where the value is.
+                </div>
+              </div>
+            );
+          })()}
+
           <div style={{ marginTop: 10 }}>
             {prop.signals.map((sig, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>

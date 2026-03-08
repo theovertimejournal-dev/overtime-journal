@@ -384,7 +384,8 @@ export default function OTJPropsPage({ user, profile, onShowLogin }) {
 
       {/* Props list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {filtered.map((p, i) => (
+        {/* Free prop — always show */}
+        {filtered.slice(0, 1).map((p, i) => (
           <PropCard
             key={i}
             prop={p}
@@ -396,6 +397,42 @@ export default function OTJPropsPage({ user, profile, onShowLogin }) {
             onLogBet={logBet}
           />
         ))}
+
+        {/* Logged in — show all remaining */}
+        {user && filtered.slice(1).map((p, i) => (
+          <PropCard
+            key={i + 1}
+            prop={p}
+            isExpanded={!!expanded[i + 1]}
+            onToggle={() => toggle(i + 1)}
+            locked={false}
+            onLockClick={showLogin}
+            betLog={betLog}
+            onLogBet={logBet}
+          />
+        ))}
+
+        {/* Logged out — single locked banner instead of 19 greyed cards */}
+        {!user && filtered.length > 1 && (
+          <div
+            onClick={showLogin}
+            style={{ cursor: 'pointer', padding: '18px 20px', borderRadius: 12, background: 'rgba(239,68,68,0.04)', border: '1px solid rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.04)'}
+          >
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#f1f5f9' }}>
+                🔒 {filtered.length - 1} more props locked tonight
+              </div>
+              <div style={{ fontSize: 11, color: '#4a5568', marginTop: 3 }}>
+                Sign in free to unlock all picks, scores, and analysis
+              </div>
+            </div>
+            <span style={{ fontSize: 12, padding: '6px 16px', borderRadius: 6, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444', fontWeight: 700 }}>
+              Sign in →
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Sign-up CTA for logged-out */}

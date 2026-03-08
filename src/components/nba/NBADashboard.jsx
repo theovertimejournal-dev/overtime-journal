@@ -427,7 +427,6 @@ export default function NBADashboard({ user, profile }) {
                       {(g.away?.b2b || g.home?.b2b) && <Pill text={`${g.away?.b2b ? g.away?.team : g.home?.team} B2B`} color="#f59e0b" />}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 11, color: "#6b7280" }}>{g.spread}</span>
                       <span style={{ fontSize: 10, padding: "2px 10px", borderRadius: 4, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)", color: "#ef4444", fontWeight: 600 }}>
                         🔒 Sign in to view
                       </span>

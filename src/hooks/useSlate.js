@@ -26,7 +26,6 @@ const MOCK_NBA_SLATE = {
   b2b_tiers: [], b2b_tags: [], spread_mismatches: []
 };
 
-// Normalize a game row from Supabase to match the expected shape
 function normalizeGame(g) {
   return {
     ...g,
@@ -36,16 +35,15 @@ function normalizeGame(g) {
   };
 }
 
+function getLocalDate() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function useSlate(sport = 'nba', date = null) {
-  // Use local date, not UTC — toISOString() returns UTC which can be
-  // yesterday's date in US timezones (AZ is UTC-7, so before 7pm = wrong date)
-  function getLocalDate() {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
   const targetDate = date || getLocalDate();
   const [slate, setSlate] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -57,22 +55,36 @@ export function useSlate(sport = 'nba', date = null) {
       setLoading(true);
       setError(null);
       try {
-        // Fetch slate row — yesterday_results is a jsonb column, NOT a joined table
-        const { data: slateData, error: slateError } = await supabase
+        // Try today's date first
+        let { data: slateData, error: slateError } = await supabase
           .from('slates')
           .select('*')
           .eq('sport', sport)
           .eq('date', targetDate)
           .single();
 
+        // If not found, fall back to most recent slate instead of mock data
         if (slateError || !slateData) {
-          console.info('[useSlate] No Supabase slate found — using mock data');
-          setSlate(MOCK_NBA_SLATE);
-          setSource('mock');
-          return;
+          console.info(`[useSlate] No slate for ${targetDate} — trying most recent`);
+          const { data: recentData, error: recentError } = await supabase
+            .from('slates')
+            .select('*')
+            .eq('sport', sport)
+            .order('date', { ascending: false })
+            .limit(1)
+            .single();
+
+          if (recentError || !recentData) {
+            console.info('[useSlate] No slates in DB — using mock data');
+            setSlate(MOCK_NBA_SLATE);
+            setSource('mock');
+            return;
+          }
+
+          slateData = recentData;
         }
 
-        // Fetch related games rows separately
+        // Fetch related games
         const { data: gamesData, error: gamesError } = await supabase
           .from('games')
           .select('*')
@@ -103,4 +115,3 @@ export function useSlate(sport = 'nba', date = null) {
 
   return { slate, loading, error, source };
 }
-"// deploy trigger" 

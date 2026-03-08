@@ -269,24 +269,46 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
             const vegasImplied = n > 0
               ? Math.round(100 / (n + 100) * 100)
               : Math.round(Math.abs(n) / (Math.abs(n) + 100) * 100);
-            // OTJ model implied from score (50-100 scale maps to ~45-65% prob)
-            const otjImplied = Math.round(45 + (prop.score - 50) * 0.4);
+            // OTJ implied: score 50-100 maps to 50-70% on the lean direction
+            const otjImplied = Math.min(70, Math.round(50 + (prop.score - 50) * 0.44));
             const edgeGap = otjImplied - vegasImplied;
-            if (Math.abs(edgeGap) < 4) return null;
-            const vegasTimes = Math.round(vegasImplied / 10);
-            const otjTimes = Math.round(otjImplied / 10);
             const leanWord = prop.lean === 'OVER' ? 'go over' : 'stay under';
+            const oppositeLean = prop.lean === 'OVER' ? 'UNDER' : 'OVER';
+
+            // Not enough signal either way
+            if (Math.abs(edgeGap) < 5) return null;
+
+            // OTJ confirms the lean — green value box
+            if (edgeGap >= 5) {
+              const vegasTimes = Math.round(vegasImplied / 10);
+              const otjTimes = Math.round(otjImplied / 10);
+              return (
+                <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.12)', borderRadius: 8, borderLeft: '3px solid #22c55e' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#22c55e', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    🎯 Value Spot — {prop.lean} {prop.line}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
+                    Vegas prices this at a <strong style={{ color: '#f1f5f9' }}>{vegasImplied}% chance</strong> to {leanWord}.
+                    Our model says <strong style={{ color: '#22c55e' }}>{otjImplied}%</strong> — a <strong style={{ color: '#22c55e' }}>+{edgeGap}% edge</strong>.
+                  </div>
+                  <div style={{ fontSize: 11, color: '#4a5568', marginTop: 6, lineHeight: 1.6, fontStyle: 'italic' }}>
+                    What that means: in 10 similar spots, Vegas pays you like this hits {vegasTimes} times — we think it hits {otjTimes} times. That gap is where the value is.
+                  </div>
+                </div>
+              );
+            }
+
+            // OTJ disagrees with lean — yellow caution box
             return (
-              <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.12)', borderRadius: 8, borderLeft: '3px solid #22c55e' }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#22c55e', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  🎯 Value Spot — {prop.lean} {prop.line}
+              <div style={{ marginTop: 10, padding: '12px 14px', background: 'rgba(251,191,36,0.04)', border: '1px solid rgba(251,191,36,0.15)', borderRadius: 8, borderLeft: '3px solid #fbbf24' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  ⚠️ Market Disagreement — {prop.lean} {prop.line}
                 </div>
                 <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
-                  Vegas prices this at a <strong style={{ color: '#f1f5f9' }}>{vegasImplied}% chance</strong> to {leanWord}.
-                  Our model says <strong style={{ color: '#22c55e' }}>{otjImplied}%</strong> — a <strong style={{ color: '#22c55e' }}>+{edgeGap}% edge</strong>.
+                  Vegas is pricing the {prop.lean} at <strong style={{ color: '#f1f5f9' }}>{vegasImplied}%</strong> but our model only sees <strong style={{ color: '#fbbf24' }}>{otjImplied}%</strong>. The market may be overvaluing this prop.
                 </div>
                 <div style={{ fontSize: 11, color: '#4a5568', marginTop: 6, lineHeight: 1.6, fontStyle: 'italic' }}>
-                  What that means: in 10 similar spots, Vegas pays you like this hits {vegasTimes} times — we think it hits {otjTimes} times. That gap is where the value is.
+                  The lean is still {prop.lean} based on season stats — but Vegas and our model are pointing in different directions. The {oppositeLean} may have hidden value worth considering.
                 </div>
               </div>
             );

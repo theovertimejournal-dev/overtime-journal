@@ -282,10 +282,15 @@ def get_todays_injuries(game_date: str, team_ids: list) -> dict:
             injuries_by_team[tid] = []
         status = row.get("status", "")
         if status in ("Out", "Doubtful"):
+            desc = row.get("description", "")[:80]
+            tenure = classify_injury_tenure(desc)
             injuries_by_team[tid].append({
                 "name": f"{player.get('first_name','')} {player.get('last_name','')}".strip(),
                 "status": status,
-                "description": row.get("description", "")[:80],
+                "description": desc,
+                "tenure": tenure["tenure"],
+                "tenure_label": tenure["label"],
+                "priced_in": tenure["priced_in"],
             })
     return injuries_by_team
 
@@ -452,6 +457,44 @@ def get_tank01_bench(team_abbrev: str) -> dict:
         return fallback
 
 
+def classify_injury_tenure(description: str) -> dict:
+    """
+    Classify how long a player has likely been out based on injury description.
+    Returns: { tenure: 'long_term' | 'mid_term' | 'fresh', label: str, priced_in: bool }
+    """
+    desc = (description or "").lower()
+
+    # Long-term indicators — definitely priced in
+    long_term_keywords = [
+        "season", "surgery", "operated", "indefinitely", "months",
+        "torn", "fracture", "fractured", "achilles", "acl", "mcl",
+        "reconstruct", "rehab", "recovery", "6 week", "8 week",
+        "10 week", "12 week", "4-6", "6-8", "out for",
+    ]
+    # Fresh indicators — may NOT be priced in
+    fresh_keywords = [
+        "day-to-day", "game-time", "questionable", "tonight",
+        "1-2", "2-3", "24 hour", "48 hour", "rest",
+        "soreness", "sore", "illness", "personal",
+    ]
+    # Mid-term — likely priced in but worth noting
+    mid_term_keywords = [
+        "week", "weeks", "2-4", "3-5", "4-5",
+        "sprain", "strain", "hamstring", "calf", "ankle",
+        "knee", "wrist", "shoulder", "back",
+    ]
+
+    if any(k in desc for k in long_term_keywords):
+        return {"tenure": "long_term", "label": "Long-term absence", "priced_in": True}
+    if any(k in desc for k in fresh_keywords):
+        return {"tenure": "fresh", "label": "Fresh scratch", "priced_in": False}
+    if any(k in desc for k in mid_term_keywords):
+        return {"tenure": "mid_term", "label": "Ongoing absence", "priced_in": True}
+
+    # Default — unknown, assume priced in if no fresh keywords
+    return {"tenure": "unknown", "label": "Out", "priced_in": True}
+
+
 def get_tank01_l10_three(team_abbrev: str, game_date: str):
     """Stubbed — getNBAGamesForTeam not on Pro tier. BDL GOAT handles L10."""
     return None
@@ -533,10 +576,14 @@ def get_tank01_injuries(team_ids_map: dict) -> dict:
             if tid not in injuries_by_team:
                 injuries_by_team[tid] = []
 
+            tenure = classify_injury_tenure(desc)
             injuries_by_team[tid].append({
                 "name": name,
                 "status": status,
                 "description": desc,
+                "tenure": tenure["tenure"],
+                "tenure_label": tenure["label"],
+                "priced_in": tenure["priced_in"],
             })
 
     except Exception as e:
@@ -647,6 +694,30 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     h_injuries = len(home.get("key_out", []))
     a_injuries = len(away.get("key_out", []))
 
+    # Fresh scratch bonus — only count injuries NOT already priced in
+    h_fresh = [p for p in home.get("injuries", []) if not p.get("priced_in", True) and p.get("status") == "Out"]
+    a_fresh = [p for p in away.get("injuries", []) if not p.get("priced_in", True) and p.get("status") == "Out"]
+    if a_fresh:
+        impact = min(len(a_fresh) * 3.0, 6.0)
+        score += impact
+        signals.append({
+            "type": "FRESH_SCRATCH",
+            "detail": f"Away missing {', '.join(p['name'] for p in a_fresh[:2])} — fresh scratch, may not be priced in",
+            "favors": home["team"],
+            "strength": "MODERATE",
+            "impact": impact,
+        })
+    if h_fresh:
+        impact = min(len(h_fresh) * 3.0, 6.0)
+        score -= impact
+        signals.append({
+            "type": "FRESH_SCRATCH",
+            "detail": f"Home missing {', '.join(p['name'] for p in h_fresh[:2])} — fresh scratch, may not be priced in",
+            "favors": away["team"],
+            "strength": "MODERATE",
+            "impact": impact,
+        })
+
     # Weak guard defense proxy: high def_rating (worse = higher number) + opponent high pace + opponent good 3PT
     # Away team attacking home guard defense
     if h_def >= 114 and a_pace >= 102 and a_3pt >= 37.0:
@@ -704,12 +775,76 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         })
     # ── End spread cap rules ──────────────────────────────────────────────────
 
+    # ── OTJ Spread Gut Check Rule ─────────────────────────────────────────────
+    # Concept: model estimates a "fair spread" from net rating diff.
+    # If Vegas spread is 3+ pts wider than fair spread → underdog may have value.
+    # Guards:
+    #   - Only fire when Vegas spread >= 6 (skip pick'em games, too much noise)
+    #   - Only fire when gap >= 3 pts (meaningful disagreement)
+    #   - Work in absolute values, assign direction at end (no double-negative flips)
+    #   - Don't fire if both teams within 1.5 net rating of each other (genuine toss-up)
+    #   - Cap suggestion label at "mild" / "moderate" / "strong" — never a hard pick
+    otj_spread_rule = None
+    try:
+        if spread_val >= 6.0:
+            # Fair spread = net rating diff × 0.45 (industry standard conversion)
+            raw_net_diff = abs(h_net - a_net)
+
+            # Only proceed if there's a real gap between teams
+            if raw_net_diff >= 1.5:
+                fair_spread = round(raw_net_diff * 0.45, 1)
+                gap = round(spread_val - fair_spread, 1)
+
+                if gap >= 3.0:
+                    # Figure out who is favored and who is the dog
+                    # spread_home is negative when home is favored
+                    try:
+                        sh = float(spread_home or 0)
+                    except (ValueError, TypeError):
+                        sh = 0.0
+
+                    if sh < 0:
+                        # Home team is the favorite
+                        favored_team = home["team"]
+                        dog_team = away["team"]
+                        dog_spread = f"+{spread_val}"
+                    elif sh > 0:
+                        # Away team is the favorite (positive spread_home = home is dog)
+                        favored_team = away["team"]
+                        dog_team = home["team"]
+                        dog_spread = f"+{spread_val}"
+                    else:
+                        favored_team = None
+                        dog_team = None
+                        dog_spread = None
+
+                    if dog_team and favored_team:
+                        strength = "strong" if gap >= 6 else "moderate" if gap >= 4 else "mild"
+                        otj_spread_rule = {
+                            "fair_spread": fair_spread,
+                            "vegas_spread": spread_val,
+                            "gap": gap,
+                            "dog_team": dog_team,
+                            "dog_spread": dog_spread,
+                            "favored_team": favored_team,
+                            "strength": strength,
+                            "label": (
+                                f"Model sees this as a {fair_spread}-pt game. "
+                                f"Vegas has it at {spread_val}. "
+                                f"Getting {dog_team} {dog_spread} may have {strength} value."
+                            ),
+                        }
+    except Exception:
+        otj_spread_rule = None
+    # ── End OTJ Spread Rule ───────────────────────────────────────────────────
+
     return {
         "lean": lean,
         "confidence": confidence,
         "score": round(score, 1),
         "signals": signals,
         "ou_lean": None,
+        "otj_spread_rule": otj_spread_rule,
     }
 
 
@@ -1526,6 +1661,80 @@ def get_player_season_averages(player_ids: list, season: int = 2025) -> dict:
     return averages
 
 
+def get_player_last10_stats(player_ids: list, season: int = 2025) -> dict:
+    """
+    Fetch last 10 game logs per player from BDL v1/stats.
+    Returns dict of player_id -> {last10_avg, last10_min, last5_avg, last5_min}
+    for each stat combo we care about.
+    """
+    if not player_ids:
+        return {}
+    results = {}
+    for pid in player_ids:
+        try:
+            data = bdl_get("v1/stats", {
+                "player_ids[]": pid,
+                "seasons[]": season,
+                "per_page": 10,
+                "sort_order": "desc",
+            })
+            games = data.get("data", [])
+            if not games:
+                continue
+
+            def avg(vals):
+                clean = [v for v in vals if v is not None]
+                return round(sum(clean) / len(clean), 1) if clean else None
+
+            def parse_min(m):
+                try:
+                    return float(str(m).split(":")[0])
+                except:
+                    return None
+
+            mins      = [parse_min(g.get("min")) for g in games]
+            pts       = [g.get("pts") for g in games]
+            reb       = [g.get("reb") for g in games]
+            ast       = [g.get("ast") for g in games]
+            blk       = [g.get("blk") for g in games]
+            stl       = [g.get("stl") for g in games]
+            fg3m      = [g.get("fg3m") for g in games]
+            turnover  = [g.get("turnover") for g in games]
+
+            def combo(lists, n):
+                totals = []
+                for i in range(min(n, len(games))):
+                    vals = [l[i] for l in lists if l[i] is not None]
+                    if vals:
+                        totals.append(sum(vals))
+                return avg(totals)
+
+            l10 = min(10, len(games))
+            l5  = min(5,  len(games))
+
+            results[pid] = {
+                "last10_min":  avg(mins[:l10]),
+                "last5_min":   avg(mins[:l5]),
+                # per-stat last10/last5
+                "points":      {"last10": avg(pts[:l10]),  "last5": avg(pts[:l5])},
+                "rebounds":    {"last10": avg(reb[:l10]),  "last5": avg(reb[:l5])},
+                "assists":     {"last10": avg(ast[:l10]),  "last5": avg(ast[:l5])},
+                "blocks":      {"last10": avg(blk[:l10]),  "last5": avg(blk[:l5])},
+                "steals":      {"last10": avg(stl[:l10]),  "last5": avg(stl[:l5])},
+                "turnovers":   {"last10": avg(turnover[:l10]), "last5": avg(turnover[:l5])},
+                "three_pointers_made": {"last10": avg(fg3m[:l10]), "last5": avg(fg3m[:l5])},
+                # combo stats
+                "points_rebounds":           {"last10": combo([pts,reb],l10),         "last5": combo([pts,reb],l5)},
+                "points_assists":            {"last10": combo([pts,ast],l10),         "last5": combo([pts,ast],l5)},
+                "rebounds_assists":          {"last10": combo([reb,ast],l10),         "last5": combo([reb,ast],l5)},
+                "points_rebounds_assists":   {"last10": combo([pts,reb,ast],l10),     "last5": combo([pts,reb,ast],l5)},
+                "blocks_steals":             {"last10": combo([blk,stl],l10),         "last5": combo([blk,stl],l5)},
+            }
+        except Exception as e:
+            print(f"  ⚠ last10 fetch failed for player {pid}: {e}", file=sys.stderr)
+    return results
+
+
 def get_player_info(player_ids: list) -> dict:
     if not player_ids:
         return {}
@@ -1664,10 +1873,11 @@ def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_
         if chosen:
             best_lines[key] = chosen
 
-    # Fetch player info + season averages
+    # Fetch player info + season averages + last10 game logs
     player_ids  = list(set(p["player_id"] for p in best_lines.values()))
     player_info = get_player_info(player_ids)
-    season_avgs = get_player_season_averages(player_ids)
+    season_avgs  = get_player_season_averages(player_ids)
+    last10_stats = get_player_last10_stats(player_ids)
 
     # Score each prop
     scored_props = []
@@ -1723,20 +1933,39 @@ def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_
         avg_pace    = (player_pace + opp_pace) / 2
         pace_factor = "Pace Up" if avg_pace > 101 else "Pace Down" if avg_pace < 97 else "Neutral"
 
+        # Pull last10 data for this player/prop_type
+        p_last10 = last10_stats.get(player_id, {})
+        last10_pt = p_last10.get(prop_type, {})
+        last10_avg = last10_pt.get("last10") if last10_pt else None
+        last5_avg  = last10_pt.get("last5")  if last10_pt else None
+        last10_min = p_last10.get("last10_min")
+        last5_min  = p_last10.get("last5_min")
+
         score, lean, confidence, signals = score_prop(
-            season_avg=season_avg, line=line, last5_avg=None,
+            season_avg=season_avg, line=line, last5_avg=last5_avg,
             opp_rank=opp_rank, b2b=False, opp_b2b=False,
             pace_factor=pace_factor,
         )
 
-        if score < PROPS_MIN_SCORE:
-            continue
-
+        # Minutes trend check — if L10 minutes are down 15%+ vs season, penalize score
         min_str = savg.get("min", "0") or "0"
         try:
             minutes_avg = float(min_str.split(":")[0])
         except Exception:
             minutes_avg = 0.0
+
+        minutes_trending_down = False
+        if last10_min and minutes_avg and last10_min < minutes_avg * 0.85:
+            drop_pct = round((1 - last10_min / minutes_avg) * 100)
+            score = max(0, score - 10)
+            signals.append({
+                "text": f"⚠️ Minutes trending down — L10 avg {last10_min} min vs season {minutes_avg} min ({drop_pct}% drop)",
+                "tag": "UNDER"
+            })
+            minutes_trending_down = True
+
+        if score < PROPS_MIN_SCORE:
+            continue
 
         scored_props.append({
             "player":         pinfo["name"],
@@ -1749,9 +1978,10 @@ def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_
             "prop_type":      prop_type,
             "line":           line,
             "season_avg":     round(season_avg, 1),
-            "last5_avg":      None,
-            "last10_avg":     None,
+            "last5_avg":      round(last5_avg, 1) if last5_avg else None,
+            "last10_avg":     round(last10_avg, 1) if last10_avg else None,
             "minutes_avg":    round(minutes_avg, 1),
+            "last10_min":     round(last10_min, 1) if last10_min else None,
             "matchup_rating": "Favorable" if opp_rank >= 20 else "Tough" if opp_rank <= 10 else "Neutral",
             "opp_pos_rank":   opp_rank,
             "opp_team":       opp or "",

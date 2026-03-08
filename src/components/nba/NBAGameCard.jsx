@@ -101,6 +101,7 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
   const narrativeContrarian = narrative?.contrarian_flag|| game.narrative_contrarian || null;
   const narrativeOuLean     = narrative?.ou_lean        || game.narrative_ou_lean    || null;
   const otjPick             = narrative?.otj_pick       || game.narrative_otj_pick   || null;
+  const otjSpreadRule       = edge?.otj_spread_rule || null;
 
   const gameId = game.id || game.game_id || matchup;
   const slateDate = game.date || (() => {
@@ -347,6 +348,44 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
             </div>
           )}
 
+          {/* Injury context box */}
+          {(() => {
+            const allInjuries = [
+              ...(away.injuries || []).filter(p => p.status === "Out" || p.status === "Doubtful").map(p => ({ ...p, team: away.team })),
+              ...(home.injuries || []).filter(p => p.status === "Out" || p.status === "Doubtful").map(p => ({ ...p, team: home.team })),
+            ];
+            if (!allInjuries.length) return null;
+            const fresh = allInjuries.filter(p => p.tenure === "fresh" || p.priced_in === false);
+            const longTerm = allInjuries.filter(p => p.priced_in === true && p.tenure !== "fresh");
+            return (
+              <div style={{ marginTop: 10, padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.05)" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>🏥 Injury Report</div>
+                {fresh.length > 0 && (
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 10, color: "#ef4444", fontWeight: 700, marginBottom: 3 }}>🚨 Fresh Scratches — may not be priced in</div>
+                    {fresh.map((p, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>
+                        <span style={{ color: "#ef4444", fontWeight: 600 }}>{p.name}</span>
+                        <span style={{ color: "#4a5568" }}> · {p.team} · {p.description || p.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {longTerm.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 10, color: "#4a5568", fontWeight: 700, marginBottom: 3 }}>Already priced in by Vegas</div>
+                    {longTerm.map((p, i) => (
+                      <div key={i} style={{ fontSize: 11, color: "#4a5568", marginBottom: 2 }}>
+                        {p.name} · {p.team}
+                        {p.tenure_label && <span style={{ fontStyle: "italic" }}> · {p.tenure_label}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Claude narrative */}
           {narrativeSummary && (
             <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(255,255,255,0.02)", borderRadius: 8, borderLeft: `3px solid ${cc}` }}>
@@ -374,6 +413,24 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
           )}
 
           {/* OTJ Pick */}
+          {otjSpreadRule && (() => {
+            const strengthColor = otjSpreadRule.strength === "strong"
+              ? "#f59e0b"
+              : otjSpreadRule.strength === "moderate"
+              ? "#94a3b8"
+              : "#4a5568";
+            return (
+              <div style={{ marginTop: 8, padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 6, borderLeft: `2px solid ${strengthColor}` }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: strengthColor, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                  📐 OTJ Spread Gut Check
+                </span>
+                <p style={{ fontSize: 11, color: "#6b7280", margin: "4px 0 0", fontStyle: "italic", lineHeight: 1.6 }}>
+                  {otjSpreadRule.label}
+                </p>
+              </div>
+            );
+          })()}
+
           {otjPick && (
             <div style={{ marginTop: 14, padding: "14px 16px", background: "linear-gradient(135deg, rgba(251,191,36,0.07), rgba(239,68,68,0.05))", borderRadius: 10, border: "1px solid rgba(251,191,36,0.2)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>

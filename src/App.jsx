@@ -9,6 +9,7 @@ import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import Record from './pages/Record';
 import { supabase } from './lib/supabase';
+import OTJPropsPage from './components/nba/OTJPropsPage';
 
 function ComingSoon({ sport, emoji, phase }) {
   return (
@@ -53,10 +54,14 @@ function SportTabs({ user, profile }) {
       }}>
         <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginRight: 8, letterSpacing: "-0.02em", flexShrink: 0 }}>OTJ</span>
         <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀<span className="nav-tab-label"> NBA</span></NavLink>
+        <NavLink to="/props" style={({ isActive }) => tabStyle(isActive)}>🎯<span className="nav-tab-label"> Props</span></NavLink>
         <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒<span className="nav-tab-label"> NHL</span></NavLink>
         <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
         <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
         <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
+        
+
+
         <div style={{ flex: 1, minWidth: 4 }} />
         {user && profile && (
           <div className="nav-username-badge" style={{
@@ -88,6 +93,7 @@ export default function App() {
   const [showUsername, setShowUsername] = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
   const [authTimeout, setAuthTimeout] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   // Fetch profile for a given user
   async function fetchProfile(userId) {
@@ -109,9 +115,11 @@ export default function App() {
       setUser(u);
       if (!u) {
         setShowWelcome(true);
+        setProfileLoading(false);
       } else {
         const p = await fetchProfile(u.id);
         setProfile(p);
+        setProfileLoading(false);
         // First login — no profile yet → show username setup
         if (!p) setShowUsername(true);
       }
@@ -125,9 +133,12 @@ export default function App() {
         setShowWelcome(false);
         const p = await fetchProfile(u.id);
         setProfile(p);
+        setProfileLoading(false);
+        // Only show username modal if profile confirmed missing after fetch
         if (!p) setShowUsername(true);
       } else {
         setProfile(null);
+        setProfileLoading(false);
         setShowUsername(false);
       }
     });
@@ -149,8 +160,8 @@ export default function App() {
         <WelcomeModal onClose={() => setShowWelcome(false)} />
       )}
 
-      {/* Username setup — first login, no profile yet */}
-      {showUsername && user && !profile && (
+      {/* Username setup — only after profile fetch confirmed missing */}
+      {showUsername && user && !profile && !profileLoading && (
         <UsernameModal user={user} onComplete={handleUsernameComplete} />
       )}
 
@@ -166,6 +177,7 @@ export default function App() {
           <Route path="/arcade" element={<NBAJamArcade user={user} profile={profile} />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowModal(true)} />} />
         </Routes>
       </div>
     </BrowserRouter>

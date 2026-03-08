@@ -22,6 +22,8 @@ import subprocess
 import os
 from datetime import datetime
 from pathlib import Path
+from nba_edge_analyzer import build_props_slate
+
 
 # ── Load env ──────────────────────────────────────────────────────────────────
 try:
@@ -209,18 +211,54 @@ if slate_id:
             "narrative_otj_pick": game.get("narrative", {}).get("otj_pick"),
             "narrative_signals": game.get("narrative", {}).get("narrative_signals", []),
         }
-        try:
+try:
             supabase.table("games").upsert(
                 game_row,
                 on_conflict="slate_id,matchup"
             ).execute()
-        except Exception as e:
+except Exception as e:
             print(f"  ⚠ Could not push game {game.get('matchup')}: {e}")
 
-    print(f"✅ {len(games)} games pushed to games table")
+# ── Step 5: Build + push props slate ──────────
+
+print(f"\n⏳ Building props slate...")
+try:
+    from nba_edge_analyzer import get_all_team_stats, get_todays_games, get_todays_injuries
+
+    raw_games = get_todays_games(game_date)
+    all_stats = get_all_team_stats(season=2025)
+    all_team_ids = list(set(
+        [g["home_team_id"] for g in raw_games] + [g["away_team_id"] for g in raw_games]
+    ))
+    todays_injuries = get_todays_injuries(game_date, all_team_ids)
+
+    props = build_props_slate(
+        games=raw_games,
+        all_stats=all_stats,
+        todays_injuries=todays_injuries,
+        game_date=game_date,
+    )
+
+    if props:
+        props_payload = {
+            "date":         game_date,
+            "props":        props,
+            "games_count":  len(set(p["game_id"] for p in props)),
+            "generated_at": datetime.now().isoformat(),
+        }
+        supabase.table("props_slates").upsert(
+            props_payload, on_conflict="date"
+        ).execute()
+        print(f"✅ Props slate pushed — {len(props)} props")
+    else:
+        print(f"⚠ No props to push")
+
+except Exception as e:
+    print(f"⚠ Props push failed (non-fatal): {e}")
 
 
 print(f"\n{'=' * 60}")
 print(f"  ✅ OTJ push complete for {game_date}")
 print(f"  Live at: overtimejournal.com/nba")
 print(f"{'=' * 60}\n")
+

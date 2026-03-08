@@ -549,7 +549,7 @@ def get_tank01_injuries(team_ids_map: dict) -> dict:
 # EDGE CALCULATOR (unchanged from original)
 # ============================================================================
 
-def calculate_edge(home: dict, away: dict) -> dict:
+def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     """Calculate composite edge from team stats."""
     signals = []
     score = 0.0
@@ -683,6 +683,26 @@ def calculate_edge(home: dict, away: dict) -> dict:
     abs_score = abs(score)
     confidence = "SHARP" if abs_score >= 14 else "LEAN" if abs_score >= 8 else "INFO"
     lean = home["team"] if score > 0 else away["team"] if score < 0 else None
+
+    # ── Spread cap rules — large spreads are garbage time traps ──────────────
+    # Added 2026-03-08: MIN -23.5 loss proved blowouts don't cover late.
+    # Rule: spread > 20 → cap at INFO. spread 14.5-20 → cap at LEAN max.
+    spread_val = abs(float(spread_home or 0))
+
+    if spread_val > 20.0:
+        confidence = "INFO"   # Never pick massive spreads — garbage time kills them
+    elif spread_val > 14.5 and confidence == "SHARP":
+        confidence = "LEAN"   # Downgrade SHARP on large spreads
+
+    if spread_val > 14.5:
+        signals.append({
+            "type": "LARGE_SPREAD_CAUTION",
+            "detail": f"Spread of {spread_val} pts — garbage time risk",
+            "favors": "FADE",
+            "strength": "CAUTION",
+            "impact": -2.0,
+        })
+    # ── End spread cap rules ──────────────────────────────────────────────────
 
     return {
         "lean": lean,
@@ -1116,7 +1136,7 @@ Respond ONLY with this JSON structure:
   "key_angle": "The single most important edge in 1 sentence. Be specific with numbers.",
   "contrarian_flag": "If public money and model data point opposite directions, describe the fade here. Otherwise null.",
   "ou_lean": "OVER or UNDER or null — only if there is a specific mispricing reason beyond general team tendencies. Brief reason in parens.",
-  "otj_pick": "One direct sentence: which side OTJ likes and the single strongest reason. Format exactly: '{{TEAM}} {{spread}} — [reason]'. No hedging, no qualifiers.",
+  "otj_pick": "One sentence picking a side with the strongest reason. Format: '{{TEAM}} {{spread}} — [reason]'. Tone MUST match confidence: SHARP=confident ('strong edge'), LEAN=moderate ('leaning'), INFO=soft ('no strong edge, slight lean if anything'). Never write confident language for INFO.",
   "narrative_signals": ["short signal 1", "short signal 2", "short signal 3"]
 }}"""
 
@@ -1317,14 +1337,14 @@ def main():
         home_profile["key_out"] = [p["name"] for p in home_profile["injuries"] if p["status"] == "Out"]
         away_profile["key_out"] = [p["name"] for p in away_profile["injuries"] if p["status"] == "Out"]
 
-        edge = calculate_edge(home_profile, away_profile)
-
-        # Attach odds
+        # Fetch odds first so spread_home is available for calculate_edge
         odds = todays_odds.get(game_id, {})
         spread_home = odds.get("spread_home")
         spread_away = odds.get("spread_away")
         spread_display = f"{home_abbrev} {spread_home}" if spread_home else None
         total = odds.get("total")
+
+        edge = calculate_edge(home_profile, away_profile, spread_home=spread_home)
 
         all_results.append({
             "matchup": f"{away_abbrev} @ {home_abbrev}",
@@ -1441,6 +1461,302 @@ def main():
             ])
         print(tabulate(summary, headers=["Game", "Score", "Lean", "Conf", "B2B"], tablefmt="rounded_grid"))
 
+
+
+# ============================================================================
+# PROPS SLATE BUILDER
+# Added 2026-03-08 — pulls live player props from BDL v2, cross-references
+# season averages already in the pipeline, scores each prop.
+# Called from push_to_supabase.py after the main slate is built.
+# ============================================================================
+
+PROPS_VENDOR_PRIORITY = ["draftkings", "fanduel", "caesars", "fanatics", "betmgm"]
+
+PROP_TYPE_LABELS = {
+    "points":                    "Points",
+    "rebounds":                  "Rebounds",
+    "assists":                   "Assists",
+    "blocks":                    "Blocks",
+    "steals":                    "Steals",
+    "turnovers":                 "Turnovers",
+    "three_pointers_made":       "3-Pointers Made",
+    "points_rebounds_assists":   "Pts+Reb+Ast",
+    "points_rebounds":           "Pts+Reb",
+    "points_assists":            "Pts+Ast",
+    "rebounds_assists":          "Reb+Ast",
+}
+
+PROPS_MIN_SCORE = 55
+
+
+def get_player_props_for_game(game_id: int) -> list:
+    data = bdl_get("v2/odds/player_props", {"game_id": game_id})
+    return data.get("data", [])
+
+
+def get_player_season_averages(player_ids: list, season: int = 2025) -> dict:
+    """
+    Fetch season averages one player at a time using v1/season_averages.
+    BDL does not support bulk player_ids[] on this endpoint.
+    Only fetches starters/rotation players (skips bench/two-way IDs with no averages).
+    """
+    if not player_ids:
+        return {}
+    averages = {}
+    for pid in player_ids:
+        data = bdl_get("v1/season_averages", {"season": season, "player_id": pid})
+        for row in data.get("data", []):
+            row_pid = row.get("player_id")
+            if row_pid:
+                averages[row_pid] = row
+    return averages
+
+
+def get_player_info(player_ids: list) -> dict:
+    if not player_ids:
+        return {}
+    info = {}
+    chunk_size = 25
+    for i in range(0, len(player_ids), chunk_size):
+        chunk = player_ids[i:i + chunk_size]
+        params = [("per_page", 100)]
+        for pid in chunk:
+            params.append(("ids[]", pid))
+        data = bdl_get("v1/players", params)
+        for p in data.get("data", []):
+            pid = p.get("id")
+            if not pid:
+                continue
+            team = p.get("team", {})
+            info[pid] = {
+                "name":    f"{p.get('first_name', '')} {p.get('last_name', '')}".strip(),
+                "team":    team.get("abbreviation", ""),
+                "pos":     p.get("position", ""),
+                "team_id": team.get("id"),
+            }
+    return info
+
+
+def pick_best_line(props_for_player_stat: list) -> dict | None:
+    ou_props = [p for p in props_for_player_stat
+                if p.get("market", {}).get("type") == "over_under"]
+    if not ou_props:
+        return None
+    vendor_map = {p["vendor"]: p for p in ou_props}
+    for vendor in PROPS_VENDOR_PRIORITY:
+        if vendor in vendor_map:
+            return vendor_map[vendor]
+    return ou_props[0]
+
+
+def score_prop(season_avg, line, last5_avg, opp_rank, b2b, opp_b2b, pace_factor):
+    score = 50
+    lean_direction = 1
+    signals = []
+
+    if season_avg and line:
+        gap = season_avg - line
+        if abs(gap) >= 3:
+            score += min(15, abs(gap) * 2)
+            if gap > 0:
+                signals.append({"text": f"Season avg {season_avg} is +{gap:.1f} above line", "tag": "OVER"})
+                lean_direction = 1
+            else:
+                signals.append({"text": f"Season avg {season_avg} is {gap:.1f} below line", "tag": "UNDER"})
+                lean_direction = -1
+        elif abs(gap) >= 1:
+            score += 5
+            lean_direction = 1 if gap > 0 else -1
+
+    if last5_avg and line:
+        l5_gap = last5_avg - line
+        if abs(l5_gap) >= 3:
+            score += 10
+            tag = "OVER" if l5_gap > 0 else "UNDER"
+            signals.append({"text": f"L5 avg {last5_avg:.1f} {'above' if l5_gap > 0 else 'below'} line by {abs(l5_gap):.1f}", "tag": tag})
+            if (l5_gap > 0 and lean_direction == 1) or (l5_gap < 0 and lean_direction == -1):
+                score += 5
+
+    if opp_rank:
+        if opp_rank >= 25:
+            score += 8
+            signals.append({"text": f"Opp ranked #{opp_rank} in pts allowed — very weak defense", "tag": "OVER"})
+        elif opp_rank >= 20:
+            score += 5
+            signals.append({"text": f"Opp ranked #{opp_rank} in pts allowed — below avg defense", "tag": "OVER"})
+        elif opp_rank <= 5:
+            score -= 8
+            signals.append({"text": f"Opp ranked #{opp_rank} in pts allowed — elite defense", "tag": "UNDER"})
+        elif opp_rank <= 10:
+            score -= 4
+            signals.append({"text": f"Opp ranked #{opp_rank} in pts allowed — strong defense", "tag": "UNDER"})
+
+    if b2b:
+        score -= 8
+        lean_direction = -1
+        signals.append({"text": "Player on B2B — fatigue risk, production may dip", "tag": "UNDER"})
+    if opp_b2b:
+        score += 6
+        signals.append({"text": "Opponent on B2B — defensive intensity drops", "tag": "OVER"})
+
+    if pace_factor == "Pace Up":
+        score += 4
+        signals.append({"text": "Pace-up matchup — more possessions favors counting stats", "tag": "OVER"})
+    elif pace_factor == "Pace Down":
+        score -= 3
+
+    score = max(0, min(100, score))
+    lean = "OVER" if lean_direction == 1 else "UNDER"
+    confidence = "HIGH" if score >= 72 else "MODERATE" if score >= 60 else "LOW"
+    return score, lean, confidence, signals
+
+
+def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_date: str) -> list:
+    """
+    Build today's props slate. Call this from push_to_supabase.py after
+    the main slate is built — it reuses games, all_stats, and injuries
+    already fetched so no duplicate API calls.
+    """
+    from collections import defaultdict
+
+    print(f"  Fetching props...", end=" ", flush=True)
+
+    all_raw_props = []
+    game_map = {}
+
+    for game in games:
+        gid = game["game_id"]
+        raw = get_player_props_for_game(gid)
+        all_raw_props.extend(raw)
+        game_map[gid] = {
+            "away":     game["away_team"],
+            "home":     game["home_team"],
+            "matchup":  f"{game['away_team']} @ {game['home_team']}",
+        }
+
+    if not all_raw_props:
+        print("no props returned")
+        return []
+
+    # Group and pick best line per player/prop
+    grouped = defaultdict(list)
+    for p in all_raw_props:
+        key = (p["game_id"], p["player_id"], p["prop_type"])
+        grouped[key].append(p)
+
+    best_lines = {}
+    for key, props in grouped.items():
+        chosen = pick_best_line(props)
+        if chosen:
+            best_lines[key] = chosen
+
+    # Fetch player info + season averages
+    player_ids  = list(set(p["player_id"] for p in best_lines.values()))
+    player_info = get_player_info(player_ids)
+    season_avgs = get_player_season_averages(player_ids)
+
+    # Score each prop
+    scored_props = []
+    all_opp_pts = sorted(
+        [(abbr, s.get("opp_pts", 0)) for abbr, s in all_stats.items()],
+        key=lambda x: x[1], reverse=True
+    )
+
+    for (game_id, player_id, prop_type), prop in best_lines.items():
+        if prop_type not in PROP_TYPE_LABELS:
+            continue
+
+        pinfo = player_info.get(player_id, {})
+        if not pinfo.get("name"):
+            continue
+
+        savg  = season_avgs.get(player_id, {})
+        ginfo = game_map.get(game_id, {})
+        team  = pinfo.get("team", "")
+        opp   = ginfo.get("home") if team == ginfo.get("away") else ginfo.get("away")
+        line  = float(prop["line_value"])
+
+        combo_map = {
+            "points_rebounds_assists": ["pts", "reb", "ast"],
+            "points_rebounds":         ["pts", "reb"],
+            "points_assists":          ["pts", "ast"],
+            "rebounds_assists":        ["reb", "ast"],
+        }
+        simple_map = {
+            "points": "pts", "rebounds": "reb", "assists": "ast",
+            "blocks": "blk", "steals": "stl", "turnovers": "turnover",
+            "three_pointers_made": "fg3m",
+        }
+
+        if prop_type in simple_map:
+            season_avg = float(savg.get(simple_map[prop_type], 0) or 0)
+        elif prop_type in combo_map:
+            season_avg = sum(float(savg.get(f, 0) or 0) for f in combo_map[prop_type])
+        else:
+            continue
+
+        if season_avg == 0:
+            continue
+
+        opp_stats = all_stats.get(opp, {})
+        opp_rank = next(
+            (i + 1 for i, (abbr, _) in enumerate(all_opp_pts) if abbr == opp),
+            15
+        )
+
+        player_pace = all_stats.get(team, {}).get("pace", 100) or 100
+        opp_pace    = opp_stats.get("pace", 100) or 100
+        avg_pace    = (player_pace + opp_pace) / 2
+        pace_factor = "Pace Up" if avg_pace > 101 else "Pace Down" if avg_pace < 97 else "Neutral"
+
+        score, lean, confidence, signals = score_prop(
+            season_avg=season_avg, line=line, last5_avg=None,
+            opp_rank=opp_rank, b2b=False, opp_b2b=False,
+            pace_factor=pace_factor,
+        )
+
+        if score < PROPS_MIN_SCORE:
+            continue
+
+        min_str = savg.get("min", "0") or "0"
+        try:
+            minutes_avg = float(min_str.split(":")[0])
+        except Exception:
+            minutes_avg = 0.0
+
+        scored_props.append({
+            "player":         pinfo["name"],
+            "player_id":      player_id,
+            "team":           team,
+            "pos":            pinfo.get("pos", ""),
+            "game":           ginfo.get("matchup", ""),
+            "game_id":        game_id,
+            "stat":           PROP_TYPE_LABELS[prop_type],
+            "prop_type":      prop_type,
+            "line":           line,
+            "season_avg":     round(season_avg, 1),
+            "last5_avg":      None,
+            "last10_avg":     None,
+            "minutes_avg":    round(minutes_avg, 1),
+            "matchup_rating": "Favorable" if opp_rank >= 20 else "Tough" if opp_rank <= 10 else "Neutral",
+            "opp_pos_rank":   opp_rank,
+            "opp_team":       opp or "",
+            "pace_factor":    pace_factor,
+            "b2b":            False,
+            "opp_b2b":        False,
+            "lean":           lean,
+            "confidence":     confidence,
+            "score":          score,
+            "vendor":         prop.get("vendor", ""),
+            "over_odds":      prop.get("market", {}).get("over_odds"),
+            "under_odds":     prop.get("market", {}).get("under_odds"),
+            "signals":        signals,
+        })
+
+    scored_props.sort(key=lambda x: x["score"], reverse=True)
+    top_props = scored_props[:20]
+    print(f"✅ {len(top_props)} props built ({len(scored_props)} scored, {len(all_raw_props)} raw lines)")
+    return top_props
 
 if __name__ == "__main__":
     main()

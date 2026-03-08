@@ -103,7 +103,13 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
   const otjPick             = narrative?.otj_pick       || game.narrative_otj_pick   || null;
 
   const gameId = game.id || game.game_id || matchup;
-  const slateDate = game.date || new Date().toISOString().split('T')[0];
+  const slateDate = game.date || (() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  })();
 
   // Load existing pick for this user+game
   useEffect(() => {

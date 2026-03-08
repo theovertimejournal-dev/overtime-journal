@@ -77,7 +77,13 @@ function CalendarMonth({ year, month, data, onSelectDay, selectedDay }) {
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date().toISOString().split('T')[0];
+  const today = (() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  })();
 
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(<div key={`e${i}`} />);

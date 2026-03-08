@@ -1,0 +1,12 @@
+# Python cache — safe to delete anytime, auto-regenerated
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log

@@ -37,7 +37,16 @@ function normalizeGame(g) {
 }
 
 export function useSlate(sport = 'nba', date = null) {
-  const targetDate = date || new Date().toISOString().split('T')[0];
+  // Use local date, not UTC — toISOString() returns UTC which can be
+  // yesterday's date in US timezones (AZ is UTC-7, so before 7pm = wrong date)
+  function getLocalDate() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const targetDate = date || getLocalDate();
   const [slate, setSlate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

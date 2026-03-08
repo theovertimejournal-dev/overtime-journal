@@ -197,7 +197,7 @@ export default function NBADashboard({ user, profile }) {
   // stop spinner after 5s and render locked state instead of infinite loading
   useEffect(() => {
     if (!loading) return;
-    const t = setTimeout(() => setLoadTimedOut(true), 5000);
+    const t = setTimeout(() => setLoadTimedOut(true), 10000);
     return () => clearTimeout(t);
   }, [loading]);
 
@@ -235,6 +235,23 @@ export default function NBADashboard({ user, profile }) {
     </div>
   );
 
+  // Slate failed to load — show friendly retry instead of broken undefined state
+  if (!slate && loadTimedOut) return (
+    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, padding: 24 }}>
+      <div style={{ fontSize: 24 }}>🏀</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9" }}>Couldn't load tonight's slate</div>
+      <div style={{ fontSize: 11, color: "#4a5568", textAlign: "center", lineHeight: 1.6 }}>
+        This can happen on first load in some browsers.<br />Tap refresh to try again.
+      </div>
+      <button
+        onClick={() => window.location.reload()}
+        style={{ fontSize: 12, padding: "10px 24px", borderRadius: 8, cursor: "pointer", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontFamily: "inherit", fontWeight: 700 }}
+      >
+        🔄 Refresh
+      </button>
+    </div>
+  );
+
   return (
     <div style={{ maxWidth: 920, margin: "0 auto", padding: "24px 16px" }}>
 
@@ -268,10 +285,10 @@ export default function NBADashboard({ user, profile }) {
         </div>
         <p style={{ fontSize: 11, color: "#4a5568", margin: "0 0 12px" }}>Bench Net Rating · B2B Fatigue · Close Games · 3PT Variance · Injuries · Bet Tracking</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <Pill text={`📅 ${slate?.date}`} color="#6b7280" />
-          <Pill text={`${slate?.games_count} games tonight`} color="#6b7280" />
+          <Pill text={`📅 ${slate?.date || today}`} color="#6b7280" />
+          <Pill text={`${slate?.games_count ?? "—"} games tonight`} color="#6b7280" />
           {!user && <Pill text={`Today: ${freeTier} free · ${(slate?.games_count || 1) - 1} locked 🔒`} color={freeTier === "SHARP" ? "#ef4444" : freeTier === "LEAN" ? "#f59e0b" : "#6b7280"} />}
-          <Pill text={`🔥 ${slate?.cumulative_record} ${slate?.cumulative_note}`} color="#22c55e" />
+          <Pill text={`🔥 ${slate?.cumulative_record || "—"} ${slate?.cumulative_note || ""}`} color="#22c55e" />
           {user && (
             <select value={sortBy} onChange={e => setSortBy(e.target.value)}
               style={{ fontSize: 11, padding: "4px 8px", borderRadius: 5, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "#6b7280", fontFamily: "inherit" }}>

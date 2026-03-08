@@ -178,6 +178,7 @@ except Exception as e:
     slate_id = None
 
 if slate_id:
+    print(f"  Using slate_id: {slate_id}")
     for game in games:
         game_row = {
             "slate_id": slate_id,
@@ -203,7 +204,6 @@ if slate_id:
             "confidence": game.get("edge", {}).get("confidence", None),
             "edge_score": game.get("edge", {}).get("score", None),
             "signals": game.get("edge", {}).get("signals", []),
-            # Claude narrative fields
             "narrative_summary": game.get("narrative", {}).get("summary"),
             "narrative_key_angle": game.get("narrative", {}).get("key_angle"),
             "narrative_contrarian": game.get("narrative", {}).get("contrarian_flag"),
@@ -211,12 +211,13 @@ if slate_id:
             "narrative_otj_pick": game.get("narrative", {}).get("otj_pick"),
             "narrative_signals": game.get("narrative", {}).get("narrative_signals", []),
         }
-try:
+        try:
             supabase.table("games").upsert(
                 game_row,
                 on_conflict="slate_id,matchup"
             ).execute()
-except Exception as e:
+            print(f"  ✅ {game.get('matchup')}")
+        except Exception as e:
             print(f"  ⚠ Could not push game {game.get('matchup')}: {e}")
 
 # ── Step 5: Build + push props slate ──────────

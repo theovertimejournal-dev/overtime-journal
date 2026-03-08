@@ -1341,7 +1341,21 @@ def main():
         odds = todays_odds.get(game_id, {})
         spread_home = odds.get("spread_home")
         spread_away = odds.get("spread_away")
-        spread_display = f"{home_abbrev} {spread_home}" if spread_home else None
+        # Show the favored team (negative spread) in the display label
+        if spread_home is not None:
+            try:
+                sh = float(spread_home)
+                if sh <= 0:
+                    # Home team is favored
+                    spread_display = f"{home_abbrev} {sh}"
+                else:
+                    # Away team is favored — use spread_away value
+                    sa = float(spread_away) if spread_away is not None else -sh
+                    spread_display = f"{away_abbrev} {sa}"
+            except (ValueError, TypeError):
+                spread_display = f"{home_abbrev} {spread_home}"
+        else:
+            spread_display = None
         total = odds.get("total")
 
         edge = calculate_edge(home_profile, away_profile, spread_home=spread_home)

@@ -106,44 +106,47 @@ export default function App() {
   }
 
   useEffect(() => {
-    // Fallback — if auth hangs for 3s, render anyway
     const timeout = setTimeout(() => setAuthTimeout(true), 3000);
 
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    // Single source of truth — onAuthStateChange fires INITIAL_SESSION on load
+    // so we don't need getSession() separately. This prevents the race condition
+    // where both run simultaneously and both try to show UsernameModal.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       clearTimeout(timeout);
       const u = session?.user ?? null;
       setUser(u);
-      if (!u) {
-        setShowWelcome(true);
-        setProfileLoading(false);
-      } else {
-        const p = await fetchProfile(u.id);
-        setProfile(p);
-        setProfileLoading(false);
-        // First login — no profile yet → show username setup
-        if (!p) setShowUsername(true);
-      }
       setAuthChecked(true);
-    });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) {
-        setShowWelcome(false);
-        const p = await fetchProfile(u.id);
-        setProfile(p);
-        setProfileLoading(false);
-        // Only show username modal if profile confirmed missing after fetch
-        if (!p) setShowUsername(true);
-      } else {
+      if (!u) {
         setProfile(null);
         setProfileLoading(false);
         setShowUsername(false);
+        // Only show welcome on initial load, not on sign-out during session
+        if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
+          setShowWelcome(true);
+        }
+        return;
       }
+
+      // User signed in — hide welcome
+      setShowWelcome(false);
+
+      // Skip profile fetch on token refresh to avoid re-triggering username modal
+      if (event === 'TOKEN_REFRESHED') return;
+
+      setProfileLoading(true);
+      const p = await fetchProfile(u.id);
+      setProfile(p);
+      setProfileLoading(false);
+
+      if (!p) setShowUsername(true);
+      else setShowUsername(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(timeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   function handleUsernameComplete(newProfile) {

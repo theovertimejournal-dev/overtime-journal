@@ -251,7 +251,14 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
           )}
 
           <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
-            Avg Min: {prop.minutes_avg} · Opp {prop.pos} DEF: #{prop.opp_pos_rank} · Score: {prop.score}/100
+            Min: {prop.minutes_avg} season
+            {prop.last10_min && prop.last10_min < prop.minutes_avg * 0.85 && (
+              <span style={{ color: '#f59e0b', fontWeight: 700 }}> · L10: {prop.last10_min} ⚠️</span>
+            )}
+            {prop.last10_min && prop.last10_min >= prop.minutes_avg * 0.85 && (
+              <span> · L10: {prop.last10_min}</span>
+            )}
+            {' '}· Opp {prop.pos} DEF: #{prop.opp_pos_rank} · Score: {prop.score}/100
           </div>
 
           {/* Plain English value box */}
@@ -263,12 +270,9 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
               ? Math.round(100 / (n + 100) * 100)
               : Math.round(Math.abs(n) / (Math.abs(n) + 100) * 100);
             // OTJ model implied from score (50-100 scale maps to ~45-65% prob)
-            // OTJ implied: score 50-100 maps to 50-70% prob on the lean side
-            // But we need to check if our implied is HIGHER than Vegas — that's the value
-            const otjImplied = Math.min(72, Math.round(50 + (prop.score - 50) * 0.44));
+            const otjImplied = Math.round(45 + (prop.score - 50) * 0.4);
             const edgeGap = otjImplied - vegasImplied;
-            // Only show if OTJ thinks it hits MORE than Vegas implies — positive edge only
-            if (edgeGap < 5) return null;
+            if (Math.abs(edgeGap) < 4) return null;
             const vegasTimes = Math.round(vegasImplied / 10);
             const otjTimes = Math.round(otjImplied / 10);
             const leanWord = prop.lean === 'OVER' ? 'go over' : 'stay under';

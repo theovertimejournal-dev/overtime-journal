@@ -95,52 +95,64 @@ export default function App() {
   const [authTimeout, setAuthTimeout] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
 
-  // Fetch profile for a given user
-  async function fetchProfile(userId) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .single();
-    return data || null;
-  }
-
   useEffect(() => {
-    const timeout = setTimeout(() => setAuthTimeout(true), 3000);
+    const timeout = setTimeout(() => setAuthTimeout(true), 5000);
+    let fetchingProfile = false;
 
-    // Single source of truth — onAuthStateChange fires INITIAL_SESSION on load
-    // so we don't need getSession() separately. This prevents the race condition
-    // where both run simultaneously and both try to show UsernameModal.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       clearTimeout(timeout);
       const u = session?.user ?? null;
       setUser(u);
       setAuthChecked(true);
 
+      // Logged out
       if (!u) {
         setProfile(null);
         setProfileLoading(false);
         setShowUsername(false);
-        // Only show welcome on initial load, not on sign-out during session
         if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
           setShowWelcome(true);
         }
         return;
       }
 
-      // User signed in — hide welcome
+      // Logged in
       setShowWelcome(false);
 
-      // Skip profile fetch on token refresh to avoid re-triggering username modal
+      // TOKEN_REFRESHED fires on every tab focus — skip it
       if (event === 'TOKEN_REFRESHED') return;
+      // Prevent duplicate fetches from rapid auth events (Chrome cached session)
+      if (fetchingProfile) return;
 
+      fetchingProfile = true;
       setProfileLoading(true);
-      const p = await fetchProfile(u.id);
-      setProfile(p);
-      setProfileLoading(false);
 
-      if (!p) setShowUsername(true);
-      else setShowUsername(false);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('user_id', u.id)
+          .single();
+
+        // PGRST116 = no rows found = genuinely new user
+        // Any other error = network/auth issue = do NOT show username modal
+        if (error && error.code !== 'PGRST116') {
+          console.warn('[Auth] Profile fetch error, skipping modal:', error.code);
+          setProfileLoading(false);
+          fetchingProfile = false;
+          return;
+        }
+
+        const p = data || null;
+        setProfile(p);
+        // Only show username modal if profile is definitively missing
+        setShowUsername(!p);
+      } catch (e) {
+        console.warn('[Auth] Profile fetch exception, skipping modal:', e.message);
+      } finally {
+        setProfileLoading(false);
+        fetchingProfile = false;
+      }
     });
 
     return () => {

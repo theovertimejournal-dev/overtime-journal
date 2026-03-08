@@ -20,48 +20,64 @@ function ComingSoon({ sport, emoji, phase }) {
   );
 }
 
+const NAV_STYLES = `
+  .otj-nav { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+  .otj-nav::-webkit-scrollbar { display: none; }
+  .nav-tab-label { display: inline; }
+  .nav-username-badge { display: flex; }
+  @media (max-width: 500px) {
+    .nav-tab-label { display: none; }
+    .nav-username-badge { display: none !important; }
+  }
+`;
+
 function SportTabs({ user, profile }) {
   const tabStyle = (isActive) => ({
-    fontSize: 12, padding: "6px 14px", borderRadius: 6, textDecoration: "none", fontWeight: 600,
+    fontSize: 12, padding: "6px 10px", borderRadius: 6, textDecoration: "none", fontWeight: 600,
     color: isActive ? "#f1f5f9" : "#4a5568",
     background: isActive ? "rgba(255,255,255,0.08)" : "transparent",
     border: isActive ? "1px solid rgba(255,255,255,0.1)" : "1px solid transparent",
     transition: "all 0.15s ease",
+    whiteSpace: "nowrap", flexShrink: 0,
   });
 
   return (
-    <nav style={{
-      position: "sticky", top: 0, zIndex: 10,
-      background: "rgba(8,8,15,0.95)", backdropFilter: "blur(12px)",
-      borderBottom: "1px solid rgba(255,255,255,0.06)",
-      padding: "10px 20px", display: "flex", gap: 6, alignItems: "center",
-      fontFamily: "'JetBrains Mono','SF Mono',monospace",
-    }}>
-      <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginRight: 10, letterSpacing: "-0.02em" }}>OTJ</span>
-      <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀 NBA</NavLink>
-      <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒 NHL</NavLink>
-      <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾ MLB</NavLink>
-      <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈 NFL</NavLink>
-      <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊 Record</NavLink>
-      <div style={{ flex: 1 }} />
-      {/* Show username badge if logged in with profile */}
-      {user && profile && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, marginRight: 8,
-        }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: "50%",
-            background: profile.avatar_color || "#ef4444",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 11, fontWeight: 700, color: "#fff",
+    <>
+      <style>{NAV_STYLES}</style>
+      <nav className="otj-nav" style={{
+        position: "sticky", top: 0, zIndex: 10,
+        background: "rgba(8,8,15,0.95)", backdropFilter: "blur(12px)",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        padding: "10px 12px", display: "flex", gap: 4, alignItems: "center",
+        fontFamily: "'JetBrains Mono','SF Mono',monospace",
+      }}>
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginRight: 8, letterSpacing: "-0.02em", flexShrink: 0 }}>OTJ</span>
+        <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀<span className="nav-tab-label"> NBA</span></NavLink>
+        <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒<span className="nav-tab-label"> NHL</span></NavLink>
+        <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
+        <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
+        <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
+        <div style={{ flex: 1, minWidth: 4 }} />
+        {user && profile && (
+          <div className="nav-username-badge" style={{
+            alignItems: "center", gap: 6, marginRight: 8, flexShrink: 0,
           }}>
-            {profile.username[0].toUpperCase()}
+            <div style={{
+              width: 22, height: 22, borderRadius: "50%",
+              background: profile.avatar_color || "#ef4444",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: 10, fontWeight: 700, color: "#fff",
+            }}>
+              {profile.username[0].toUpperCase()}
+            </div>
+            <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
           </div>
-          <span style={{ fontSize: 11, color: "#6b7280" }}>@{profile.username}</span>
+        )}
+        <div style={{ flexShrink: 0 }}>
+          <AuthButton />
         </div>
-      )}
-      <AuthButton />
-    </nav>
+      </nav>
+    </>
   );
 }
 

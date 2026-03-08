@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useSlate } from '../../hooks/useSlate';
-import { supabase } from '../../lib/supabase';
 import { Pill } from '../common/Pill';
 import { NBAGameCard } from './NBAGameCard';
 import { B2BTierCard, SpreadMismatchCard } from './B2BTierCard';
@@ -70,24 +69,28 @@ function BettingLog({ betLog }) {
   );
 }
 
-export default function NBADashboard() {
+export default function NBADashboard({ user, profile }) {
   const today = new Date().toISOString().split('T')[0];
   const { slate, loading, source } = useSlate('nba', today);
 
-  const [user, setUser] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState({});
   const [sortBy, setSortBy] = useState("score");
   const [betLog, setBetLog] = useState([]);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
 
+  // Close login modal when user signs in via App.jsx auth
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setUser(session?.user ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) setShowModal(false);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+    if (user) setShowModal(false);
+  }, [user]);
+
+  // Safety net — if useSlate hangs (Supabase RLS blocking anon reads),
+  // stop spinner after 5s and render locked state instead of infinite loading
+  useEffect(() => {
+    if (!loading) return;
+    const t = setTimeout(() => setLoadTimedOut(true), 5000);
+    return () => clearTimeout(t);
+  }, [loading]);
 
  const sorted = [...(slate?.games || [])].sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
 
@@ -115,9 +118,10 @@ export default function NBADashboard() {
     });
   };
 
-  if (loading) return (
-    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+  if (loading && !loadTimedOut) return (
+    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
       <div style={{ fontSize: 13, color: "#4a5568" }}>Loading tonight's slate...</div>
+      <div style={{ fontSize: 10, color: "#374151" }}>Connecting to pipeline</div>
     </div>
   );
 

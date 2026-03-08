@@ -199,6 +199,8 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
         <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap" }}>
           <div style={{ fontSize: 11, color: "#6b7280" }}>Spread: <span style={{ color: "#e2e8f0" }}>{spread}</span></div>
           <div style={{ fontSize: 11, color: "#6b7280" }}>Total: <span style={{ color: "#e2e8f0" }}>O/U {total}</span></div>
+          {game.ml_away && <div style={{ fontSize: 11, color: "#6b7280" }}>{away.team} ML: <span style={{ color: parseInt(game.ml_away) > 0 ? "#22c55e" : "#e2e8f0", fontWeight: 600 }}>{parseInt(game.ml_away) > 0 ? `+${game.ml_away}` : game.ml_away}</span></div>}
+          {game.ml_home && <div style={{ fontSize: 11, color: "#6b7280" }}>{home.team} ML: <span style={{ color: parseInt(game.ml_home) > 0 ? "#22c55e" : "#e2e8f0", fontWeight: 600 }}>{parseInt(game.ml_home) > 0 ? `+${game.ml_home}` : game.ml_home}</span></div>}
           {edge.ou_lean && <div style={{ fontSize: 11, color: "#a855f7" }}>O/U Lean: <strong>{edge.ou_lean}</strong></div>}
           {win_prob && (
             <div style={{ fontSize: 11, color: "#6b7280" }}>
@@ -216,6 +218,25 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
             <NBATeamColumn t={away} />
             <NBATeamColumn t={home} />
           </div>
+
+          {/* Moneyline comparison */}
+          {(game.ml_away || game.ml_home) && (
+            <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
+              {[{ team: away.team, ml: game.ml_away }, { team: home.team, ml: game.ml_home }].map(({ team, ml }) => {
+                if (!ml) return null;
+                const n = parseInt(ml);
+                const implied = n > 0 ? (100 / (n + 100) * 100).toFixed(0) : (Math.abs(n) / (Math.abs(n) + 100) * 100).toFixed(0);
+                const isLean = edge.lean === team;
+                return (
+                  <div key={team} style={{ flex: 1, padding: "8px 10px", borderRadius: 8, background: isLean ? "rgba(239,68,68,0.06)" : "rgba(255,255,255,0.02)", border: `1px solid ${isLean ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)"}` }}>
+                    <div style={{ fontSize: 10, color: "#6b7280" }}>{team} ML{isLean ? " ← lean" : ""}</div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: n > 0 ? "#22c55e" : "#e2e8f0" }}>{n > 0 ? `+${n}` : n}</div>
+                    <div style={{ fontSize: 10, color: "#4a5568" }}>Impl: {implied}%</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* Edge signals */}
           {edge.signals?.length > 0 && (

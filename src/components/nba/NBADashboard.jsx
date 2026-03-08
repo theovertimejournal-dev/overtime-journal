@@ -1,10 +1,114 @@
 import { useState, useEffect } from 'react';
 import { useSlate } from '../../hooks/useSlate';
+import { usePropsSlate } from '../../hooks/usePropsSlate';
 import { Pill } from '../common/Pill';
 import { NBAGameCard } from './NBAGameCard';
 import { B2BTierCard, SpreadMismatchCard } from './B2BTierCard';
 import { LoginModal } from '../common/LoginModal';
 import { RecordWidget } from '../common/RecordWidget';
+
+// ── Parlay Builder ────────────────────────────────────────────────────────────
+
+// Convert American odds to decimal
+function toDecimal(ml) {
+  if (!ml) return null;
+  const n = parseInt(ml);
+  if (isNaN(n)) return null;
+  return n > 0 ? (n / 100) + 1 : (100 / Math.abs(n)) + 1;
+}
+
+// Convert American odds to implied probability (0–1)
+function impliedProb(ml) {
+  if (!ml) return null;
+  const n = parseInt(ml);
+  if (isNaN(n)) return null;
+  return n > 0 ? 100 / (n + 100) : Math.abs(n) / (Math.abs(n) + 100);
+}
+
+// Convert decimal odds back to American for display
+function toAmerican(dec) {
+  if (!dec || dec <= 1) return null;
+  const n = dec >= 2 ? Math.round((dec - 1) * 100) : Math.round(-100 / (dec - 1));
+  return n > 0 ? `+${n}` : `${n}`;
+}
+
+// EV score = edge_score adjusted by how much our model disagrees with the market
+// Higher = more value vs the line
+function calcEV(game, isHome) {
+  const edgeScore = game.edge?.score || 0;
+  const ml = isHome ? game.ml_home : game.ml_away;
+  if (!ml) return edgeScore;
+  const mktProb = impliedProb(ml);
+  // Model confidence proxy: normalize edge_score to 0.5–0.85 range
+  const modelProb = 0.5 + (edgeScore / 100) * 0.35;
+  const edge = modelProb - mktProb;
+  // EV = edge_score × (1 + market_disagreement_bonus)
+  return edgeScore * (1 + Math.max(0, edge) * 2);
+}
+
+// Pick the best spread leg, ML leg, and prop leg
+function buildParlay(games, props) {
+  const MIN_SCORE = 7;
+  const qualified = (games || []).filter(g => (g.edge?.score || 0) >= MIN_SCORE && g.edge?.lean);
+
+  if (!qualified.length) return null;
+
+  // ── Spread leg: highest EV game, take the spread ──
+  const spreadCandidates = qualified.map(g => {
+    const isHome = g.edge.lean === g.home?.team;
+    const ev = calcEV(g, isHome);
+    const ml = isHome ? g.ml_home : g.ml_away;
+    const spread = isHome ? g.spread_home : g.spread_away;
+    const spreadStr = spread != null ? `${g.edge.lean} ${parseFloat(spread) > 0 ? '+' : ''}${parseFloat(spread).toFixed(1)}` : g.edge.lean;
+    return { game: g, ev, ml, spread: spreadStr, isHome, type: 'spread', label: spreadStr, matchup: g.matchup };
+  }).sort((a, b) => b.ev - a.ev);
+
+  const spreadLeg = spreadCandidates[0] || null;
+
+  // ── ML leg: best value moneyline — prefer underdog our model likes ──
+  const mlCandidates = qualified
+    .filter(g => g !== spreadLeg?.game) // different game from spread leg if possible
+    .map(g => {
+      const isHome = g.edge.lean === g.home?.team;
+      const ml = isHome ? g.ml_home : g.ml_away;
+      if (!ml) return null;
+      const n = parseInt(ml);
+      if (isNaN(n)) return null;
+      const ev = calcEV(g, isHome);
+      // Bonus for underdogs we like (positive ML = underdog)
+      const underdogBonus = n > 0 ? n / 100 : 0;
+      return { game: g, ev: ev + underdogBonus * 3, ml, mlDisplay: n > 0 ? `+${n}` : `${n}`, isHome, type: 'ml', label: `${g.edge.lean} ML ${n > 0 ? '+' : ''}${n}`, matchup: g.matchup };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.ev - a.ev);
+
+  // Fall back to same game if only 1 qualifies
+  const mlLeg = mlCandidates[0] || (spreadLeg ? {
+    ...spreadLeg,
+    type: 'ml',
+    label: spreadLeg.ml ? `${spreadLeg.game.edge.lean} ML` : null,
+  } : null);
+
+  // ── Prop leg: highest scored prop ──
+  const propLeg = props?.length
+    ? { type: 'prop', prop: props[0], label: `${props[0].player} ${props[0].lean} ${props[0].line} ${props[0].stat}`, matchup: props[0].matchup }
+    : null;
+
+  // ── Calculate combined odds ──
+  const legs = [spreadLeg, mlLeg, propLeg].filter(Boolean);
+  if (legs.length < 2) return null;
+
+  // Spread/ML legs use their ML odds as proxy; prop legs assume ~-115 (standard)
+  const decimalOdds = legs.map(leg => {
+    if (leg.type === 'prop') return toDecimal(-115);
+    return toDecimal(leg.ml) || 1.87; // fallback ~-115
+  });
+
+  const combinedDecimal = decimalOdds.reduce((acc, d) => acc * d, 1);
+  const combinedAmerican = toAmerican(combinedDecimal);
+
+  return { legs, combinedDecimal, combinedAmerican, legCount: legs.length };
+}
 
 // Date-seeded RNG — same result for all visitors on a given day, resets tomorrow
 function getDailyTier(dateStr) {
@@ -79,6 +183,8 @@ export default function NBADashboard({ user, profile }) {
     return `${y}-${m}-${d}`;
   })();
   const { slate, loading, source } = useSlate('nba', today);
+  const { propsSlate } = usePropsSlate(today);
+  const topProps = [...(propsSlate?.props || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
 
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState({});
@@ -102,6 +208,7 @@ export default function NBADashboard({ user, profile }) {
  const sorted = [...(slate?.games || [])].sort((a, b) => sortBy === "score" ? Math.abs(b.edge?.score || 0) - Math.abs(a.edge?.score || 0) : 0);
 
   const sharpConf = sorted.filter(g => g.edge?.confidence === "SHARP");
+  const parlay = buildParlay(sorted, topProps);
   const { game: freeGame, tier: freeTier } = getFreeGame(sorted, today);
 
   useEffect(() => {
@@ -208,17 +315,59 @@ export default function NBADashboard({ user, profile }) {
       {user && (
         <>
           <BettingLog betLog={betLog} />
-          {sharpConf.length > 0 && (
-            <div style={{ background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.12)", borderRadius: 10, padding: "12px 16px", marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", marginBottom: 4, textTransform: "uppercase" }}>🔥 Sharp Edges Tonight</div>
-              {sharpConf.map((g, i) => (
-                <div key={i} style={{ fontSize: 13, color: "#fca5a5", marginBottom: 3 }}>
-                  {g.matchup} → <strong>{g.edge?.lean}</strong> (score: {g.edge?.score})
-                  {g.edge?.ou_lean && <span style={{ marginLeft: 8, color: "#a855f7" }}>· {g.edge?.ou_lean}</span>}
-                  {g.away?.b2b && <span style={{ marginLeft: 6, color: "#f59e0b" }}>· {g.away?.team} B2B</span>}
-                  {g.home?.b2b && <span style={{ marginLeft: 6, color: "#f59e0b" }}>· {g.home?.team} B2B</span>}
+          {parlay && (
+            <div style={{
+              background: "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.03))",
+              border: "1px solid rgba(239,68,68,0.3)",
+              borderRadius: 12, padding: "16px 18px", marginBottom: 16,
+              boxShadow: "0 0 24px rgba(239,68,68,0.07)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 18 }}>🔥</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                      OTJ'S PARLAY TONIGHT
+                    </div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 1 }}>
+                      {parlay.legCount}-leg mixed · EV-weighted · parlay at your own risk 😈
+                    </div>
+                  </div>
                 </div>
-              ))}
+                <div style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)" }}>
+                  <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", textAlign: "center" }}>Est. Odds</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: "#ef4444", textAlign: "center" }}>{parlay.combinedAmerican || "—"}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {parlay.legs.map((leg, i) => {
+                  const typeColor = leg.type === 'spread' ? "#f59e0b" : leg.type === 'ml' ? "#22c55e" : "#a855f7";
+                  const typeLabel = leg.type === 'spread' ? "SPREAD" : leg.type === 'ml' ? "ML" : "PROP";
+                  const typeEmoji = leg.type === 'spread' ? "📊" : leg.type === 'ml' ? "💰" : "🎯";
+                  const mlVal = leg.ml ? parseInt(leg.ml) : null;
+                  return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "10px 12px", border: "1px solid rgba(255,255,255,0.06)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: `${typeColor}18`, color: typeColor, fontWeight: 700, letterSpacing: "0.05em" }}>
+                          {typeEmoji} {typeLabel}
+                        </span>
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#f1f5f9" }}>{leg.label}</div>
+                          <div style={{ fontSize: 10, color: "#4a5568" }}>{leg.matchup}</div>
+                        </div>
+                      </div>
+                      {leg.type !== 'prop' && mlVal && (
+                        <div style={{ fontSize: 12, fontWeight: 700, color: mlVal > 0 ? "#22c55e" : "#6b7280" }}>
+                          {mlVal > 0 ? `+${mlVal}` : mlVal}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 10, fontSize: 10, color: "#4a5568", borderTop: "1px solid rgba(239,68,68,0.1)", paddingTop: 8 }}>
+                💡 EV-weighted picks · spread odds used as ML proxy for estimate · verify lines at your sportsbook
+              </div>
             </div>
           )}
           {(slate?.b2b_tiers || slate?.b2b_tags) && <B2BTierCard tiers={slate.b2b_tiers} tags={slate.b2b_tags} lesson={slate.b2b_lesson} />}

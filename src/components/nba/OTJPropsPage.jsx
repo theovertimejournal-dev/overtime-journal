@@ -103,7 +103,7 @@ const MOCK_PROPS = {
 };
 // ─── End mock data ────────────────────────────────────────────────────────────
 
-const TAG_COLORS  = { OVER: '#22c55e', UNDER: '#ef4444', NEUTRAL: '#6b7280', CAUTION: '#f59e0b' };
+const TAG_COLORS  = { OVER: '#22c55e', UNDER: '#ef4444', NEUTRAL: '#6b7280', CAUTION: '#f59e0b', WARN: '#f59e0b' };
 const CONF_COLORS = { HIGH: '#ef4444', MODERATE: '#f59e0b', LOW: '#6b7280' };
 const CONF_LABELS = { HIGH: '🔥 HIGH', MODERATE: '⚡ MOD', LOW: 'ℹ INFO' };
 
@@ -216,7 +216,9 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
               ['Line',    prop.line,        '#e2e8f0', ''],
               ['Season',  prop.season_avg,  diffSzn > 0.5 ? '#22c55e' : diffSzn < -0.5 ? '#ef4444' : '#e2e8f0', `${diffSzn > 0 ? '+' : ''}${diffSzn.toFixed(1)}`],
               ['Last 10', prop.last10_avg,  '#e2e8f0', ''],
-              ['Last 5',  prop.last5_avg,   diff5 > 1 ? '#22c55e' : diff5 < -1 ? '#ef4444' : '#e2e8f0', `${diff5 > 0 ? '+' : ''}${diff5.toFixed(1)}`],
+              ['Last 5',  prop.last5_avg != null ? prop.last5_avg : '—',
+                prop.last5_avg != null ? (diff5 > 1 ? '#22c55e' : diff5 < -1 ? '#ef4444' : '#e2e8f0') : '#4a5568',
+                prop.last5_avg != null ? `${diff5 > 0 ? '+' : ''}${diff5.toFixed(1)}` : ''],
             ].map(([label, val, color, delta], i) => (
               <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, padding: '8px 10px' }}>
                 <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase' }}>{label}</div>
@@ -225,6 +227,28 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
               </div>
             ))}
           </div>
+
+          {/* Odds row */}
+          {(prop.over_odds || prop.under_odds) && (
+            <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+              {prop.over_odds && (
+                <div style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', color: '#22c55e' }}>
+                  OVER {prop.over_odds > 0 ? `+${prop.over_odds}` : prop.over_odds}
+                  <span style={{ color: '#4a5568', marginLeft: 4 }}>
+                    ({Math.round(100 / (1 + 100 / Math.abs(prop.over_odds)))}% implied)
+                  </span>
+                </div>
+              )}
+              {prop.under_odds && (
+                <div style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444' }}>
+                  UNDER {prop.under_odds > 0 ? `+${prop.under_odds}` : prop.under_odds}
+                  <span style={{ color: '#4a5568', marginLeft: 4 }}>
+                    ({Math.round(100 / (1 + 100 / Math.abs(prop.under_odds)))}% implied)
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ marginTop: 8, fontSize: 11, color: '#6b7280' }}>
             Avg Min: {prop.minutes_avg} · Opp {prop.pos} DEF: #{prop.opp_pos_rank} · Score: {prop.score}/100
@@ -238,7 +262,7 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick, betLog, onL
                   background: `${TAG_COLORS[sig.tag] || '#6b7280'}15`,
                   color: TAG_COLORS[sig.tag] || '#6b7280', fontWeight: 600,
                 }}>{sig.tag}</span>
-                <span style={{ fontSize: 12, color: '#94a3b8' }}>{sig.text}</span>
+                <span style={{ fontSize: 12, color: sig.tag === 'WARN' ? '#f59e0b' : '#94a3b8' }}>{sig.text}</span>
               </div>
             ))}
           </div>

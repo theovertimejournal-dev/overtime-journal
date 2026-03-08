@@ -48,26 +48,23 @@ function calcEV(game, isHome) {
 
 // Pick the best spread leg, ML leg, and prop leg
 function buildParlay(games, props) {
-  const MIN_SCORE = 7;
-  const qualified = (games || []).filter(g => (g.edge?.score || 0) >= MIN_SCORE && g.edge?.lean);
+  const allGames = (games || []).filter(g => g.edge?.lean);
+  if (!allGames.length) return null;
 
-  if (!qualified.length) return null;
-
-  // ── Spread leg: highest EV game, take the spread ──
-  const spreadCandidates = qualified.map(g => {
+  // ── Spread leg: highest EV across all games ──
+  const spreadCandidates = allGames.map(g => {
     const isHome = g.edge.lean === g.home?.team;
     const ev = calcEV(g, isHome);
     const ml = isHome ? g.ml_home : g.ml_away;
     const spread = isHome ? g.spread_home : g.spread_away;
     const spreadStr = spread != null ? `${g.edge.lean} ${parseFloat(spread) > 0 ? '+' : ''}${parseFloat(spread).toFixed(1)}` : g.edge.lean;
-    return { game: g, ev, ml, spread: spreadStr, isHome, type: 'spread', label: spreadStr, matchup: g.matchup };
+    return { game: g, ev, ml, isHome, type: 'spread', label: spreadStr, matchup: g.matchup, score: g.edge?.score || 0 };
   }).sort((a, b) => b.ev - a.ev);
-
   const spreadLeg = spreadCandidates[0] || null;
 
-  // ── ML leg: best value moneyline — prefer underdog our model likes ──
-  const mlCandidates = qualified
-    .filter(g => g !== spreadLeg?.game) // different game from spread leg if possible
+  // ── ML leg: best value, prefer underdogs, different game if possible ──
+  const mlCandidates = allGames
+    .filter(g => g !== spreadLeg?.game)
     .map(g => {
       const isHome = g.edge.lean === g.home?.team;
       const ml = isHome ? g.ml_home : g.ml_away;
@@ -75,39 +72,38 @@ function buildParlay(games, props) {
       const n = parseInt(ml);
       if (isNaN(n)) return null;
       const ev = calcEV(g, isHome);
-      // Bonus for underdogs we like (positive ML = underdog)
       const underdogBonus = n > 0 ? n / 100 : 0;
-      return { game: g, ev: ev + underdogBonus * 3, ml, mlDisplay: n > 0 ? `+${n}` : `${n}`, isHome, type: 'ml', label: `${g.edge.lean} ML ${n > 0 ? '+' : ''}${n}`, matchup: g.matchup };
+      return { game: g, ev: ev + underdogBonus * 3, ml, isHome, type: 'ml', label: `${g.edge.lean} ML ${n > 0 ? `+${n}` : n}`, matchup: g.matchup, score: g.edge?.score || 0 };
     })
     .filter(Boolean)
     .sort((a, b) => b.ev - a.ev);
-
-  // Fall back to same game if only 1 qualifies
-  const mlLeg = mlCandidates[0] || (spreadLeg ? {
-    ...spreadLeg,
-    type: 'ml',
-    label: spreadLeg.ml ? `${spreadLeg.game.edge.lean} ML` : null,
-  } : null);
+  const mlLeg = mlCandidates[0] || (spreadLeg ? { ...spreadLeg, type: 'ml', label: spreadLeg.ml ? `${spreadLeg.game.edge.lean} ML` : spreadLeg.label } : null);
 
   // ── Prop leg: highest scored prop ──
   const propLeg = props?.length
-    ? { type: 'prop', prop: props[0], label: `${props[0].player} ${props[0].lean} ${props[0].line} ${props[0].stat}`, matchup: props[0].matchup }
+    ? { type: 'prop', label: `${props[0].player} ${props[0].lean} ${props[0].line} ${props[0].stat}`, matchup: props[0].matchup, score: props[0].score || 0 }
     : null;
 
-  // ── Calculate combined odds ──
   const legs = [spreadLeg, mlLeg, propLeg].filter(Boolean);
-  if (legs.length < 2) return null;
+  if (!legs.length) return null;
 
-  // Spread/ML legs use their ML odds as proxy; prop legs assume ~-115 (standard)
-  const decimalOdds = legs.map(leg => {
-    if (leg.type === 'prop') return toDecimal(-115);
-    return toDecimal(leg.ml) || 1.87; // fallback ~-115
-  });
+  // ── Composite confidence: average score across all 3 legs ──
+  const avgScore = legs.reduce((sum, leg) => sum + (leg.score || 0), 0) / legs.length;
+  const tier = avgScore >= 14 ? 'HIGH' : avgScore >= 8 ? 'MODERATE' : 'LOW';
 
+  const TIER_CONFIG = {
+    HIGH:     { label: "OTJ'S PARLAY TONIGHT",  sub: "High confidence · EV-weighted · parlay at your own risk 😈",              color: "#ef4444", emoji: "🔥" },
+    MODERATE: { label: "WE LIKE THESE TONIGHT",  sub: "Moderate confidence · not our strongest slate · hedge accordingly",        color: "#f59e0b", emoji: "⚡" },
+    LOW:      { label: "SLIM PICKINGS TONIGHT",  sub: "Low confidence · but if we had to pick... · tread carefully 😬",           color: "#6b7280", emoji: "😬" },
+  };
+  const config = TIER_CONFIG[tier];
+
+  // ── Combined odds — prop assumed -115 ──
+  const decimalOdds = legs.map(leg => leg.type === 'prop' ? toDecimal(-115) : (toDecimal(leg.ml) || 1.87));
   const combinedDecimal = decimalOdds.reduce((acc, d) => acc * d, 1);
   const combinedAmerican = toAmerican(combinedDecimal);
 
-  return { legs, combinedDecimal, combinedAmerican, legCount: legs.length };
+  return { legs, combinedDecimal, combinedAmerican, legCount: legs.length, tier, config, avgScore: Math.round(avgScore) };
 }
 
 // Date-seeded RNG — same result for all visitors on a given day, resets tomorrow
@@ -317,26 +313,32 @@ export default function NBADashboard({ user, profile }) {
           <BettingLog betLog={betLog} />
           {parlay && (
             <div style={{
-              background: "linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.03))",
-              border: "1px solid rgba(239,68,68,0.3)",
+              background: `linear-gradient(135deg, ${parlay.config.color}12, ${parlay.config.color}05)`,
+              border: `1px solid ${parlay.config.color}40`,
               borderRadius: 12, padding: "16px 18px", marginBottom: 16,
-              boxShadow: "0 0 24px rgba(239,68,68,0.07)"
+              boxShadow: `0 0 24px ${parlay.config.color}10`
             }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 18 }}>🔥</span>
+                  <span style={{ fontSize: 18 }}>{parlay.config.emoji}</span>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: "#ef4444", letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                      OTJ'S PARLAY TONIGHT
+                    <div style={{ fontSize: 13, fontWeight: 800, color: parlay.config.color, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                      {parlay.config.label}
                     </div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 1 }}>
-                      {parlay.legCount}-leg mixed · EV-weighted · parlay at your own risk 😈
-                    </div>
+                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 1 }}>{parlay.config.sub}</div>
                   </div>
                 </div>
-                <div style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)" }}>
-                  <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", textAlign: "center" }}>Est. Odds</div>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: "#ef4444", textAlign: "center" }}>{parlay.combinedAmerican || "—"}</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  {/* Composite score badge */}
+                  <div style={{ padding: "4px 10px", borderRadius: 6, background: `${parlay.config.color}15`, border: `1px solid ${parlay.config.color}30`, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase" }}>Composite</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: parlay.config.color }}>{parlay.avgScore}</div>
+                  </div>
+                  {/* Combined odds badge */}
+                  <div style={{ padding: "4px 10px", borderRadius: 6, background: `${parlay.config.color}15`, border: `1px solid ${parlay.config.color}30`, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase" }}>Est. Odds</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: parlay.config.color }}>{parlay.combinedAmerican || "—"}</div>
+                  </div>
                 </div>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -356,17 +358,20 @@ export default function NBADashboard({ user, profile }) {
                           <div style={{ fontSize: 10, color: "#4a5568" }}>{leg.matchup}</div>
                         </div>
                       </div>
-                      {leg.type !== 'prop' && mlVal && (
-                        <div style={{ fontSize: 12, fontWeight: 700, color: mlVal > 0 ? "#22c55e" : "#6b7280" }}>
-                          {mlVal > 0 ? `+${mlVal}` : mlVal}
-                        </div>
-                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {leg.score > 0 && <div style={{ fontSize: 10, color: "#4a5568" }}>score: {leg.score}</div>}
+                        {leg.type !== 'prop' && mlVal && (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: mlVal > 0 ? "#22c55e" : "#6b7280" }}>
+                            {mlVal > 0 ? `+${mlVal}` : mlVal}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 10, fontSize: 10, color: "#4a5568", borderTop: "1px solid rgba(239,68,68,0.1)", paddingTop: 8 }}>
-                💡 EV-weighted picks · spread odds used as ML proxy for estimate · verify lines at your sportsbook
+              <div style={{ marginTop: 10, fontSize: 10, color: "#4a5568", borderTop: `1px solid ${parlay.config.color}18`, paddingTop: 8 }}>
+                💡 Composite score avg across all legs · verify lines at your sportsbook · this is not financial advice
               </div>
             </div>
           )}

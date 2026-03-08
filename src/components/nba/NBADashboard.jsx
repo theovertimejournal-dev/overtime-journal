@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSlate } from '../../hooks/useSlate';
+import DateNav from '../common/DateNav';
 import { usePropsSlate } from '../../hooks/usePropsSlate';
 import { Pill } from '../common/Pill';
 import { NBAGameCard } from './NBAGameCard';
@@ -178,8 +179,9 @@ export default function NBADashboard({ user, profile }) {
     const d = String(now.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   })();
-  const { slate, loading, source } = useSlate('nba', today);
-  const { propsSlate } = usePropsSlate(today);
+  const [selectedDate, setSelectedDate] = useState(today);
+  const { slate, loading, source } = useSlate('nba', selectedDate);
+  const { propsSlate } = usePropsSlate(selectedDate);
   const topProps = [...(propsSlate?.props || [])].sort((a, b) => (b.score || 0) - (a.score || 0));
 
   const [showModal, setShowModal] = useState(false);
@@ -285,7 +287,7 @@ export default function NBADashboard({ user, profile }) {
         </div>
         <p style={{ fontSize: 11, color: "#4a5568", margin: "0 0 12px" }}>Bench Net Rating · B2B Fatigue · Close Games · 3PT Variance · Injuries · Bet Tracking</p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <Pill text={`📅 ${slate?.date || today}`} color="#6b7280" />
+          <Pill text={`📅 ${slate?.date || selectedDate}`} color="#6b7280" />
           <Pill text={`${slate?.games_count ?? "—"} games tonight`} color="#6b7280" />
           {!user && <Pill text={`Today: ${freeTier} free · ${(slate?.games_count || 1) - 1} locked 🔒`} color={freeTier === "SHARP" ? "#ef4444" : freeTier === "LEAN" ? "#f59e0b" : "#6b7280"} />}
           <Pill text={`🔥 ${slate?.cumulative_record || "—"} ${slate?.cumulative_note || ""}`} color="#22c55e" />
@@ -298,6 +300,9 @@ export default function NBADashboard({ user, profile }) {
           )}
         </div>
       </div>
+
+      {/* Date navigation */}
+      <DateNav selectedDate={selectedDate} onDateChange={setSelectedDate} />
 
       {slate?.headline && (
         <div style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 10, padding: "14px 18px", marginBottom: 14 }}>

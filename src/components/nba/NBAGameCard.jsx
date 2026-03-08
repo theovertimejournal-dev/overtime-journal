@@ -275,34 +275,66 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
 
           {/* Plain English Value Box */}
           {edge.lean && (() => {
-            const leanMl = edge.lean === away.team ? game.ml_away : game.ml_home;
-            const otherMl = edge.lean === away.team ? game.ml_home : game.ml_away;
-            if (!leanMl) return null;
-            const n = parseInt(leanMl);
-            const vegasImplied = n > 0
-              ? Math.round(100 / (n + 100) * 100)
-              : Math.round(Math.abs(n) / (Math.abs(n) + 100) * 100);
-            // OTJ model implied: edge score maps to probability
-            // score of 14+ = ~60%, 8-13 = ~52%, below = ~48%
+            // Always use OPENING odds for value calculation — live odds are mid-game noise
+            const openLeanMl = edge.lean === away.team ? (game.opening_ml_away || game.ml_away) : (game.opening_ml_home || game.ml_home);
+            const liveLeanMl = edge.lean === away.team ? game.ml_away : game.ml_home;
+            if (!openLeanMl) return null;
+
+            const openN = parseInt(openLeanMl);
+            const liveN = liveLeanMl ? parseInt(liveLeanMl) : null;
+
+            // Don't show on heavy favorites — model can't reliably challenge -280+
+            if (Math.abs(openN) > 280 && openN < 0) return null;
+
             const absScore = Math.abs(edge.score || 0);
-            const otjImplied = absScore >= 14 ? 60 : absScore >= 8 ? 54 : 50;
+            // Require meaningful edge score
+            if (absScore < 8) return null;
+
+            const vegasImplied = openN > 0
+              ? Math.round(100 / (openN + 100) * 100)
+              : Math.round(Math.abs(openN) / (Math.abs(openN) + 100) * 100);
+
+            const otjImplied = absScore >= 14 ? 62 : absScore >= 10 ? 56 : 52;
             const edgeGap = otjImplied - vegasImplied;
-            const isUnderdog = n > 0;
-            if (Math.abs(edgeGap) < 3) return null; // not enough gap to show
+            const isUnderdog = openN > 0;
+
+            // Only show green box when OTJ confirms the lean with 5%+ gap
+            if (edgeGap < 5) return null;
+
             const tenTimes = Math.round(otjImplied / 10);
             const vegasTimes = Math.round(vegasImplied / 10);
+
+            // Detect significant live line movement (2x or more)
+            const liveImplied = liveN ? (liveN > 0
+              ? Math.round(100 / (liveN + 100) * 100)
+              : Math.round(Math.abs(liveN) / (Math.abs(liveN) + 100) * 100)) : null;
+            const bigMovement = liveImplied && Math.abs(liveImplied - vegasImplied) >= 15;
+            const liveTimestamp = game.odds_updated_at
+              ? new Date(game.odds_updated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+              : null;
+
             return (
               <div style={{ marginTop: 10, padding: "12px 14px", background: "rgba(34,197,94,0.04)", border: "1px solid rgba(34,197,94,0.12)", borderRadius: 8, borderLeft: "3px solid #22c55e" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#22c55e", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                  🎯 Value Spot — {edge.lean} {n > 0 ? `+${n}` : n}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#22c55e", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    🎯 Value Spot — {edge.lean} {openN > 0 ? `+${openN}` : openN}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#4a5568" }}>at tip-off</div>
                 </div>
                 <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>
-                  Vegas prices <strong style={{ color: "#f1f5f9" }}>{edge.lean}</strong> at a <strong style={{ color: "#f1f5f9" }}>{vegasImplied}% chance</strong> to win.
+                  Vegas priced <strong style={{ color: "#f1f5f9" }}>{edge.lean}</strong> at a <strong style={{ color: "#f1f5f9" }}>{vegasImplied}% chance</strong> to win.
                   Our model says <strong style={{ color: "#22c55e" }}>{otjImplied}%</strong> — a <strong style={{ color: "#22c55e" }}>+{edgeGap}% edge</strong>.
                 </div>
                 <div style={{ fontSize: 11, color: "#4a5568", marginTop: 6, lineHeight: 1.6, fontStyle: "italic" }}>
-                  What that means: if this game played out 10 times, Vegas is paying you like {edge.lean} wins {vegasTimes} times — we think they win {tenTimes} times. {isUnderdog ? "You're getting underdog odds on a team we think wins more than Vegas says." : "The favorite is even stronger than the price suggests."}
+                  What that means: if this game played out 10 times, Vegas was paying you like {edge.lean} wins {vegasTimes} times — we think they win {tenTimes} times. {isUnderdog ? "You're getting underdog odds on a team we think wins more than Vegas says." : "The favorite is even stronger than the price suggests."}
                 </div>
+                {bigMovement && liveN && (
+                  <div style={{ marginTop: 8, padding: "6px 10px", background: "rgba(251,191,36,0.06)", borderRadius: 6, border: "1px solid rgba(251,191,36,0.15)" }}>
+                    <span style={{ fontSize: 11, color: "#fbbf24" }}>
+                      ⚠️ Line has moved — {edge.lean} now {liveN > 0 ? `+${liveN}` : liveN} ({liveImplied}% implied){liveTimestamp ? ` as of ${liveTimestamp}` : ""}
+                    </span>
+                  </div>
+                )}
               </div>
             );
           })()}

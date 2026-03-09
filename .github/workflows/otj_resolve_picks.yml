@@ -38,10 +38,13 @@ jobs:
           TANK01_API_KEY:       ${{ secrets.TANK01_API_KEY }}
         run: |
           cd python
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          YESTERDAY=$(TZ="America/New_York" date -d "yesterday" +%Y-%m-%d)
+          echo "ET date: $ET_DATE | Grading: $YESTERDAY"
           if [ -n "${{ github.event.inputs.date }}" ]; then
-            python resolve_picks.py --date=${{ github.event.inputs.date }}
+            python -u resolve_picks.py --date=${{ github.event.inputs.date }}
           else
-            python resolve_picks.py
+            python -u resolve_picks.py --date=$YESTERDAY
           fi
 
       - name: Notify on failure

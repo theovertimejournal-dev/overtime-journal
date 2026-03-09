@@ -37,7 +37,10 @@ jobs:
         run: |
           cd python
           echo "--- Running live_scores.py ---"
-          python -u live_scores.py
+          # Use ET date (UTC-5) not UTC date
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          echo "ET date: $ET_DATE"
+          python -u live_scores.py --date=$ET_DATE
           echo "--- Done ---"
 
       - name: Notify on failure

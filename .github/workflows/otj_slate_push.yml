@@ -40,10 +40,12 @@ jobs:
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           cd python
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          echo "ET date: $ET_DATE"
           if [ -n "${{ github.event.inputs.date }}" ]; then
-            python push_to_supabase.py --date=${{ github.event.inputs.date }}
+            python -u push_to_supabase.py --date=${{ github.event.inputs.date }}
           else
-            python push_to_supabase.py
+            python -u push_to_supabase.py --date=$ET_DATE
           fi
 
       - name: Notify on failure

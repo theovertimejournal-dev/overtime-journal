@@ -12,7 +12,7 @@ import { supabase } from './lib/supabase';
 import OTJPropsPage from './components/nba/OTJPropsPage';
 import ArcadePage from './pages/ArcadePage';
 import LandingPage from './pages/LandingPage';
-
+import About from './pages/About';
 // ─── Protected route — redirects to / if not logged in ───────────────────────
 function ProtectedRoute({ user, authChecked, children }) {
   if (!authChecked) return null;
@@ -260,6 +260,7 @@ export default function App() {
           } />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/about" element={<About />} />
           <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowModal(true)} />} />
         </Routes>
       </div>

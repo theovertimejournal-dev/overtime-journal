@@ -126,7 +126,6 @@ export default function App() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      clearTimeout(timeout);
       const u = session?.user ?? null;
 
       // FIX 2: TOKEN_REFRESHED with no session means the refresh silently failed

@@ -11,6 +11,7 @@ import Record from './pages/Record';
 import { supabase } from './lib/supabase';
 import OTJPropsPage from './components/nba/OTJPropsPage';
 import ArcadePage from './pages/ArcadePage';
+import LandingPage from './pages/LandingPage';
 
 // ─── Protected route — redirects to / if not logged in ───────────────────────
 function ProtectedRoute({ user, authChecked, children }) {
@@ -67,6 +68,7 @@ function SportTabs({ user, profile }) {
         fontFamily: "'JetBrains Mono','SF Mono',monospace",
       }}>
         <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginRight: 8, letterSpacing: "-0.02em", flexShrink: 0 }}>OTJ</span>
+        <NavLink to="/" end style={({ isActive }) => tabStyle(isActive)}>🏠<span className="nav-tab-label"> Home</span></NavLink>
         <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀<span className="nav-tab-label"> NBA</span></NavLink>
         <NavLink to="/props" style={({ isActive }) => tabStyle(isActive)}>🎯<span className="nav-tab-label"> Props</span></NavLink>
         <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒<span className="nav-tab-label"> NHL</span></NavLink>
@@ -104,24 +106,22 @@ export default function App() {
   const [profile, setProfile]           = useState(null);
   const [showWelcome, setShowWelcome]   = useState(false);
   const [showUsername, setShowUsername] = useState(false);
-  const [authChecked, setAuthChecked]   = useState(false);
-  const [authTimeout, setAuthTimeout]   = useState(false);
-  const [profileLoading, setProfileLoading] = useState(true);
+  const [authChecked,      setAuthChecked]      = useState(false);
+  const [sessionValidated, setSessionValidated] = useState(false); // true only after server confirms token
+  const [profileLoading,   setProfileLoading]   = useState(true);
 
   useEffect(() => {
-    const timeout = setTimeout(() => setAuthTimeout(true), 5000);
     let fetchingProfile = false;
 
-    // FIX 1: Validate + refresh the session on every app load.
-    // Chrome caches the JWT to disk and serves it before Supabase can check
-    // if it's still valid. refreshSession() forces a server-side validation.
-    // If the refresh token is expired, Supabase clears the session automatically
-    // and fires SIGNED_OUT — no manual cleanup needed.
+    // Force server-side token validation on every load.
+    // If no session exists, mark immediately so we don't hang.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         await supabase.auth.refreshSession();
-        // onAuthStateChange will fire with the refreshed session or SIGNED_OUT,
-        // so no need to setUser here — let the listener handle it.
+        // onAuthStateChange fires with refreshed session or SIGNED_OUT
+      } else {
+        setSessionValidated(true);
+        setAuthChecked(true);
       }
     });
 
@@ -138,15 +138,13 @@ export default function App() {
         setProfileLoading(false);
         setShowWelcome(true);
         setAuthChecked(true);
-        // Don't hard redirect — let React Router handle it via ProtectedRoute
-        // so the user lands back on the page they were on after re-login
+        setSessionValidated(true);
         return;
       }
 
-      // TOKEN_REFRESHED with a valid session — session is already synced,
-      // no need to re-fetch the profile.
       if (event === 'TOKEN_REFRESHED' && session) {
         setAuthChecked(true);
+        setSessionValidated(true);
         return;
       }
 
@@ -158,6 +156,7 @@ export default function App() {
         setProfile(null);
         setProfileLoading(false);
         setShowUsername(false);
+        setSessionValidated(true);
         if (event === 'INITIAL_SESSION' || event === 'SIGNED_OUT') {
           setShowWelcome(true);
         }
@@ -203,12 +202,12 @@ export default function App() {
         console.warn('[Auth] Profile fetch exception, skipping modal:', e.message);
       } finally {
         setProfileLoading(false);
+        setSessionValidated(true);
         fetchingProfile = false;
       }
     });
 
     return () => {
-      clearTimeout(timeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -218,7 +217,20 @@ export default function App() {
     setShowUsername(false);
   }
 
-  if (!authChecked && !authTimeout) return null;
+  // Don't render anything until session is confirmed — prevents ghost user render
+  if (!sessionValidated) return (
+    <div style={{
+      minHeight: "100vh", background: "#08080f",
+      display: "flex", alignItems: "center", justifyContent: "center",
+    }}>
+      <div style={{
+        fontFamily: "'JetBrains Mono','SF Mono',monospace",
+        fontSize: 11, color: "#1e293b", letterSpacing: "0.15em",
+      }}>
+        LOADING...
+      </div>
+    </div>
+  );
 
   return (
     <BrowserRouter>
@@ -233,8 +245,8 @@ export default function App() {
       <div style={{ minHeight: "100vh", background: "#08080f", color: "#e2e8f0", fontFamily: "'JetBrains Mono','SF Mono',monospace" }}>
         <SportTabs user={user} profile={profile} />
         <Routes>
-          <Route path="/" element={<Navigate to="/nba" replace />} />
-          <Route path="/nba" element={<NBADashboard user={user} profile={profile} />} />
+          <Route path="/" element={<LandingPage user={user} profile={profile} sessionValidated={sessionValidated} />} />
+          <Route path="/nba" element={<NBADashboard user={user} profile={profile} sessionValidated={sessionValidated} />} />
           <Route path="/nhl" element={<ComingSoon sport="NHL" emoji="🏒" phase="Phase 2 — March" />} />
           <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
           <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />

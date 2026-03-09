@@ -700,18 +700,60 @@ export default function NBAJamArcade() {
 
   return (
     <div style={{
-      minHeight:"100vh", background:"#090909",
+      minHeight:"100vh",
+      background:"#0a0a0f",
+      backgroundImage:`
+        radial-gradient(ellipse at 50% 0%, rgba(139,92,246,0.15) 0%, transparent 60%),
+        radial-gradient(ellipse at 0% 100%, rgba(59,130,246,0.08) 0%, transparent 50%),
+        radial-gradient(ellipse at 100% 100%, rgba(239,68,68,0.08) 0%, transparent 50%),
+        repeating-linear-gradient(0deg, transparent, transparent 40px, rgba(255,255,255,0.015) 40px, rgba(255,255,255,0.015) 41px),
+        repeating-linear-gradient(90deg, transparent, transparent 40px, rgba(255,255,255,0.015) 40px, rgba(255,255,255,0.015) 41px)
+      `,
       display:"flex", flexDirection:"column", alignItems:"center",
       padding:"14px 8px 16px", fontFamily:PIXEL_FONT, overflowX:"hidden",
     }}>
+
+    {/* Arcade cabinet wrapper */}
+    <div style={{
+      width:"100%", maxWidth:920,
+      background:"linear-gradient(180deg, #1a0a2e 0%, #0d0d1a 40%, #0a0a0f 100%)",
+      borderRadius:24,
+      border:"3px solid #2d1b69",
+      boxShadow:`
+        0 0 0 1px #4c1d95,
+        0 0 30px rgba(139,92,246,0.3),
+        0 0 60px rgba(139,92,246,0.15),
+        inset 0 0 40px rgba(0,0,0,0.5)
+      `,
+      padding:"20px 20px 24px",
+      position:"relative",
+    }}>
+
+    {/* Cabinet top glow strip */}
+    <div style={{
+      position:"absolute", top:0, left:"10%", right:"10%", height:3,
+      background:"linear-gradient(90deg, transparent, #a855f7, #ec4899, #a855f7, transparent)",
+      borderRadius:"0 0 4px 4px",
+      boxShadow:"0 0 12px rgba(168,85,247,0.8)",
+    }}/>
+
+    {/* Side accent lights */}
+    <div style={{position:"absolute",top:"15%",left:8,width:4,height:"70%",background:"linear-gradient(180deg,transparent,#7c3aed,#4f46e5,transparent)",borderRadius:4,boxShadow:"0 0 8px rgba(124,58,237,0.6)"}}/>
+    <div style={{position:"absolute",top:"15%",right:8,width:4,height:"70%",background:"linear-gradient(180deg,transparent,#7c3aed,#4f46e5,transparent)",borderRadius:4,boxShadow:"0 0 8px rgba(124,58,237,0.6)"}}/>
+
       <div style={{marginBottom:8,textAlign:"center",width:"100%"}}>
         <div style={{marginBottom:3}}>
-          <a href="/nba" style={{fontSize:11,color:"#374151",textDecoration:"none"}}>← Back to OTJ</a>
+          <a href="/arcade" style={{fontSize:11,color:"#4c1d95",textDecoration:"none"}}>← Arcade</a>
         </div>
-        <h1 style={{fontSize:22,fontWeight:700,color:"#fbbf24",margin:0,letterSpacing:"0.06em",textTransform:"uppercase"}}>
+        <h1 style={{
+          fontSize:28, fontWeight:700, margin:0, letterSpacing:"0.12em", textTransform:"uppercase",
+          background:"linear-gradient(135deg, #fbbf24, #f59e0b, #fbbf24)",
+          WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent",
+          filter:"drop-shadow(0 0 8px rgba(251,191,36,0.5))",
+        }}>
           🕹 OTJ JAM
         </h1>
-        <p style={{fontSize:10,color:"#374151",margin:"2px 0 0"}}>
+        <p style={{fontSize:10,color:"#4c1d95",margin:"2px 0 0"}}>
           Field &gt;25 · 3PT &gt;50 · Half Court &gt;90 · 🔥ON FIRE +15 · Half court = 4pts
         </p>
       </div>
@@ -847,9 +889,32 @@ export default function NBAJamArcade() {
         </div>
       )}
 
-      <div style={{marginTop:8,fontSize:10,color:"#1f2937",textAlign:"center",lineHeight:2}}>
+      <div style={{marginTop:8,fontSize:10,color:"#4c1d95",textAlign:"center",lineHeight:2}}>
         ★ = active player &nbsp;·&nbsp; Pass to switch control &nbsp;·&nbsp; 3 buckets in a row = 🔥
       </div>
+
+      {/* Cabinet bottom coin slot */}
+      <div style={{
+        display:"flex", justifyContent:"center", alignItems:"center",
+        gap:16, marginTop:16, paddingTop:16,
+        borderTop:"1px solid #1e1040",
+      }}>
+        <div style={{
+          background:"#0d0d1a", border:"2px solid #2d1b69",
+          borderRadius:8, padding:"4px 20px",
+          fontSize:10, color:"#4c1d95", letterSpacing:"0.1em",
+          boxShadow:"inset 0 2px 4px rgba(0,0,0,0.5)",
+        }}>
+          ▌▌ INSERT COIN ▌▌
+        </div>
+        <div style={{
+          width:40, height:8, background:"#0d0d1a",
+          border:"2px solid #2d1b69", borderRadius:4,
+          boxShadow:"inset 0 1px 3px rgba(0,0,0,0.8)",
+        }}/>
+      </div>
+
+    </div> {/* end cabinet */}
     </div>
   );
 }

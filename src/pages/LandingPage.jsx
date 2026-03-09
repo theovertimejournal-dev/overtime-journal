@@ -315,7 +315,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
     const hour = new Date().getHours();
     const isGameTime = hour >= 18 || hour < 2;
     if (isGameTime) {
-      const interval = setInterval(fetchSlateData, 5 * 60 * 1000);
+      const interval = setInterval(fetchSlateData, 8 * 60 * 1000);
       return () => clearInterval(interval);
     }
   }, [fetchSlateData]);

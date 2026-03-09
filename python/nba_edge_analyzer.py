@@ -341,6 +341,8 @@ def check_b2b(team_id: int, game_date: str, team_abbrev: str = "", espn_yesterda
     last5_parts = []
     close_wins = 0
     close_losses = 0
+    last10_pts_allowed = []  # for def_rating_last10
+    last10_pts_scored  = []  # for off_rating_last10
 
     for g in games[:10]:  # scan last 10 for close game sample size
         home_id = g.get("home_team", {}).get("id")
@@ -360,6 +362,13 @@ def check_b2b(team_id: int, game_date: str, team_abbrev: str = "", espn_yesterda
         # Last 5 result tags
         if len(last5_parts) < 5:
             last5_parts.append("W" if won else "L")
+
+        # Track points allowed/scored for last10 defensive/offensive ratings
+        pts_allowed = visitor_score if is_home else home_score
+        pts_scored  = home_score if is_home else visitor_score
+        if len(last10_pts_allowed) < 10:
+            last10_pts_allowed.append(pts_allowed)
+            last10_pts_scored.append(pts_scored)
 
         # Close game tally — games within 5 points
         if margin <= 5:
@@ -394,6 +403,8 @@ def check_b2b(team_id: int, game_date: str, team_abbrev: str = "", espn_yesterda
         "close_wins": close_wins,
         "close_losses": close_losses,
         "close_pct": close_pct,
+        "def_rating_last10": round(sum(last10_pts_allowed) / len(last10_pts_allowed), 1) if last10_pts_allowed else None,
+        "off_rating_last10": round(sum(last10_pts_scored)  / len(last10_pts_scored),  1) if last10_pts_scored  else None,
     }
 
 
@@ -647,19 +658,52 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             "favors": away["team"], "strength": "STRONG", "impact": 8.0,
         })
 
-    # Close game record
+    # Close game record — only fire when sample is meaningful
     h_close = home.get("close_pct", 0.5)
     a_close = away.get("close_pct", 0.5)
+    h_close_total = home.get("close_wins", 0) + home.get("close_losses", 0)
+    a_close_total = away.get("close_wins", 0) + away.get("close_losses", 0)
+    min_sample = min(h_close_total, a_close_total)
     close_diff = h_close - a_close
-    if abs(close_diff) >= 0.15:
-        impact = min(abs(close_diff) * 20, 5.0)
+
+    # Require 8+ close games for both teams AND a meaningful gap
+    # Cap impact at 2.5 (was 5.0) — close game record is noisy, don't let it dominate
+    if min_sample >= 8 and abs(close_diff) >= 0.20:
+        sample_confidence = min(min_sample / 15, 1.0)  # maxes out at 15 games
+        impact = min(abs(close_diff) * 12 * sample_confidence, 2.5)
         score += impact if close_diff > 0 else -impact
+        favor_team = home if close_diff > 0 else away
+        favor_w = favor_team.get("close_wins", 0)
+        favor_l = favor_team.get("close_losses", 0)
         signals.append({
             "type": "CLOSE_GAMES",
-            "detail": f"{'Home' if close_diff > 0 else 'Away'} better in close games",
-            "favors": home["team"] if close_diff > 0 else away["team"],
+            "detail": f"{favor_team['team']} better in close games "
+                      f"({favor_w}-{favor_l} in games decided ≤5pts)",
+            "favors": favor_team["team"],
             "strength": "MODERATE", "impact": round(impact, 1),
         })
+
+    # Defensive trend signal — last 10 def rating vs season def rating
+    # Fires when a team's recent defense is significantly worse than their season number
+    # Higher def_rating = worse defense (more points allowed)
+    for team_data, opp_data in [(home, away), (away, home)]:
+        season_def = team_data.get("def_rating")
+        last10_def = team_data.get("def_rating_last10")
+        if season_def and last10_def:
+            trending_worse = last10_def - season_def
+            if trending_worse >= 4.0:  # giving up 4+ more pts/g recently than season avg
+                impact = min(trending_worse * 0.4, 3.0)
+                is_home_team = team_data["team"] == home["team"]
+                score += impact if not is_home_team else -impact  # benefits opponent
+                signals.append({
+                    "type": "DEF_TRENDING_WORSE",
+                    "detail": f"{team_data['team']} defense trending worse — "
+                              f"allowing {last10_def} pts/g last 10 vs {season_def} season avg "
+                              f"(+{trending_worse:.1f} pts allowed)",
+                    "favors": opp_data["team"],
+                    "strength": "MODERATE" if trending_worse >= 6 else "MILD",
+                    "impact": round(impact, 1),
+                })
 
     # 3PT variance
     for team_data, label in [(home, "Home"), (away, "Away")]:

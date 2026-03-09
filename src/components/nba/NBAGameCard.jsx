@@ -228,6 +228,22 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
             )}
           </div>}
           {edge.ou_lean && <div style={{ fontSize: 11, color: "#a855f7" }}>O/U Lean: <strong>{edge.ou_lean}</strong></div>}
+          {(away?.pace > 0 || home?.pace > 0) && (
+            <div style={{ fontSize: 11, color: "#6b7280" }}>
+              Pace: <span style={{ color: "#e2e8f0" }}>{away.team} {away.pace}</span>
+              <span style={{ color: "#4a5568" }}> vs </span>
+              <span style={{ color: "#e2e8f0" }}>{home.team} {home.pace}</span>
+              {away.pace && home.pace && (
+                <span style={{ color: "#a855f7", marginLeft: 6 }}>
+                  {Math.abs(away.pace - home.pace) >= 3
+                    ? (away.pace > home.pace
+                        ? `⚡ ${away.team} pushes pace`
+                        : `⚡ ${home.team} pushes pace`)
+                    : "· similar pace"}
+                </span>
+              )}
+            </div>
+          )}
           {win_prob && (
             <div style={{ fontSize: 11, color: "#6b7280" }}>
               Win Prob: <span style={{ color: "#e2e8f0" }}>{away.team} {win_prob.away}% / {home.team} {win_prob.home}%</span>

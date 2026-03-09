@@ -1,0 +1,12 @@
+# railway.toml — tells Railway how to build and run the server
+[build]
+builder = "nixpacks"
+buildCommand = "cd server && npm install"
+
+[deploy]
+startCommand = "cd server && npm start"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[[services]]
+name = "otj-colyseus"

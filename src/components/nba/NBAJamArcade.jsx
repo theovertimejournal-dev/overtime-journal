@@ -1,10 +1,26 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import Colyseus from "colyseus.js";
+
+// ─── Multiplayer config ───────────────────────────────────────────────────────
+const COLYSEUS_URL = "wss://overtime-journal-production.up.railway.app";
+
+// ─── Skins — add new entries here, no game logic changes needed ───────────────
+const SKINS = {
+  default: { label: "Classic",   playerColor: "#ef4444", ballTrail: null,      popups: null },
+  fire:    { label: "🔥 Fire",   playerColor: "#f97316", ballTrail: "#f97316", popups: { score2: ["INFERNO!!", "SCORCHED!! 🔥"], score3: ["FIRE FROM DEEP!! 🔥"] } },
+  ice:     { label: "❄️ Ice",    playerColor: "#60a5fa", ballTrail: "#bfdbfe", popups: { score2: ["ICE COLD!!", "FROZEN!!"],       score3: ["ABSOLUTE ZERO!!"] } },
+  gold:    { label: "👑 Gold",   playerColor: "#fbbf24", ballTrail: "#fde68a", popups: { score2: ["MONEY!!", "GOLDEN!!"],           score3: ["PURE GOLD!!"] } },
+};
 
 // Detect touch/mobile device
-const isMobile = () => (
-  typeof window !== "undefined" &&
-  ("ontouchstart" in window || navigator.maxTouchPoints > 0 || window.matchMedia("(pointer: coarse)").matches)
-);
+// Windows desktops report maxTouchPoints > 0 even without touchscreen — require coarse pointer + small screen
+const isMobile = () => {
+  if (typeof window === "undefined") return false;
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
+  const smallScreen   = window.innerWidth <= 768;
+  const hasTouch      = "ontouchstart" in window;
+  return coarsePointer && (smallScreen || hasTouch);
+};
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 800, H = 480;
@@ -83,7 +99,79 @@ export default function NBAJamArcade() {
   const canvasRef = useRef(null);
   const stateRef = useRef(initState());
   const animRef  = useRef(null);
-  const [uiPhase, setUiPhase] = useState("menu");
+  const [uiPhase,    setUiPhase]    = useState("menu");
+  const [mpStatus,   setMpStatus]   = useState(null);   // null | "connecting" | "waiting" | "ready" | "playing"
+  const [mpSlot,     setMpSlot]     = useState(null);   // "p1" | "p2"
+  const [mpRoomId,   setMpRoomId]   = useState(null);
+  const [playerSkin, setPlayerSkin] = useState("default");
+  const roomRef = useRef(null);
+
+  // ── Multiplayer: connect to Colyseus and join/create a room ──────────────
+  const startMultiplayer = useCallback(async (username = "Player") => {
+    setMpStatus("connecting");
+    try {
+      const client = new Colyseus.Client(COLYSEUS_URL);
+      const room   = await client.joinOrCreate("nba_jam", {
+        gameType: "nba_jam",
+        username,
+        skin: playerSkin,
+      });
+      roomRef.current = room;
+      setMpRoomId(room.id);
+
+      room.onMessage("joined", (data) => {
+        setMpSlot(data.slot);
+        setMpStatus("waiting");
+      });
+
+      room.onMessage("both_connected", () => setMpStatus("ready"));
+
+      room.onMessage("game_start", () => {
+        setMpStatus("playing");
+        const s = initState(); s.phase = "playing";
+        stateRef.current = s; setUiPhase("playing");
+      });
+
+      room.onMessage("opponent_action", (data) => {
+        // Apply opponent inputs to CPU slot so both screens stay in sync
+        const s = stateRef.current;
+        if (data.keys) {
+          Object.assign(s.keys, data.keys);
+        }
+      });
+
+      room.onMessage("score_update", (data) => {
+        const s = stateRef.current;
+        if (data.scoredBy !== mpSlot) {
+          // Opponent scored — update our local score display
+          s.scores = s.scores || {};
+        }
+      });
+
+      room.onMessage("opponent_left", () => {
+        setMpStatus(null);
+        setUiPhase("menu");
+        if (roomRef.current) { roomRef.current.leave(); roomRef.current = null; }
+      });
+
+      room.onMessage("game_over", (data) => {
+        setMpStatus(null);
+      });
+
+    } catch (err) {
+      console.error("Multiplayer connection failed:", err);
+      setMpStatus(null);
+    }
+  }, [playerSkin]);
+
+  // Send local key state to opponent every frame (throttled to every 3 frames)
+  const mpFrameCount = useRef(0);
+  const syncToOpponent = useCallback((keys) => {
+    if (!roomRef.current || mpStatus !== "playing") return;
+    mpFrameCount.current++;
+    if (mpFrameCount.current % 3 !== 0) return;
+    roomRef.current.send("action", { keys });
+  }, [mpStatus]);
 
   const startGame = useCallback(() => {
     const s = initState(); s.phase = "playing";
@@ -650,14 +738,64 @@ export default function NBAJamArcade() {
                 <tr><td style={{color:"#f59e0b"}}>🔥 On fire</td><td>+15 bonus after 3 straight</td></tr>
               </tbody>
             </table>
+            {/* Skin selector */}
+            <div style={{display:"flex",gap:6,marginBottom:12,marginTop:4}}>
+              {Object.entries(SKINS).map(([key, skin]) => (
+                <button key={key} onClick={() => setPlayerSkin(key)} style={{
+                  fontSize:10, padding:"4px 8px", borderRadius:4, cursor:"pointer",
+                  background: playerSkin === key ? skin.playerColor : "#1a1a1a",
+                  border: `1px solid ${playerSkin === key ? skin.playerColor : "#374151"}`,
+                  color: playerSkin === key ? "#000" : "#6b7280",
+                  fontFamily:PIXEL_FONT, fontWeight:700,
+                }}>
+                  {skin.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Solo */}
             <button onClick={startGame} style={{
               fontSize:14,padding:"11px 32px",borderRadius:6,cursor:"pointer",
               background:"#fbbf24",border:"none",color:"#000",
               fontFamily:PIXEL_FONT,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",
-              marginTop:8,
+              marginTop:4,width:"100%",maxWidth:220,
             }}>
               INSERT COIN →
             </button>
+
+            {/* Multiplayer */}
+            {mpStatus === null && (
+              <button onClick={() => startMultiplayer("Player")} style={{
+                fontSize:13,padding:"10px 32px",borderRadius:6,cursor:"pointer",
+                background:"transparent",border:"2px solid #3b82f6",color:"#3b82f6",
+                fontFamily:PIXEL_FONT,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",
+                marginTop:8,width:"100%",maxWidth:220,
+              }}>
+                🌐 VS FRIEND
+              </button>
+            )}
+            {mpStatus === "connecting" && (
+              <div style={{color:"#6b7280",fontSize:11,marginTop:8}}>Connecting to server...</div>
+            )}
+            {mpStatus === "waiting" && (
+              <div style={{textAlign:"center",marginTop:8}}>
+                <div style={{color:"#fbbf24",fontSize:12,marginBottom:4}}>⏳ Waiting for opponent...</div>
+                <div style={{color:"#374151",fontSize:10}}>Room: {mpRoomId}</div>
+                <div style={{color:"#4a5568",fontSize:10}}>Share your link so a friend can join!</div>
+              </div>
+            )}
+            {mpStatus === "ready" && (
+              <div style={{textAlign:"center",marginTop:8}}>
+                <div style={{color:"#22c55e",fontSize:12,marginBottom:6}}>✅ Opponent connected!</div>
+                <button onClick={() => roomRef.current?.send("ready")} style={{
+                  fontSize:13,padding:"10px 28px",borderRadius:6,cursor:"pointer",
+                  background:"#22c55e",border:"none",color:"#000",
+                  fontFamily:PIXEL_FONT,fontWeight:700,textTransform:"uppercase",
+                }}>
+                  READY UP →
+                </button>
+              </div>
+            )}
           </div>
         )}
         <canvas

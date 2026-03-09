@@ -80,7 +80,7 @@ HEADERS = {
 # ── Step 1: Fetch scores from Tank01 ─────────────────────────────────────────
 def fetch_tank01_scores(date_str: str) -> list:
     """
-    Hit Tank01 getNBAScoresForDate.
+    Hit Tank01 getNBACurrentInfo.
     Returns list of game dicts with home/away teams, scores, status.
     """
     try:
@@ -92,10 +92,33 @@ def fetch_tank01_scores(date_str: str) -> list:
         )
         resp.raise_for_status()
         data = resp.json()
-        games = data.get("body", [])
-        if isinstance(games, dict):
-            games = list(games.values())
+
+        # Debug: print raw structure so we can see what Tank01 returns
+        print(f"  Raw keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+
+        body = data.get("body", data)
+
+        # body could be a list, a dict of games, or a dict with a games key
+        if isinstance(body, list):
+            games = body
+        elif isinstance(body, dict):
+            # Check for common nested keys
+            if "games" in body:
+                games = body["games"]
+                if isinstance(games, dict):
+                    games = list(games.values())
+            else:
+                # Each value in body might be a game dict
+                games = [v for v in body.values() if isinstance(v, dict)]
+        else:
+            games = []
+
+        # Filter out any non-dict items
+        games = [g for g in games if isinstance(g, dict)]
+
         print(f"✅ Tank01 returned {len(games)} games")
+        if games:
+            print(f"  Sample game keys: {list(games[0].keys())[:10]}")
         return games
     except Exception as e:
         print(f"⚠ Tank01 fetch failed: {e}")

@@ -37,8 +37,7 @@ SUPABASE_KEY  = os.environ.get("SUPABASE_SERVICE_KEY", "")
 TANK01_KEY    = os.environ.get("TANK01_API_KEY", "")
 
 TANK01_HOST   = "tank01-fantasy-stats.p.rapidapi.com"
-TANK01_SCORES = "https://tank01-fantasy-stats.p.rapidapi.com/getNBAScoresForDate"
-TANK01_GAMES  = "https://tank01-fantasy-stats.p.rapidapi.com/getNBAGamesForDate"
+TANK01_SCORES = "https://tank01-fantasy-stats.p.rapidapi.com/getNBACurrentInfo"
 
 if not SUPABASE_KEY:
     print("❌ SUPABASE_SERVICE_KEY not set.")
@@ -88,7 +87,7 @@ def fetch_tank01_scores(date_str: str) -> list:
         resp = requests.get(
             TANK01_SCORES,
             headers=HEADERS,
-            params={"gameDate": date_str, "topPerformers": "false"},
+            params={"date": date_str},
             timeout=15,
         )
         resp.raise_for_status()

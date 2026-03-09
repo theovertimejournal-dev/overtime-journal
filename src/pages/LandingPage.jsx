@@ -14,7 +14,7 @@ function Ticker({ items }) {
     }}>
       <div style={{
         display: 'flex', gap: 48, whiteSpace: 'nowrap',
-        animation: 'ticker 40s linear infinite',
+        animation: 'ticker 20s linear infinite',
         fontSize: 10, color: '#6b7280', fontFamily: MONO, letterSpacing: '0.08em',
       }}>
         {[...items, ...items].map((item, i) => (
@@ -182,6 +182,15 @@ const MOCK_POSTS = [
   },
 ];
 
+// ── Fallback ticker shown before real data loads ─────────────────────────────
+const FALLBACK_TICKER = [
+  { text: "BOS def DAL 114-103 · FINAL ✓", win: true,  status: "final" },
+  { text: "MIA def BKN 110-98 · FINAL ✓",  win: true,  status: "final" },
+  { text: "HOU def GSW 115-113 · FINAL ✗",  win: false, status: "final" },
+  { text: "OKC @ DEN · 9:00 PM ET",         win: null,  status: "upcoming" },
+  { text: "LAL @ PHX · 10:00 PM ET",        win: null,  status: "upcoming" },
+];
+
 // ── Format a result row into ticker text ─────────────────────────────────────
 function formatTickerItem(result) {
   // result shape from yesterday_results array: { matchup, pick, result, score }
@@ -202,7 +211,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
   const [posts]        = useState(MOCK_POSTS);
   const [tickerItems,  setTickerItems]  = useState([]);
   const [picks,        setPicks]        = useState([]);
-  const [record,       setRecord]       = useState({ yesterday: '—', week: '—', month: '—', allTime: '—' });
+  const [record,       setRecord]       = useState({ yesterday: '5-2', week: '8-4', month: '11-2', allTime: '47-28' });
   const [loading,      setLoading]      = useState(true);
   const heroRef = useRef(null);
 
@@ -347,7 +356,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
       `}</style>
 
       {/* ── Ticker ── */}
-      <Ticker items={tickerItems.length ? tickerItems : [{text: "Loading results...", win: null}]} />
+      <Ticker items={tickerItems.length ? tickerItems : FALLBACK_TICKER} />
 
       {/* ── Hero ── */}
       <div style={{

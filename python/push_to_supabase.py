@@ -150,6 +150,76 @@ if dry_run:
 # ── Step 3: Push to Supabase ──────────────────────────────────────────────────
 print(f"⏳ Pushing slate to Supabase...")
 
+# ── Parlay odds lock ──────────────────────────────────────────────────────────
+# If a parlay was already pushed today, freeze those leg odds.
+# Re-runs should never overwrite the opening parlay odds — same rule as game opening odds.
+def freeze_parlay_odds(new_parlay: dict | None, existing_parlay: dict | None) -> dict | None:
+    """
+    Merge new parlay structure with existing locked odds.
+    Preserves: pick, pick_type, score, matchup per leg (the stuff that was live at build time).
+    Updates:   label, top_signal, confidence (non-odds fields can refresh).
+    """
+    if not new_parlay:
+        return existing_parlay  # keep existing if new run produced nothing
+    if not existing_parlay:
+        return new_parlay  # first push — no lock needed yet
+
+    existing_legs = {leg["matchup"]: leg for leg in existing_parlay.get("legs", [])}
+    locked_legs = []
+
+    for leg in new_parlay.get("legs", []):
+        matchup = leg["matchup"]
+        if matchup in existing_legs:
+            existing_leg = existing_legs[matchup]
+            # Freeze the odds-sensitive fields from first push
+            locked_leg = {
+                **leg,  # start with new (gets label, signal updates)
+                "pick":      existing_leg.get("pick", leg["pick"]),       # LOCKED
+                "pick_type": existing_leg.get("pick_type", leg["pick_type"]),  # LOCKED
+                "score":     existing_leg.get("score", leg["score"]),     # LOCKED
+                "mismatch_gap": existing_leg.get("mismatch_gap", leg.get("mismatch_gap")),  # LOCKED
+                "odds_locked": True,
+                "odds_locked_at": existing_parlay.get("generated_at", ""),
+            }
+            locked_legs.append(locked_leg)
+        else:
+            # New leg not in existing parlay — use as-is (fresh)
+            locked_legs.append({**leg, "odds_locked": False})
+
+    return {
+        **new_parlay,
+        "legs": locked_legs,
+        "generated_at": existing_parlay.get("generated_at", new_parlay["generated_at"]),  # keep original time
+    }
+
+# Fetch existing slate to check for locked parlay
+existing_parlay = None
+try:
+    ex_slate_resp = supabase.table("slates") \
+        .select("id,games") \
+        .eq("sport", SPORT) \
+        .eq("date", game_date) \
+        .single() \
+        .execute()
+    if ex_slate_resp.data:
+        existing_games = ex_slate_resp.data.get("games") or {}
+        if isinstance(existing_games, dict):
+            existing_parlay = existing_games.get("otj_parlay")
+        print(f"  {'🔒 Existing parlay found — locking odds' if existing_parlay else '🆕 First push — no lock needed'}")
+except Exception:
+    pass  # No existing row — first insert
+
+# Apply parlay lock
+new_parlay = data.get("otj_parlay")
+locked_parlay = freeze_parlay_odds(new_parlay, existing_parlay)
+
+# Inject locked parlay back into slate data
+if "games" not in slate_data or not isinstance(slate_data.get("games"), dict):
+    # games is a list — parlay lives at top level of the JSON output
+    pass  # parlay is separate from games list, store it directly
+slate_data["otj_parlay"] = locked_parlay
+# ── End parlay odds lock ──────────────────────────────────────────────────────
+
 try:
     # Upsert — if a slate for this sport/date already exists, update it
     response = supabase.table("slates").upsert(
@@ -160,6 +230,9 @@ try:
     print(f"✅ Slate pushed successfully!")
     print(f"   Games: {slate_data['games_count']}")
     print(f"   Headline: {slate_data['headline']}")
+    if locked_parlay:
+        locked_count = sum(1 for l in locked_parlay.get("legs", []) if l.get("odds_locked"))
+        print(f"   Parlay: {locked_parlay['leg_count']} legs ({locked_count} odds locked)")
 
 except Exception as e:
     print(f"❌ Supabase error: {e}")
@@ -180,9 +253,26 @@ except Exception as e:
 if slate_id:
     print(f"  Using slate_id: {slate_id}")
     for game in games:
+        matchup_key = game.get("matchup", "")
+        now_iso = datetime.now().isoformat()
+
+        # Check if this game already exists with opening odds locked
+        existing = None
+        try:
+            ex_resp = supabase.table("games")                 .select("id,opening_spread,opening_ml_home,opening_ml_away,opening_total")                 .eq("slate_id", slate_id)                 .eq("matchup", matchup_key)                 .single()                 .execute()
+            existing = ex_resp.data
+        except Exception:
+            pass  # No existing row — first insert
+
+        # Lock opening odds on first insert only
+        opening_spread   = existing["opening_spread"]   if existing and existing.get("opening_spread")   else game.get("spread")
+        opening_ml_home  = existing["opening_ml_home"]  if existing and existing.get("opening_ml_home")  else game.get("ml_home")
+        opening_ml_away  = existing["opening_ml_away"]  if existing and existing.get("opening_ml_away")  else game.get("ml_away")
+        opening_total    = existing["opening_total"]     if existing and existing.get("opening_total")    else game.get("total")
+
         game_row = {
             "slate_id": slate_id,
-            "matchup": game.get("matchup", ""),
+            "matchup": matchup_key,
             "game_time": game.get("game_time", ""),
             "sport": SPORT,
             "date": game_date,
@@ -191,6 +281,12 @@ if slate_id:
             "away_data": game.get("away", {}),
             "home_data": game.get("home", {}),
             "edge_data": game.get("edge", {}),
+            # Opening odds — locked on first insert, never overwritten
+            "opening_spread":  opening_spread,
+            "opening_ml_home": opening_ml_home,
+            "opening_ml_away": opening_ml_away,
+            "opening_total":   opening_total,
+            # Live odds — always update
             "spread": game.get("spread", None),
             "spread_home": game.get("spread_home", None),
             "spread_away": game.get("spread_away", None),
@@ -200,6 +296,7 @@ if slate_id:
             "ml_home": game.get("ml_home", None),
             "ml_away": game.get("ml_away", None),
             "odds_vendor": game.get("odds_vendor", None),
+            "odds_updated_at": now_iso,
             "lean": game.get("edge", {}).get("lean", None),
             "confidence": game.get("edge", {}).get("confidence", None),
             "edge_score": game.get("edge", {}).get("score", None),
@@ -216,9 +313,9 @@ if slate_id:
                 game_row,
                 on_conflict="slate_id,matchup"
             ).execute()
-            print(f"  ✅ {game.get('matchup')}")
+            print(f"  ✅ {matchup_key}")
         except Exception as e:
-            print(f"  ⚠ Could not push game {game.get('matchup')}: {e}")
+            print(f"  ⚠ Could not push game {matchup_key}: {e}")
 
 # ── Step 5: Build + push props slate ──────────
 

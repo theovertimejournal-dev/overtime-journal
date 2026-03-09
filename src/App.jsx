@@ -59,8 +59,6 @@ function SportTabs({ user, profile }) {
         <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
         <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
         <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
-        
-
 
         <div style={{ flex: 1, minWidth: 4 }} />
         {user && profile && (
@@ -87,21 +85,55 @@ function SportTabs({ user, profile }) {
 }
 
 export default function App() {
-  const [user, setUser]               = useState(null);
-  const [profile, setProfile]         = useState(null);
-  const [showWelcome, setShowWelcome] = useState(false);
+  const [user, setUser]                 = useState(null);
+  const [profile, setProfile]           = useState(null);
+  const [showWelcome, setShowWelcome]   = useState(false);
   const [showUsername, setShowUsername] = useState(false);
-  const [authChecked, setAuthChecked] = useState(false);
-  const [authTimeout, setAuthTimeout] = useState(false);
+  const [authChecked, setAuthChecked]   = useState(false);
+  const [authTimeout, setAuthTimeout]   = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
 
   useEffect(() => {
     const timeout = setTimeout(() => setAuthTimeout(true), 5000);
     let fetchingProfile = false;
 
+    // FIX 1: Validate + refresh the session on every app load.
+    // Chrome caches the JWT to disk and serves it before Supabase can check
+    // if it's still valid. refreshSession() forces a server-side validation.
+    // If the refresh token is expired, Supabase clears the session automatically
+    // and fires SIGNED_OUT — no manual cleanup needed.
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        await supabase.auth.refreshSession();
+        // onAuthStateChange will fire with the refreshed session or SIGNED_OUT,
+        // so no need to setUser here — let the listener handle it.
+      }
+    });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       clearTimeout(timeout);
       const u = session?.user ?? null;
+
+      // FIX 2: TOKEN_REFRESHED with no session means the refresh silently failed
+      // (expired refresh token). Without this check the app stays in a zombie
+      // logged-in state — user sees old data forever until they clear cache.
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        setUser(null);
+        setProfile(null);
+        setProfileLoading(false);
+        setShowWelcome(true);
+        setAuthChecked(true);
+        window.location.href = '/';
+        return;
+      }
+
+      // TOKEN_REFRESHED with a valid session — session is already synced,
+      // no need to re-fetch the profile.
+      if (event === 'TOKEN_REFRESHED' && session) {
+        setAuthChecked(true);
+        return;
+      }
+
       setUser(u);
       setAuthChecked(true);
 
@@ -119,11 +151,8 @@ export default function App() {
       // Logged in
       setShowWelcome(false);
 
-      // TOKEN_REFRESHED fires on every tab focus — skip it
-      if (event === 'TOKEN_REFRESHED') return;
-      // Prevent duplicate fetches from rapid auth events (Chrome cached session)
+      // Prevent duplicate fetches from rapid auth events
       if (fetchingProfile) return;
-
       fetchingProfile = true;
       setProfileLoading(true);
 
@@ -145,7 +174,6 @@ export default function App() {
 
         const p = data || null;
         setProfile(p);
-        // Only show username modal if profile is definitively missing
         setShowUsername(!p);
       } catch (e) {
         console.warn('[Auth] Profile fetch exception, skipping modal:', e.message);
@@ -170,12 +198,10 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      {/* Welcome modal — logged out users */}
       {showWelcome && !user && (
         <WelcomeModal onClose={() => setShowWelcome(false)} />
       )}
 
-      {/* Username setup — only after profile fetch confirmed missing */}
       {showUsername && user && !profile && !profileLoading && (
         <UsernameModal user={user} onComplete={handleUsernameComplete} />
       )}

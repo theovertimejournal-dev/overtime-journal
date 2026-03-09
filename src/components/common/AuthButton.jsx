@@ -22,7 +22,11 @@ export function AuthButton() {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    // scope: 'global' revokes the token server-side and wipes ALL local storage
+    // window.location.href forces a full JS runtime reset — React Router's navigate()
+    // does NOT do this and leaves stale state alive in memory
+    await supabase.auth.signOut({ scope: 'global' });
+    window.location.href = '/';
   };
 
   if (user) {

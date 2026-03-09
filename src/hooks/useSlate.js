@@ -98,6 +98,8 @@ export function useSlate(sport = 'nba', date = null) {
           ...slateData,
           games: (gamesData || []).map(normalizeGame),
           yesterday_results: slateData.yesterday_results || [],
+          // Parlay — use locked version if present, fall back to games JSONB
+          otj_parlay: slateData.otj_parlay || slateData.games?.otj_parlay || null,
         });
         setSource('supabase');
 

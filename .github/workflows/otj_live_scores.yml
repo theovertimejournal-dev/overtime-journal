@@ -36,11 +36,9 @@ jobs:
           TANK01_API_KEY:       ${{ secrets.TANK01_API_KEY }}
         run: |
           cd python
-          if [ -n "${{ github.event.inputs.date }}" ]; then
-            python live_scores.py --date=${{ github.event.inputs.date }}
-          else
-            python live_scores.py
-          fi
+          echo "--- Running live_scores.py ---"
+          python -u live_scores.py
+          echo "--- Done ---"
 
       - name: Notify on failure
         if: failure()

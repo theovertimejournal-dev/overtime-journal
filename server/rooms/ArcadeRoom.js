@@ -1,4 +1,4 @@
-const { Room } = require("@colyseus/core");
+const { Room } = require("colyseus");
 
 // ─── ArcadeRoom ───────────────────────────────────────────────────────────────
 // Handles multiplayer sessions for all OTJ arcade games:

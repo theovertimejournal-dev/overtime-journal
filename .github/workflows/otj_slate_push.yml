@@ -1,0 +1,51 @@
+name: OTJ Slate Push (3PM ET)
+
+on:
+  schedule:
+    # 3:00 PM ET = 20:00 UTC (EST) / 19:00 UTC (EDT)
+    # Running at both to cover daylight saving transitions
+    - cron: '0 20 * * *'
+  workflow_dispatch:          # allows manual trigger from GitHub UI
+    inputs:
+      date:
+        description: 'Date to push (YYYY-MM-DD) — leave blank for today'
+        required: false
+        default: ''
+
+jobs:
+  push-slate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests nba_api
+
+      - name: Run slate push
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BALLDONTLIE_API_KEY:  ${{ secrets.BALLDONTLIE_API_KEY }}
+          TANK01_API_KEY:       ${{ secrets.TANK01_API_KEY }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cd python
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python push_to_supabase.py --date=${{ github.event.inputs.date }}
+          else
+            python push_to_supabase.py
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Slate push failed — check logs above"

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 
@@ -154,42 +154,7 @@ function PostCard({ post, onClick }) {
   );
 }
 
-// ── Static mock data (replace with Supabase queries) ─────────────────────────
-const MOCK_RECORD = { yesterday: '5-2', week: '8-4', month: '11-2', allTime: '47-28' };
-
-const MOCK_TICKER = [
-  { text: 'BOS -6.5 vs DAL · WON 114-103', win: true },
-  { text: 'LAL ML vs DEN · LOST 108-115', win: false },
-  { text: 'GSW/HOU UNDER 228 · WON 221', win: true },
-  { text: 'MIL -4 vs IND · WON 119-112', win: true },
-  { text: 'PHX ML vs OKC · LOST 98-112', win: false },
-  { text: 'NYK -3 vs ATL · WON 107-102', win: true },
-];
-
-const MOCK_PICKS = [
-  {
-    sport: 'NBA', bet_type: 'SPREAD', team: 'BOS -14.5',
-    matchup_label: 'DAL @ BOS · 7:00 PM ET',
-    confidence: 'HIGH', edge_score: 38,
-    signal_summary: 'BOS B2B advantage. DAL second night of back-to-back, 3rd road game in 4 nights.',
-    tags: ['B2B', 'REST', 'HOME'],
-  },
-  {
-    sport: 'NBA', bet_type: 'TOTAL', team: 'UNDER 224.5',
-    matchup_label: 'MIL @ NYK · 7:30 PM ET',
-    confidence: 'MED', edge_score: 24,
-    signal_summary: 'NYK top-5 defensive rating last 10 games. MIL shooting cold stretch continues.',
-    tags: ['DEF TREND', '3PT COLD'],
-  },
-  {
-    sport: 'NBA', bet_type: 'ML', team: 'OKC +115',
-    matchup_label: 'OKC @ DEN · 9:00 PM ET',
-    confidence: 'MED', edge_score: 21,
-    signal_summary: 'Line value on OKC. DEN missing key rotation pieces, OKC top road record in West.',
-    tags: ['LINE VALUE', 'INJURY'],
-  },
-];
-
+// ── Fallback mock posts (replace with Supabase posts table later) ────────────
 const MOCK_POSTS = [
   {
     category: 'BREAKDOWN',
@@ -217,12 +182,143 @@ const MOCK_POSTS = [
   },
 ];
 
+// ── Format a result row into ticker text ─────────────────────────────────────
+function formatTickerItem(result) {
+  // result shape from yesterday_results array: { matchup, pick, result, score }
+  // OR from games table: { matchup, lean, confidence, final_score }
+  if (!result) return null;
+  const win = result.result === 'W' || result.result === 'win' || result.won === true;
+  const text = [
+    result.matchup || result.game,
+    result.pick || result.lean,
+    result.score || result.final_score || '',
+  ].filter(Boolean).join(' · ');
+  return { text, win };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function LandingPage({ user, profile, sessionValidated }) {
   const navigate = useNavigate();
-  const [picks]  = useState(MOCK_PICKS);
-  const [posts]  = useState(MOCK_POSTS);
-  const heroRef  = useRef(null);
+  const [posts]        = useState(MOCK_POSTS);
+  const [tickerItems,  setTickerItems]  = useState([]);
+  const [picks,        setPicks]        = useState([]);
+  const [record,       setRecord]       = useState({ yesterday: '—', week: '—', month: '—', allTime: '—' });
+  const [loading,      setLoading]      = useState(true);
+  const heroRef = useRef(null);
+
+  // ── Live data from Supabase ───────────────────────────────────────────────
+  const fetchSlateData = useCallback(async () => {
+    try {
+      // Get today's slate + most recent 3 slates for ticker results
+      const today = new Date().toISOString().split('T')[0];
+
+      const { data: slates, error } = await supabase
+        .from('slates')
+        .select('date, games, yesterday_record, yesterday_results, cumulative_record, headline, games_count, otj_parlay')
+        .eq('sport', 'nba')
+        .order('date', { ascending: false })
+        .limit(4);
+
+      if (error) throw error;
+      if (!slates?.length) { setLoading(false); return; }
+
+      const todaySlate  = slates.find(s => s.date === today) || slates[0];
+      const recentSlate = slates.find(s => s.yesterday_results?.length > 0) || slates[1];
+
+      // ── Time-aware ticker logic ──────────────────────────────────────
+      // ET hour (approximate using UTC-5/UTC-4)
+      const nowET = new Date();
+      const etOffset = -5; // EST; use -4 for EDT
+      const etHour = (nowET.getUTCHours() + 24 + etOffset) % 24;
+
+      // 1. 9PM–6AM ET: show live_ticker from Supabase (Tank01 live scores)
+      if (etHour >= 21 || etHour < 6) {
+        const liveTicker = todaySlate?.live_ticker || [];
+        if (liveTicker.length > 0) {
+          setTickerItems(liveTicker.map(t => ({
+            text: t.display,
+            win: t.pick_result === 'W' ? true : t.pick_result === 'L' ? false : null,
+            status: t.status,
+          })));
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 2. 3PM–9PM ET: show today's upcoming games — matchup + tip time ONLY (no lean)
+      if (etHour >= 15 && etHour < 21) {
+        const upcoming = (todaySlate?.games || []).map(g => ({
+          text: `${g.matchup || ''} · ${g.game_time || 'TBD'} ET`,
+          win: null,
+          status: 'upcoming',
+        })).filter(t => t.text.length > 5);
+        if (upcoming.length > 0) {
+          setTickerItems(upcoming);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 3. 6AM–3PM ET: show last night's final results with W/L
+      const allResults = [];
+      for (const slate of slates) {
+        const results = slate.yesterday_results || [];
+        for (const r of results) {
+          const item = formatTickerItem(r);
+          if (item?.text) allResults.push(item);
+        }
+      }
+      if (allResults.length > 0) {
+        setTickerItems(allResults);
+      }
+
+      // ── Record badges ──
+      const cumulative = todaySlate?.cumulative_record || recentSlate?.cumulative_record || '—';
+      const yesterday  = recentSlate?.yesterday_record || '—';
+      setRecord({
+        yesterday,
+        week: '—',   // not stored separately yet — add later
+        month: '—',  // not stored separately yet
+        allTime: cumulative,
+      });
+
+      // ── Today's top picks from games ──
+      const games = todaySlate?.games || [];
+      const topPicks = games
+        .filter(g => g.edge?.score > 15)
+        .sort((a, b) => (b.edge?.score || 0) - (a.edge?.score || 0))
+        .slice(0, 3)
+        .map(g => ({
+          sport: 'NBA',
+          bet_type: g.edge?.bet_type || 'SPREAD',
+          team: g.edge?.lean || g.matchup,
+          matchup_label: `${g.matchup} · ${g.game_time || ''}`,
+          confidence: g.edge?.confidence || 'MED',
+          edge_score: Math.round(g.edge?.score || 0),
+          signal_summary: g.narrative?.summary || g.edge?.signals?.[0]?.detail || '',
+          tags: (g.edge?.signals || []).slice(0, 3).map(s => s.type || s.tag || '').filter(Boolean),
+        }));
+
+      setPicks(topPicks.length ? topPicks : []);
+
+    } catch (err) {
+      console.warn('[LandingPage] Supabase fetch failed:', err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSlateData();
+
+    // Poll every 5 minutes for live score updates during game time (6PM–midnight ET)
+    const hour = new Date().getHours();
+    const isGameTime = hour >= 18 || hour < 2;
+    if (isGameTime) {
+      const interval = setInterval(fetchSlateData, 5 * 60 * 1000);
+      return () => clearInterval(interval);
+    }
+  }, [fetchSlateData]);
 
   // Parallax on hero
   useEffect(() => {
@@ -251,7 +347,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
       `}</style>
 
       {/* ── Ticker ── */}
-      <Ticker items={MOCK_TICKER} />
+      <Ticker items={tickerItems.length ? tickerItems : [{text: "Loading results...", win: null}]} />
 
       {/* ── Hero ── */}
       <div style={{
@@ -303,10 +399,10 @@ export default function LandingPage({ user, profile, sessionValidated }) {
             borderRadius: 8, overflow: 'hidden',
             marginBottom: 28,
           }}>
-            <RecordBadge label="YESTERDAY" value={MOCK_RECORD.yesterday} accent="#22c55e" />
-            <RecordBadge label="THIS WEEK"  value={MOCK_RECORD.week} />
-            <RecordBadge label="THIS MONTH" value={MOCK_RECORD.month} accent="#fbbf24" />
-            <RecordBadge label="ALL TIME"   value={MOCK_RECORD.allTime} />
+            <RecordBadge label="YESTERDAY" value={record.yesterday} accent="#22c55e" />
+            <RecordBadge label="THIS WEEK"  value={record.week} />
+            <RecordBadge label="THIS MONTH" value={record.month} accent="#fbbf24" />
+            <RecordBadge label="ALL TIME"   value={record.allTime} />
           </div>
 
           {/* CTA buttons */}

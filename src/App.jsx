@@ -10,6 +10,20 @@ import Terms from './pages/Terms';
 import Record from './pages/Record';
 import { supabase } from './lib/supabase';
 import OTJPropsPage from './components/nba/OTJPropsPage';
+import ArcadePage from './pages/ArcadePage';
+
+// ─── Protected route — redirects to / if not logged in ───────────────────────
+function ProtectedRoute({ user, authChecked, children }) {
+  if (!authChecked) return null;
+  if (!user) {
+    // Save where they were trying to go so we can redirect back after login
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("otj_redirect", window.location.pathname);
+    }
+    return <Navigate to="/nba" replace />;
+  }
+  return children;
+}
 
 function ComingSoon({ sport, emoji, phase }) {
   return (
@@ -59,6 +73,7 @@ function SportTabs({ user, profile }) {
         <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
         <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
         <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
+        <NavLink to="/arcade" style={({ isActive }) => tabStyle(isActive)}>🕹<span className="nav-tab-label"> Arcade</span></NavLink>
 
         <div style={{ flex: 1, minWidth: 4 }} />
         {user && profile && (
@@ -123,7 +138,8 @@ export default function App() {
         setProfileLoading(false);
         setShowWelcome(true);
         setAuthChecked(true);
-        window.location.href = '/';
+        // Don't hard redirect — let React Router handle it via ProtectedRoute
+        // so the user lands back on the page they were on after re-login
         return;
       }
 
@@ -148,8 +164,16 @@ export default function App() {
         return;
       }
 
-      // Logged in
+      // Logged in — redirect to where they were trying to go
       setShowWelcome(false);
+      if (event === 'SIGNED_IN') {
+        const redirect = sessionStorage.getItem("otj_redirect");
+        if (redirect && redirect !== "/") {
+          sessionStorage.removeItem("otj_redirect");
+          window.location.href = redirect;
+          return;
+        }
+      }
 
       // Prevent duplicate fetches from rapid auth events
       if (fetchingProfile) return;
@@ -215,7 +239,16 @@ export default function App() {
           <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
           <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />
           <Route path="/record" element={<Record />} />
-          <Route path="/arcade" element={<NBAJamArcade user={user} profile={profile} />} />
+          <Route path="/arcade" element={
+            <ProtectedRoute user={user} authChecked={authChecked}>
+              <ArcadePage user={user} profile={profile} />
+            </ProtectedRoute>
+          } />
+          <Route path="/arcade/nba" element={
+            <ProtectedRoute user={user} authChecked={authChecked}>
+              <NBAJamArcade user={user} profile={profile} />
+            </ProtectedRoute>
+          } />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
           <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowModal(true)} />} />

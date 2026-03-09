@@ -104,9 +104,69 @@ export default function NBAJamArcade() {
   const [mpSlot,     setMpSlot]     = useState(null);   // "p1" | "p2"
   const [mpRoomId,   setMpRoomId]   = useState(null);
   const [playerSkin, setPlayerSkin] = useState("default");
+  const [linkCopied, setLinkCopied] = useState(false);
   const roomRef = useRef(null);
 
-  // ── Multiplayer: connect to Colyseus and join/create a room ──────────────
+  // Check URL for ?room=xxx on mount — auto-join if present
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get("room");
+    if (roomParam) {
+      joinRoomById(roomParam);
+    }
+  }, []);
+
+  // ── Multiplayer helpers ──────────────────────────────────────────────────
+  const setupRoomHandlers = useCallback((room) => {
+    roomRef.current = room;
+    setMpRoomId(room.id);
+    // Update URL with room id so it's shareable
+    const url = new URL(window.location.href);
+    url.searchParams.set("room", room.id);
+    window.history.replaceState({}, "", url.toString());
+
+    room.onMessage("joined", (data) => { setMpSlot(data.slot); setMpStatus("waiting"); });
+    room.onMessage("both_connected", () => setMpStatus("ready"));
+    room.onMessage("game_start", () => {
+      setMpStatus("playing");
+      const s = initState(); s.phase = "playing";
+      stateRef.current = s; setUiPhase("playing");
+    });
+    room.onMessage("opponent_action", (data) => {
+      const s = stateRef.current;
+      if (data.keys) Object.assign(s.keys, data.keys);
+    });
+    room.onMessage("score_update", () => {});
+    room.onMessage("opponent_left", () => {
+      setMpStatus(null); setUiPhase("menu");
+      const url = new URL(window.location.href);
+      url.searchParams.delete("room");
+      window.history.replaceState({}, "", url.toString());
+      if (roomRef.current) { roomRef.current.leave(); roomRef.current = null; }
+    });
+    room.onMessage("game_over", () => { setMpStatus(null); });
+  }, []);
+
+  const joinRoomById = useCallback(async (roomId) => {
+    setMpStatus("connecting");
+    try {
+      const client = new Colyseus.Client(COLYSEUS_URL);
+      const room = await client.joinById(roomId, {
+        gameType: "nba_jam",
+        username: profile?.username || "Player",
+        skin: playerSkin,
+      });
+      setupRoomHandlers(room);
+    } catch (err) {
+      console.error("Failed to join room:", err);
+      setMpStatus(null);
+      // Clear bad room param from URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("room");
+      window.history.replaceState({}, "", url.toString());
+    }
+  }, [playerSkin, setupRoomHandlers]);
+
   const startMultiplayer = useCallback(async (username = "Player") => {
     setMpStatus("connecting");
     try {
@@ -116,53 +176,12 @@ export default function NBAJamArcade() {
         username,
         skin: playerSkin,
       });
-      roomRef.current = room;
-      setMpRoomId(room.id);
-
-      room.onMessage("joined", (data) => {
-        setMpSlot(data.slot);
-        setMpStatus("waiting");
-      });
-
-      room.onMessage("both_connected", () => setMpStatus("ready"));
-
-      room.onMessage("game_start", () => {
-        setMpStatus("playing");
-        const s = initState(); s.phase = "playing";
-        stateRef.current = s; setUiPhase("playing");
-      });
-
-      room.onMessage("opponent_action", (data) => {
-        // Apply opponent inputs to CPU slot so both screens stay in sync
-        const s = stateRef.current;
-        if (data.keys) {
-          Object.assign(s.keys, data.keys);
-        }
-      });
-
-      room.onMessage("score_update", (data) => {
-        const s = stateRef.current;
-        if (data.scoredBy !== mpSlot) {
-          // Opponent scored — update our local score display
-          s.scores = s.scores || {};
-        }
-      });
-
-      room.onMessage("opponent_left", () => {
-        setMpStatus(null);
-        setUiPhase("menu");
-        if (roomRef.current) { roomRef.current.leave(); roomRef.current = null; }
-      });
-
-      room.onMessage("game_over", (data) => {
-        setMpStatus(null);
-      });
-
+      setupRoomHandlers(room);
     } catch (err) {
       console.error("Multiplayer connection failed:", err);
       setMpStatus(null);
     }
-  }, [playerSkin]);
+  }, [playerSkin, setupRoomHandlers]);
 
   // Send local key state to opponent every frame (throttled to every 3 frames)
   const mpFrameCount = useRef(0);
@@ -716,6 +735,7 @@ export default function NBAJamArcade() {
     {/* Arcade cabinet wrapper */}
     <div style={{
       width:"100%", maxWidth:920,
+      margin:"0 auto",
       background:"linear-gradient(180deg, #1a0a2e 0%, #0d0d1a 40%, #0a0a0f 100%)",
       borderRadius:24,
       border:"3px solid #2d1b69",
@@ -725,7 +745,7 @@ export default function NBAJamArcade() {
         0 0 60px rgba(139,92,246,0.15),
         inset 0 0 40px rgba(0,0,0,0.5)
       `,
-      padding:"20px 20px 24px",
+      padding:"20px 20px 0px",
       position:"relative",
     }}>
 
@@ -817,13 +837,46 @@ export default function NBAJamArcade() {
               </button>
             )}
             {mpStatus === "connecting" && (
-              <div style={{color:"#6b7280",fontSize:11,marginTop:8}}>Connecting to server...</div>
+              <div style={{color:"#6b7280",fontSize:11,marginTop:8}}>⏳ Connecting...</div>
             )}
             {mpStatus === "waiting" && (
-              <div style={{textAlign:"center",marginTop:8}}>
-                <div style={{color:"#fbbf24",fontSize:12,marginBottom:4}}>⏳ Waiting for opponent...</div>
-                <div style={{color:"#374151",fontSize:10}}>Room: {mpRoomId}</div>
-                <div style={{color:"#4a5568",fontSize:10}}>Share your link so a friend can join!</div>
+              <div style={{textAlign:"center",marginTop:10,width:"100%",maxWidth:280}}>
+                <div style={{color:"#fbbf24",fontSize:12,marginBottom:8}}>⏳ Waiting for opponent...</div>
+
+                {/* Room code */}
+                <div style={{
+                  background:"#0d0d1a", border:"1px solid #2d1b69",
+                  borderRadius:8, padding:"8px 12px", marginBottom:8,
+                }}>
+                  <div style={{color:"#4a5568",fontSize:9,letterSpacing:"0.15em",marginBottom:4}}>ROOM CODE</div>
+                  <div style={{
+                    color:"#a855f7", fontSize:20, fontWeight:700, letterSpacing:"0.2em",
+                    textShadow:"0 0 8px rgba(168,85,247,0.5)",
+                  }}>
+                    {mpRoomId ? mpRoomId.slice(-6).toUpperCase() : "------"}
+                  </div>
+                </div>
+
+                {/* Copy link button */}
+                <button onClick={() => {
+                  const url = `${window.location.origin}/arcade/nba?room=${mpRoomId}`;
+                  navigator.clipboard.writeText(url).then(() => {
+                    setLinkCopied(true);
+                    setTimeout(() => setLinkCopied(false), 2000);
+                  });
+                }} style={{
+                  width:"100%", padding:"8px 0", borderRadius:6, cursor:"pointer",
+                  background: linkCopied ? "#22c55e" : "#1a0a2e",
+                  border:`1px solid ${linkCopied ? "#22c55e" : "#4c1d95"}`,
+                  color: linkCopied ? "#000" : "#a855f7",
+                  fontSize:11, fontFamily:PIXEL_FONT, fontWeight:700,
+                  letterSpacing:"0.1em", transition:"all 0.2s",
+                }}>
+                  {linkCopied ? "✅ COPIED!" : "🔗 COPY INVITE LINK"}
+                </button>
+                <div style={{color:"#1e1040",fontSize:9,marginTop:6}}>
+                  Friend joins → paste link or enter code
+                </div>
               </div>
             )}
             {mpStatus === "ready" && (
@@ -893,25 +946,93 @@ export default function NBAJamArcade() {
         ★ = active player &nbsp;·&nbsp; Pass to switch control &nbsp;·&nbsp; 3 buckets in a row = 🔥
       </div>
 
-      {/* Cabinet bottom coin slot */}
+      {/* ── Arcade control panel ── */}
       <div style={{
-        display:"flex", justifyContent:"center", alignItems:"center",
-        gap:16, marginTop:16, paddingTop:16,
-        borderTop:"1px solid #1e1040",
+        width:"100%", marginTop:16, paddingTop:20,
+        borderTop:"2px solid #1e1040",
+        background:"linear-gradient(180deg, #100820 0%, #0a0a14 100%)",
+        borderRadius:"0 0 20px 20px",
+        display:"flex", alignItems:"center", justifyContent:"space-between",
+        padding:"16px 32px 20px",
+        position:"relative",
       }}>
+
+        {/* Center coin slot */}
         <div style={{
-          background:"#0d0d1a", border:"2px solid #2d1b69",
-          borderRadius:8, padding:"4px 20px",
-          fontSize:10, color:"#4c1d95", letterSpacing:"0.1em",
-          boxShadow:"inset 0 2px 4px rgba(0,0,0,0.5)",
+          position:"absolute", top:0, left:"50%", transform:"translateX(-50%) translateY(-1px)",
+          background:"#0a0a14", border:"2px solid #2d1b69",
+          borderRadius:"0 0 8px 8px", padding:"3px 24px",
+          fontSize:9, color:"#2d1b69", letterSpacing:"0.15em",
         }}>
-          ▌▌ INSERT COIN ▌▌
+          ▌ INSERT COIN ▌
         </div>
-        <div style={{
-          width:40, height:8, background:"#0d0d1a",
-          border:"2px solid #2d1b69", borderRadius:4,
-          boxShadow:"inset 0 1px 3px rgba(0,0,0,0.8)",
-        }}/>
+
+        {/* Left side — Joystick */}
+        <div style={{display:"flex", flexDirection:"column", alignItems:"center", gap:6}}>
+          <div style={{fontSize:9, color:"#2d1b69", letterSpacing:"0.1em", marginBottom:2}}>MOVE</div>
+          {/* Joystick base */}
+          <div style={{
+            width:64, height:64, borderRadius:"50%",
+            background:"radial-gradient(circle at 35% 35%, #1e1040, #0a0612)",
+            border:"3px solid #2d1b69",
+            boxShadow:"0 4px 12px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.05)",
+            display:"flex", alignItems:"center", justifyContent:"center",
+            position:"relative",
+          }}>
+            {/* Gate lines */}
+            <div style={{position:"absolute",width:"100%",height:1,background:"#1e1040"}}/>
+            <div style={{position:"absolute",width:1,height:"100%",background:"#1e1040"}}/>
+            {/* Stick */}
+            <div style={{
+              width:22, height:22, borderRadius:"50%",
+              background:"radial-gradient(circle at 35% 35%, #4c1d95, #2d1b69)",
+              border:"2px solid #7c3aed",
+              boxShadow:"0 0 8px rgba(124,58,237,0.6), 0 3px 6px rgba(0,0,0,0.5)",
+              zIndex:1,
+            }}/>
+          </div>
+        </div>
+
+        {/* Center label */}
+        <div style={{textAlign:"center"}}>
+          <div style={{
+            fontSize:11, fontWeight:700, color:"#1e1040",
+            letterSpacing:"0.15em", textTransform:"uppercase",
+          }}>
+            OTJ JAM
+          </div>
+          <div style={{fontSize:8, color:"#12091f", marginTop:2}}>★ ★ ★</div>
+        </div>
+
+        {/* Right side — Action buttons */}
+        <div style={{display:"flex", flexDirection:"column", alignItems:"center", gap:6}}>
+          <div style={{fontSize:9, color:"#2d1b69", letterSpacing:"0.1em", marginBottom:2}}>ACTION</div>
+          <div style={{display:"flex", gap:10, alignItems:"center"}}>
+            {/* SHOOT button — yellow */}
+            <div style={{display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
+              <div style={{
+                width:36, height:36, borderRadius:"50%",
+                background:"radial-gradient(circle at 35% 35%, #fbbf24, #d97706)",
+                border:"3px solid #92400e",
+                boxShadow:"0 0 10px rgba(251,191,36,0.5), 0 4px 8px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.2)",
+                cursor:"pointer",
+              }}/>
+              <div style={{fontSize:8, color:"#4a5568", letterSpacing:"0.05em"}}>SHOOT</div>
+            </div>
+            {/* PASS button — purple */}
+            <div style={{display:"flex", flexDirection:"column", alignItems:"center", gap:4}}>
+              <div style={{
+                width:36, height:36, borderRadius:"50%",
+                background:"radial-gradient(circle at 35% 35%, #a855f7, #7c3aed)",
+                border:"3px solid #4c1d95",
+                boxShadow:"0 0 10px rgba(168,85,247,0.5), 0 4px 8px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.2)",
+                cursor:"pointer",
+              }}/>
+              <div style={{fontSize:8, color:"#4a5568", letterSpacing:"0.05em"}}>PASS</div>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div> {/* end cabinet */}

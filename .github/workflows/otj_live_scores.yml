@@ -37,10 +37,14 @@ jobs:
         run: |
           cd python
           echo "--- Running live_scores.py ---"
-          # Use ET date (UTC-5) not UTC date
-          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
-          echo "ET date: $ET_DATE"
-          python -u live_scores.py --date=$ET_DATE
+          # Use manual date if provided, otherwise use ET date
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            RUN_DATE="${{ github.event.inputs.date }}"
+          else
+            RUN_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          fi
+          echo "Running for date: $RUN_DATE"
+          python -u live_scores.py --date=$RUN_DATE
           echo "--- Done ---"
 
       - name: Notify on failure

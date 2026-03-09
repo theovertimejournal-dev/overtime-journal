@@ -169,13 +169,14 @@ export default function App() {
         const redirect = sessionStorage.getItem("otj_redirect");
         if (redirect && redirect !== "/") {
           sessionStorage.removeItem("otj_redirect");
+          setSessionValidated(true);
           window.location.href = redirect;
           return;
         }
       }
 
       // Prevent duplicate fetches from rapid auth events
-      if (fetchingProfile) return;
+      if (fetchingProfile) { setSessionValidated(true); return; }
       fetchingProfile = true;
       setProfileLoading(true);
 

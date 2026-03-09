@@ -1,25 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-
-// ── Mock data — replace with Supabase fetch when pick system is live ──────────
-// Each day can have multiple sport entries
-const MOCK_RECORD_DATA = {
-  "2026-03-06": { w: 5, l: 2, record: "5-2", units: 2.8, sport: "NBA", note: "PHX upset by CHI · GSW upset HOU", highlight: "NOP +9.5 cash" },
-  "2026-03-05": { w: 6, l: 1, record: "6-1", units: 4.9, sport: "NBA", note: "LAL B2B fatigue played out perfectly", highlight: "LAL B2B fade hit" },
-  "2026-03-04": { w: 4, l: 3, record: "4-3", units: 0.7, sport: "NBA", note: "Tough night — two close game losses", highlight: null },
-  "2026-03-03": { w: 6, l: 2, record: "6-2", units: 3.8, sport: "NBA", note: "Bench edge theory validated — 3 of 4 bench picks hit", highlight: "BOS bench edge" },
-  "2026-03-02": { w: 5, l: 2, record: "5-2", units: 2.8, sport: "NBA", note: "Solid B2B plays", highlight: null },
-  "2026-03-01": { w: 3, l: 4, record: "3-4", units: -1.4, sport: "NBA", note: "Rough start to March — variance night", highlight: null },
-  "2026-02-28": { w: 7, l: 1, record: "7-1", units: 6.1, sport: "NBA", note: "Best night of the month", highlight: "7-1 night 🔥" },
-  "2026-02-27": { w: 5, l: 3, record: "5-3", units: 1.7, sport: "NBA", note: null, highlight: null },
-  "2026-02-26": { w: 4, l: 2, record: "4-2", units: 1.8, sport: "NBA", note: null, highlight: null },
-  "2026-02-25": { w: 6, l: 2, record: "6-2", units: 3.8, sport: "NBA", note: null, highlight: null },
-  "2026-02-24": { w: 5, l: 1, record: "5-1", units: 3.9, sport: "NBA", note: null, highlight: null },
-  "2026-02-23": { w: 3, l: 3, record: "3-3", units: -0.3, sport: "NBA", note: null, highlight: null },
-  "2026-02-22": { w: 4, l: 3, record: "4-3", units: 0.7, sport: "NBA", note: null, highlight: null },
-  "2026-02-21": { w: 6, l: 1, record: "6-1", units: 4.9, sport: "NBA", note: null, highlight: null },
-  "2026-02-20": { w: 5, l: 2, record: "5-2", units: 2.8, sport: "NBA", note: null, highlight: null },
-};
+import { supabase } from '../lib/supabase';
 
 const SPORTS = [
   { key: "ALL", label: "All Sports", emoji: "📊" },
@@ -45,11 +26,19 @@ function buildEquityCurve(filteredData) {
   return sorted.map(([date, d]) => {
     running += d.units;
     return {
-      date: date.slice(5),   // "MM-DD"
+      date: date.slice(5),
       units: parseFloat(running.toFixed(2)),
       daily: d.units,
     };
   });
+}
+
+function getLocalDate() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 // ── Custom Tooltip ────────────────────────────────────────────────────────────
@@ -77,13 +66,7 @@ function CalendarMonth({ year, month, data, onSelectDay, selectedDay }) {
   const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = (() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  })();
+  const today = getLocalDate();
 
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(<div key={`e${i}`} />);
@@ -153,6 +136,7 @@ function StatCard({ label, value, sub, color, accent }) {
       border: `1px solid ${accent || "rgba(255,255,255,0.06)"}`,
       borderRadius: 10, padding: "14px 16px",
       position: "relative", overflow: "hidden",
+      minWidth: 0, // prevents overflow in grid
     }}>
       {accent && (
         <div style={{
@@ -163,7 +147,7 @@ function StatCard({ label, value, sub, color, accent }) {
       <div style={{ fontSize: 9, color: "#374151", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
         {label}
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, color: color || "#e2e8f0", letterSpacing: "-0.02em" }}>
+      <div style={{ fontSize: 22, fontWeight: 700, color: color || "#e2e8f0", letterSpacing: "-0.02em", wordBreak: "break-all" }}>
         {value}
       </div>
       {sub && <div style={{ fontSize: 10, color: "#4a5568", marginTop: 4 }}>{sub}</div>}
@@ -176,7 +160,7 @@ function SportTab({ sport, active, onClick, hasData }) {
   return (
     <button onClick={onClick} style={{
       fontSize: 11, fontWeight: 700,
-      padding: "6px 14px", borderRadius: 6,
+      padding: "6px 12px", borderRadius: 6,
       border: active ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.06)",
       background: active ? "rgba(239,68,68,0.1)" : "rgba(255,255,255,0.02)",
       color: active ? "#ef4444" : hasData ? "#6b7280" : "#1f2937",
@@ -184,6 +168,7 @@ function SportTab({ sport, active, onClick, hasData }) {
       fontFamily: "inherit",
       transition: "all 0.12s",
       letterSpacing: "0.04em",
+      whiteSpace: "nowrap",
     }}>
       {sport.emoji} {sport.key}
     </button>
@@ -193,43 +178,113 @@ function SportTab({ sport, active, onClick, hasData }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function Record() {
   const today = new Date();
-  const [selectedDay, setSelectedDay] = useState("2026-03-06");
+  const todayStr = getLocalDate();
+  const [selectedDay, setSelectedDay] = useState(null);
   const [activeSport, setActiveSport] = useState("ALL");
+  const [rawData, setRawData] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Filter data by sport
+  // ── Fetch from Supabase yesterday_results ──
+  useEffect(() => {
+    async function fetchResults() {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('yesterday_results')
+          .select('*')
+          .order('date', { ascending: true });
+
+        if (error) throw error;
+        setRawData(data || []);
+
+        // Auto-select most recent day with data
+        if (data?.length) {
+          const sorted = [...data].sort((a, b) => b.date.localeCompare(a.date));
+          setSelectedDay(sorted[0].date);
+        }
+      } catch (e) {
+        console.warn('[Record] Fetch failed:', e.message);
+        setRawData([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchResults();
+  }, []);
+
+  // ── Transform raw rows into the shape the UI expects ──
+  // Each row from yesterday_results maps to one calendar day entry
+  const allRecordData = useMemo(() => {
+    const map = {};
+    for (const row of rawData) {
+      const sport = row.sport?.toUpperCase() || 'NBA';
+      const wins = row.wins || 0;
+      const losses = row.losses || 0;
+      // units: approximate from W/L (1u per bet, -1.1u per loss)
+      const units = parseFloat((wins * 1 - losses * 1.1).toFixed(1));
+      map[row.date] = {
+        w: wins,
+        l: losses,
+        record: row.record || `${wins}-${losses}`,
+        units,
+        sport,
+        note: row.results?.length
+          ? row.results.filter(r => r.result === 'L').map(r => `${r.matchup} L`).join(' · ') || null
+          : null,
+        highlight: row.results?.find(r => r.result === 'W' && r.confidence === 'SHARP')
+          ? `${row.results.find(r => r.result === 'W' && r.confidence === 'SHARP').lean} SHARP hit`
+          : null,
+        streak: row.streak,
+        weekly_record: row.weekly_record,
+        monthly_record: row.monthly_record,
+        cumulative_record: row.cumulative_record,
+        results: row.results || [],
+      };
+    }
+    return map;
+  }, [rawData]);
+
+  // ── Filter by sport ──
   const filteredData = useMemo(() => {
-    if (activeSport === "ALL") return MOCK_RECORD_DATA;
+    if (activeSport === "ALL") return allRecordData;
     return Object.fromEntries(
-      Object.entries(MOCK_RECORD_DATA).filter(([, d]) => d.sport === activeSport)
+      Object.entries(allRecordData).filter(([, d]) => d.sport === activeSport)
     );
-  }, [activeSport]);
+  }, [activeSport, allRecordData]);
 
-  // Aggregates
+  // ── Aggregates ──
   const allDays = Object.values(filteredData);
   const totalW = allDays.reduce((s, d) => s + d.w, 0);
   const totalL = allDays.reduce((s, d) => s + d.l, 0);
-  const totalUnits = allDays.reduce((s, d) => s + d.units, 0);
+  const totalUnits = parseFloat(allDays.reduce((s, d) => s + d.units, 0).toFixed(1));
   const winPct = totalW + totalL > 0 ? ((totalW / (totalW + totalL)) * 100).toFixed(1) : "—";
 
-  // This month
+  // ── This month ──
   const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2,'0')}`;
   const monthDays = Object.entries(filteredData).filter(([d]) => d.startsWith(thisMonth));
   const monthW = monthDays.reduce((s, [,d]) => s + d.w, 0);
   const monthL = monthDays.reduce((s, [,d]) => s + d.l, 0);
-  const monthUnits = monthDays.reduce((s, [,d]) => s + d.units, 0);
+  const monthUnits = parseFloat(monthDays.reduce((s, [,d]) => s + d.units, 0).toFixed(1));
 
-  // Equity curve
+  // ── Equity curve ──
   const equityCurve = useMemo(() => buildEquityCurve(filteredData), [filteredData]);
 
-  // ROI (simplified: units / total bets * 100)
+  // ── ROI ──
   const totalBets = totalW + totalL;
   const roi = totalBets > 0 ? ((totalUnits / totalBets) * 100).toFixed(1) : "—";
 
-  // Best streak (longest W streak)
-  const selectedData = filteredData[selectedDay] || MOCK_RECORD_DATA[selectedDay];
+  const selectedData = selectedDay ? filteredData[selectedDay] : null;
+  const sportsWithData = new Set(Object.values(allRecordData).map(d => d.sport));
 
-  // Sports that have data
-  const sportsWithData = new Set(Object.values(MOCK_RECORD_DATA).map(d => d.sport));
+  // ── Most recent cumulative from DB ──
+  const latestRow = rawData.length ? [...rawData].sort((a,b) => b.date.localeCompare(a.date))[0] : null;
+  const displayCumulative = latestRow?.cumulative_record || (totalW + totalL > 0 ? `${totalW}-${totalL}` : "—");
+
+  if (loading) return (
+    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8, fontFamily: "'JetBrains Mono','SF Mono',monospace" }}>
+      <div style={{ fontSize: 13, color: "#4a5568" }}>Loading record...</div>
+    </div>
+  );
 
   return (
     <div style={{
@@ -237,8 +292,9 @@ export default function Record() {
       background: "#08080f",
       color: "#e2e8f0",
       fontFamily: "'JetBrains Mono','SF Mono','Fira Code',monospace",
+      overflowX: "hidden", // fix mobile right-overflow
     }}>
-      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px 16px" }}>
+      <div style={{ maxWidth: 1080, margin: "0 auto", padding: "32px 16px", boxSizing: "border-box" }}>
 
         {/* ── Header ── */}
         <div style={{ marginBottom: 24 }}>
@@ -270,18 +326,13 @@ export default function Record() {
               hasData={s.key === "ALL" || sportsWithData.has(s.key)}
             />
           ))}
-          {activeSport !== "ALL" && !sportsWithData.has(activeSport) && (
-            <span style={{ fontSize: 10, color: "#374151", alignSelf: "center", marginLeft: 4 }}>
-              No data yet — coming soon
-            </span>
-          )}
         </div>
 
         {/* ── Stat Cards ── */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 24 }}>
           <StatCard
             label="All Time W-L"
-            value={totalW + totalL > 0 ? `${totalW}-${totalL}` : "—"}
+            value={displayCumulative}
             color="#22c55e"
             accent="rgba(34,197,94,0.3)"
           />
@@ -293,7 +344,7 @@ export default function Record() {
           />
           <StatCard
             label="Total Units"
-            value={totalBets > 0 ? `${totalUnits >= 0 ? "+" : ""}${totalUnits.toFixed(1)}u` : "—"}
+            value={totalBets > 0 ? `${totalUnits >= 0 ? "+" : ""}${totalUnits}u` : "—"}
             color={totalUnits >= 0 ? "#22c55e" : "#ef4444"}
             accent={totalUnits >= 0 ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}
           />
@@ -304,33 +355,32 @@ export default function Record() {
             sub="per unit wagered"
           />
           <StatCard
-            label={`${today.toLocaleString('default', { month: 'long' })}`}
+            label={today.toLocaleString('default', { month: 'long' })}
             value={monthW + monthL > 0 ? `${monthW}-${monthL}` : "—"}
             color="#f59e0b"
-            sub={monthW + monthL > 0 ? `${monthUnits >= 0 ? "+" : ""}${monthUnits.toFixed(1)}u` : ""}
+            sub={monthW + monthL > 0 ? `${monthUnits >= 0 ? "+" : ""}${monthUnits}u` : ""}
           />
         </div>
 
-        {/* ── Equity Curve + Calendar split ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 24 }}>
+        {/* ── Equity Curve + Day Detail ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20, marginBottom: 24 }}>
 
-          {/* Equity curve chart */}
+          {/* Equity curve */}
           <div style={{
             background: "rgba(255,255,255,0.02)",
             border: "1px solid rgba(255,255,255,0.06)",
             borderRadius: 12, padding: "18px 16px",
+            minWidth: 0,
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div>
                 <div style={{ fontSize: 10, color: "#374151", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 2 }}>
                   Equity Curve
                 </div>
-                <div style={{ fontSize: 11, color: "#4a5568" }}>
-                  Cumulative units over time
-                </div>
+                <div style={{ fontSize: 11, color: "#4a5568" }}>Cumulative units over time</div>
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: totalUnits >= 0 ? "#22c55e" : "#ef4444" }}>
-                {totalUnits >= 0 ? "+" : ""}{totalUnits.toFixed(1)}u
+                {totalUnits >= 0 ? "+" : ""}{totalUnits}u
               </div>
             </div>
 
@@ -340,36 +390,27 @@ export default function Record() {
                   <XAxis
                     dataKey="date"
                     tick={{ fontSize: 9, fill: "#374151", fontFamily: "inherit" }}
-                    tickLine={false}
-                    axisLine={false}
-                    interval={Math.floor(equityCurve.length / 5)}
+                    tickLine={false} axisLine={false}
+                    interval={Math.max(0, Math.floor(equityCurve.length / 5))}
                   />
                   <YAxis
                     tick={{ fontSize: 9, fill: "#374151", fontFamily: "inherit" }}
-                    tickLine={false}
-                    axisLine={false}
+                    tickLine={false} axisLine={false}
                     tickFormatter={v => `${v}u`}
                   />
                   <Tooltip content={<CustomTooltip />} />
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
-                  <Line
-                    type="monotone"
-                    dataKey="units"
-                    stroke="#22c55e"
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4, fill: "#22c55e", stroke: "#08080f", strokeWidth: 2 }}
-                  />
+                  <Line type="monotone" dataKey="units" stroke="#22c55e" strokeWidth={2} dot={false}
+                    activeDot={{ r: 4, fill: "#22c55e", stroke: "#08080f", strokeWidth: 2 }} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
               <div style={{ height: 180, display: "flex", alignItems: "center", justifyContent: "center", color: "#374151", fontSize: 11 }}>
-                No data for this sport yet
+                {rawData.length === 0 ? "No graded picks yet" : "No data for this sport yet"}
               </div>
             )}
 
-            {/* Mini legend */}
-            <div style={{ display: "flex", gap: 16, marginTop: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
               {[
                 { color: "#22c55e", label: "4+ units" },
                 { color: "#86efac", label: "1-4 units" },
@@ -384,20 +425,17 @@ export default function Record() {
             </div>
           </div>
 
-          {/* Day detail panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Day detail */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
             {selectedData ? (
               <div style={{
                 background: "rgba(255,255,255,0.02)",
                 border: "1px solid rgba(255,255,255,0.08)",
-                borderRadius: 12, padding: "18px",
-                flex: 1,
+                borderRadius: 12, padding: "18px", flex: 1,
               }}>
                 <div style={{ fontSize: 10, color: "#4a5568", marginBottom: 4, letterSpacing: "0.06em" }}>
                   {selectedDay}
-                  {selectedData.sport && (
-                    <span style={{ marginLeft: 8, color: "#374151" }}>· {selectedData.sport}</span>
-                  )}
+                  {selectedData.sport && <span style={{ marginLeft: 8, color: "#374151" }}>· {selectedData.sport}</span>}
                 </div>
                 <div style={{
                   fontSize: 32, fontWeight: 700,
@@ -424,6 +462,30 @@ export default function Record() {
                   ))}
                 </div>
 
+                {/* Individual game results */}
+                {selectedData.results?.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 9, color: "#374151", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Game Results</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {selectedData.results.map((r, i) => (
+                        <div key={i} style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          fontSize: 11, padding: "5px 8px", borderRadius: 6,
+                          background: r.result === 'W' ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.06)",
+                          border: `1px solid ${r.result === 'W' ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)"}`,
+                        }}>
+                          <span style={{ fontWeight: 700, color: r.result === 'W' ? "#22c55e" : "#ef4444" }}>
+                            {r.result === 'W' ? "✓" : "✗"}
+                          </span>
+                          <span style={{ color: "#94a3b8" }}>{r.matchup}</span>
+                          <span style={{ color: "#6b7280", marginLeft: "auto" }}>→ {r.lean}</span>
+                          {r.final_score && <span style={{ color: "#4a5568" }}>{r.final_score}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {selectedData.note && (
                   <div style={{
                     fontSize: 11, color: "#94a3b8", lineHeight: 1.7, marginBottom: 10,
@@ -437,10 +499,7 @@ export default function Record() {
                 )}
 
                 {selectedData.highlight && (
-                  <div style={{
-                    fontSize: 11, color: "#f59e0b", fontWeight: 600,
-                    display: "flex", alignItems: "center", gap: 6
-                  }}>
+                  <div style={{ fontSize: 11, color: "#f59e0b", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
                     <span>⭐</span> {selectedData.highlight}
                   </div>
                 )}
@@ -456,7 +515,7 @@ export default function Record() {
               </div>
             )}
 
-            {/* Monthly summary card */}
+            {/* Monthly summary */}
             <div style={{
               background: "rgba(255,255,255,0.02)",
               border: "1px solid rgba(255,255,255,0.06)",
@@ -466,7 +525,7 @@ export default function Record() {
                 {today.toLocaleString('default', { month: 'long', year: 'numeric' })} · {activeSport}
               </div>
               {monthW + monthL > 0 ? (
-                <div style={{ display: "flex", gap: 20 }}>
+                <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
                   <div>
                     <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 3 }}>RECORD</div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: "#22c55e" }}>{monthW}-{monthL}</div>
@@ -474,7 +533,7 @@ export default function Record() {
                   <div>
                     <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 3 }}>UNITS</div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: monthUnits >= 0 ? "#22c55e" : "#ef4444" }}>
-                      {monthUnits >= 0 ? "+" : ""}{monthUnits.toFixed(1)}u
+                      {monthUnits >= 0 ? "+" : ""}{monthUnits}u
                     </div>
                   </div>
                   <div>
@@ -483,6 +542,14 @@ export default function Record() {
                       {((monthW / (monthW + monthL)) * 100).toFixed(0)}%
                     </div>
                   </div>
+                  {latestRow?.streak && (
+                    <div>
+                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 3 }}>STREAK</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: latestRow.streak.startsWith('W') ? "#22c55e" : "#ef4444" }}>
+                        {latestRow.streak}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ fontSize: 11, color: "#374151" }}>No {activeSport} picks this month yet</div>

@@ -8,8 +8,17 @@ const CONFIDENCE_COLORS = { SHARP: "#ef4444", LEAN: "#f59e0b", INFO: "#6b7280" }
 
 function formatGameTime(raw) {
   if (!raw) return '';
+
+  // If it's already a formatted string like "7:30 PM ET" or "7:00 PM ET",
+  // return it directly — Chrome can't parse these as dates and throws Invalid Date.
+  // A real ISO datetime will contain a 'T' or '-' with digits.
+  if (!/^\d{4}-|\d{4}T/.test(raw)) return raw;
+
   try {
-    return new Date(raw).toLocaleTimeString('en-US', {
+    const d = new Date(raw);
+    // Catch the Invalid Date case explicitly — NaN check on getTime()
+    if (isNaN(d.getTime())) return raw;
+    return d.toLocaleTimeString('en-US', {
       hour: 'numeric', minute: '2-digit',
       timeZone: 'America/New_York', hour12: true
     }) + ' ET';

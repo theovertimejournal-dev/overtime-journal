@@ -882,6 +882,53 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         otj_spread_rule = None
     # ── End OTJ Spread Rule ───────────────────────────────────────────────────
 
+    # ── OTJ Juice Fade Rule ───────────────────────────────────────────────────
+    # Concept: when model leans a heavy favorite but edge score is negative,
+    # the market has already eaten the edge. Underdog spread likely carries
+    # more value per dollar than the ML.
+    # Guards:
+    #   - Only fire when ML odds on lean team are -250 or worse (heavy chalk)
+    #   - Only fire when edge score is negative
+    #   - Only fire when spread >= 6 (skip pick'em noise)
+    otj_juice_fade = None
+    try:
+        if lean and score < 0 and spread_val >= 6.0:
+            lean_is_home_team = (lean == home["team"])
+            if lean_is_home_team:
+                ml_odds = home.get("ml", None)
+                dog_team = away["team"]
+                dog_spread_str = f"+{spread_val}"
+            else:
+                ml_odds = away.get("ml", None)
+                dog_team = home["team"]
+                dog_spread_str = f"+{spread_val}"
+
+            if ml_odds is not None:
+                try:
+                    ml_float = float(ml_odds)
+                    if ml_float <= -250:
+                        strength = "strong" if ml_float <= -350 else "moderate"
+                        otj_juice_fade = {
+                            "lean_team": lean,
+                            "ml_odds": ml_float,
+                            "dog_team": dog_team,
+                            "dog_spread": dog_spread_str,
+                            "edge_score": round(score, 1),
+                            "spread": spread_val,
+                            "strength": strength,
+                            "gut_check_flag": "JUICE_FADE",
+                            "label": (
+                                f"Model leans {lean} but edge score is negative ({round(score, 1)}) "
+                                f"on {ml_float:+.0f} chalk. Market may have fully priced this in. "
+                                f"{dog_team} {dog_spread_str} could carry {strength} spread value."
+                            ),
+                        }
+                except (ValueError, TypeError):
+                    pass
+    except Exception:
+        otj_juice_fade = None
+    # ── End OTJ Juice Fade Rule ───────────────────────────────────────────────
+
     return {
         "lean": lean,
         "confidence": confidence,
@@ -889,6 +936,7 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "signals": signals,
         "ou_lean": None,
         "otj_spread_rule": otj_spread_rule,
+        "otj_juice_fade": otj_juice_fade,
     }
 
 

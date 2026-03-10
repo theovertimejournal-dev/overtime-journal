@@ -149,6 +149,35 @@ def grade_game(game: dict, scores: dict) -> dict | None:
     actual_winner = home_team if final["home_won"] else away_team
     score_str = f"{away_score}-{home_score}" if final["home_won"] else f"{home_score}-{away_score}"
 
+    # Capture ML odds and spread at time of pick for outcome validation
+    lean_is_home = lean == home_team
+    ml_home = game.get("ml_home")
+    ml_away = game.get("ml_away")
+    closing_ml_lean = ml_home if lean_is_home else ml_away
+    closing_ml_dog  = ml_away if lean_is_home else ml_home
+    dog_team = away_team if lean_is_home else home_team
+    home_score_final = final["home_score"]
+    away_score_final = final["away_score"]
+    margin_final = home_score_final - away_score_final
+    dog_covered = None
+    if spread is not None:
+        try:
+            sv = float(spread)
+            if lean_is_home:
+                dog_covered = margin_final < -sv  # away covers
+            else:
+                dog_covered = (-margin_final) < -sv  # home covers
+        except (ValueError, TypeError):
+            pass
+
+    # Gut check flags that fired on this game
+    gut_check_flags = []
+    edge_data = game.get("edge", {})
+    if edge_data.get("otj_juice_fade"):
+        gut_check_flags.append("JUICE_FADE")
+    if edge_data.get("otj_spread_rule"):
+        gut_check_flags.append("SPREAD_VALUE")
+
     return {
         "matchup": matchup,
         "lean": lean,
@@ -158,6 +187,11 @@ def grade_game(game: dict, scores: dict) -> dict | None:
         "final_score": f"{final['away_score']}-{final['home_score']}",
         "actual_winner": actual_winner,
         "spread": spread,
+        "closing_ml_lean": closing_ml_lean,
+        "closing_ml_dog": closing_ml_dog,
+        "dog_team": dog_team,
+        "dog_covered": dog_covered,
+        "gut_check_flags": gut_check_flags,
     }
 
 
@@ -379,6 +413,34 @@ try:
         "results": results,
         "graded_at": datetime.now().isoformat(),
     }, on_conflict="date,sport").execute()
+
+    # ── Track gut check flag outcomes for system validation ───────────────────
+    # Each game that had a gut check flag fired gets logged separately so we
+    # can later query: "when JUICE_FADE fired, how often did the dog cover?"
+    juice_fade_games = [r for r in results if "JUICE_FADE" in r.get("gut_check_flags", [])]
+    spread_value_games = [r for r in results if "SPREAD_VALUE" in r.get("gut_check_flags", [])]
+
+    for r in juice_fade_games + spread_value_games:
+        try:
+            for flag in r.get("gut_check_flags", []):
+                supabase.table("gut_check_outcomes").upsert({
+                    "date": grade_date,
+                    "sport": "nba",
+                    "matchup": r["matchup"],
+                    "flag_type": flag,
+                    "lean_team": r["lean"],
+                    "dog_team": r.get("dog_team"),
+                    "dog_covered": r.get("dog_covered"),
+                    "closing_ml_lean": r.get("closing_ml_lean"),
+                    "closing_ml_dog": r.get("closing_ml_dog"),
+                    "edge_score": r.get("edge_score"),
+                    "spread": r.get("spread"),
+                    "result": r["result"],
+                    "graded_at": datetime.now().isoformat(),
+                }, on_conflict="date,sport,matchup,flag_type").execute()
+        except Exception as e:
+            print(f"  ⚠ gut_check_outcomes log failed (run SQL below to create table): {e}")
+    # ── End gut check outcome tracking ───────────────────────────────────────
     print(f"  ✅ Upserted yesterday_results for {grade_date}")
 except Exception as e:
     print(f"  ⚠ yesterday_results table may not exist yet: {e}")

@@ -412,45 +412,80 @@ def check_b2b(team_id: int, game_date: str, team_abbrev: str = "", espn_yesterda
 # TANK01 DATA HELPERS
 # ============================================================================
 
-def get_tank01_bench(team_abbrev: str) -> dict:
+def get_tank01_bench(team_abbrev: str, injuries: list = None) -> dict:
     """
     Fetch bench net rating for a team via Tank01 Depth Charts.
-    Returns dict with bench_net and bench_ppg, or zeros on failure.
-    Tank01 uses full team names — we map from BDL abbreviations.
+    Dynamically removes tonight's scratches before averaging so the
+    bench rating reflects who is actually available, not the full roster.
+
+    injuries: list of injury dicts for this team (from get_todays_injuries).
+              Players with status Out/Doubtful are excluded from bench calc.
+    Returns dict with bench_net, bench_ppg, available_bench, removed_bench.
     """
-    fallback = {"bench_net": 0, "bench_ppg": 0}
+    fallback = {"bench_net": 0, "bench_ppg": 0, "available_bench": [], "removed_bench": []}
     if not TANK01_AVAILABLE:
         return fallback
 
-    # Tank01 accepts the abbreviation directly in getNBATeamRoster
-    # Depth chart endpoint: getNBADepthCharts
     data = tank01_get("getNBADepthCharts", {"teamAbv": team_abbrev})
     body = data.get("body", [])
 
     if not body:
         return fallback
 
+    # Build set of scratched player names (lowercase) for fast lookup
+    scratched_names = set()
+    if injuries:
+        for p in injuries:
+            name = (p.get("name") or "").lower().strip()
+            if name:
+                scratched_names.add(name)
+                # Also add last name only as fallback match
+                parts = name.split()
+                if parts:
+                    scratched_names.add(parts[-1])
+
     try:
-        # Tank01 returns depth chart grouped by position
-        # Bench players are those NOT listed as starters (depth position > 1)
         bench_net_ratings = []
         bench_pts = []
+        available_bench = []
+        removed_bench = []
 
         team_entry = body[0] if isinstance(body, list) else body
         depth_chart = team_entry.get("depthChart", {}) if isinstance(team_entry, dict) else {}
+
         for position, players in depth_chart.items():
             if not isinstance(players, list):
                 continue
             for i, player in enumerate(players):
                 if i == 0:
-                    # Starter — skip
-                    continue
-                # Bench player
+                    continue  # starter — skip
+
+                # Get player name for scratch check
+                p_name = (
+                    player.get("longName") or
+                    player.get("name") or
+                    f"{player.get('firstName','')} {player.get('lastName','')}".strip()
+                ).lower().strip()
+                p_last = p_name.split()[-1] if p_name else ""
+
+                # Check if this bench player is scratched tonight
+                is_scratched = (
+                    p_name in scratched_names or
+                    p_last in scratched_names
+                )
+
                 net = player.get("netRtg") or player.get("netRating")
                 pts = player.get("pts") or player.get("ppg")
+                display_name = player.get("longName") or player.get("name") or p_name
+
+                if is_scratched:
+                    removed_bench.append(display_name)
+                    continue  # exclude from bench calc
+
                 if net is not None:
                     try:
                         bench_net_ratings.append(float(net))
+                        available_bench.append(display_name)
                     except (ValueError, TypeError):
                         pass
                 if pts is not None:
@@ -461,7 +496,16 @@ def get_tank01_bench(team_abbrev: str) -> dict:
 
         bench_net = round(sum(bench_net_ratings) / len(bench_net_ratings), 1) if bench_net_ratings else 0
         bench_ppg = round(sum(bench_pts), 1) if bench_pts else 0
-        return {"bench_net": bench_net, "bench_ppg": bench_ppg}
+
+        if removed_bench:
+            print(f"  🏥 {team_abbrev} bench adjusted — removed: {', '.join(removed_bench[:4])} | available bench: {len(available_bench)} players", file=sys.stderr)
+
+        return {
+            "bench_net": bench_net,
+            "bench_ppg": bench_ppg,
+            "available_bench": available_bench,
+            "removed_bench": removed_bench,
+        }
 
     except Exception as e:
         print(f"  ⚠ Tank01 bench parse error ({team_abbrev}): {e}", file=sys.stderr)
@@ -882,53 +926,6 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         otj_spread_rule = None
     # ── End OTJ Spread Rule ───────────────────────────────────────────────────
 
-    # ── OTJ Juice Fade Rule ───────────────────────────────────────────────────
-    # Concept: when model leans a heavy favorite but edge score is negative,
-    # the market has already eaten the edge. Underdog spread likely carries
-    # more value per dollar than the ML.
-    # Guards:
-    #   - Only fire when ML odds on lean team are -250 or worse (heavy chalk)
-    #   - Only fire when edge score is negative
-    #   - Only fire when spread >= 6 (skip pick'em noise)
-    otj_juice_fade = None
-    try:
-        if lean and score < 0 and spread_val >= 6.0:
-            lean_is_home_team = (lean == home["team"])
-            if lean_is_home_team:
-                ml_odds = home.get("ml", None)
-                dog_team = away["team"]
-                dog_spread_str = f"+{spread_val}"
-            else:
-                ml_odds = away.get("ml", None)
-                dog_team = home["team"]
-                dog_spread_str = f"+{spread_val}"
-
-            if ml_odds is not None:
-                try:
-                    ml_float = float(ml_odds)
-                    if ml_float <= -250:
-                        strength = "strong" if ml_float <= -350 else "moderate"
-                        otj_juice_fade = {
-                            "lean_team": lean,
-                            "ml_odds": ml_float,
-                            "dog_team": dog_team,
-                            "dog_spread": dog_spread_str,
-                            "edge_score": round(score, 1),
-                            "spread": spread_val,
-                            "strength": strength,
-                            "gut_check_flag": "JUICE_FADE",
-                            "label": (
-                                f"Model leans {lean} but edge score is negative ({round(score, 1)}) "
-                                f"on {ml_float:+.0f} chalk. Market may have fully priced this in. "
-                                f"{dog_team} {dog_spread_str} could carry {strength} spread value."
-                            ),
-                        }
-                except (ValueError, TypeError):
-                    pass
-    except Exception:
-        otj_juice_fade = None
-    # ── End OTJ Juice Fade Rule ───────────────────────────────────────────────
-
     return {
         "lean": lean,
         "confidence": confidence,
@@ -936,7 +933,6 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "signals": signals,
         "ou_lean": None,
         "otj_spread_rule": otj_spread_rule,
-        "otj_juice_fade": otj_juice_fade,
     }
 
 
@@ -944,7 +940,7 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
 # BUILD TEAM PROFILE
 # ============================================================================
 
-def build_team_profile(team_abbrev: str, team_id: int, all_stats: dict, game_date: str, espn_yesterday: set = None) -> dict:
+def build_team_profile(team_abbrev: str, team_id: int, all_stats: dict, game_date: str, espn_yesterday: set = None, injuries: list = None) -> dict:
     """Build a complete team profile for edge calculation."""
     profile = {"team": team_abbrev, "team_id": team_id}
 
@@ -974,7 +970,7 @@ def build_team_profile(team_abbrev: str, team_id: int, all_stats: dict, game_dat
     profile["last10_three"] = l10_three if l10_three is not None else profile["three_pct"]
 
     # Bench net rating — real data via Tank01, fallback to 0
-    bench_data = get_tank01_bench(team_abbrev)
+    bench_data = get_tank01_bench(team_abbrev, injuries=injuries)
     profile["bench_net"] = bench_data["bench_net"]
     profile["bench_ppg"] = bench_data["bench_ppg"]
 
@@ -1555,14 +1551,18 @@ def main():
         if not json_mode:
             print(f"  ⏳ {away_abbrev} @ {home_abbrev}...")
 
-        home_profile = build_team_profile(home_abbrev, home_id, all_stats, game_date, espn_yesterday)
-        away_profile = build_team_profile(away_abbrev, away_id, all_stats, game_date, espn_yesterday)
+        # Fetch injuries first so dynamic bench calc can filter scratches
+        home_injuries = todays_injuries.get(home_id, [])
+        away_injuries = todays_injuries.get(away_id, [])
+
+        home_profile = build_team_profile(home_abbrev, home_id, all_stats, game_date, espn_yesterday, injuries=home_injuries)
+        away_profile = build_team_profile(away_abbrev, away_id, all_stats, game_date, espn_yesterday, injuries=away_injuries)
 
         # Attach injuries
-        home_profile["injuries"] = todays_injuries.get(home_id, [])
-        away_profile["injuries"] = todays_injuries.get(away_id, [])
-        home_profile["key_out"] = [p["name"] for p in home_profile["injuries"] if p["status"] == "Out"]
-        away_profile["key_out"] = [p["name"] for p in away_profile["injuries"] if p["status"] == "Out"]
+        home_profile["injuries"] = home_injuries
+        away_profile["injuries"] = away_injuries
+        home_profile["key_out"] = [p["name"] for p in home_injuries if p["status"] == "Out"]
+        away_profile["key_out"] = [p["name"] for p in away_injuries if p["status"] == "Out"]
 
         # Fetch odds first so spread_home is available for calculate_edge
         odds = todays_odds.get(game_id, {})

@@ -31,7 +31,7 @@ const GoogleIcon = () => (
 );
 
 export function LoginModal({ onClose }) {
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup' | 'forgot'
+  const [mode, setMode] = useState('main'); // 'main' | 'signin' | 'signup' | 'forgot'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -93,132 +93,167 @@ export function LoginModal({ onClose }) {
 
   return (
     <>
-      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 100 }} />
-
+      {/* Scrollable overlay — fixes cutoff on small screens */}
       <div style={{
-        position: 'fixed', top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)', zIndex: 101,
-        background: '#0f1117', border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: 16, padding: '32px 32px 24px', width: '100%', maxWidth: 400,
-        textAlign: 'center', fontFamily: "'JetBrains Mono','SF Mono',monospace",
-        maxHeight: '90vh', overflowY: 'auto',
-      }}>
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        overflowY: 'auto', padding: '40px 16px',
+      }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
 
-        {/* In-app browser warning */}
-        {showInAppWarning && (
-          <div style={{ marginBottom: 16, padding: '12px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', fontSize: 12, color: '#fca5a5', textAlign: 'left' }}>
-            ⚠️ Google sign-in doesn't work here. Copy the link and open in <strong>Chrome or Safari</strong>.
-            <button onClick={() => navigator.clipboard?.writeText(window.location.href)} style={{ display: 'block', marginTop: 8, background: 'rgba(239,68,68,0.2)', border: 'none', color: '#fca5a5', borderRadius: 6, padding: '6px 12px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-              📋 Copy Link
-            </button>
-          </div>
-        )}
+        <div style={{
+          background: '#0d0f18', border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 20, padding: '36px 32px 28px', width: '100%', maxWidth: 420,
+          textAlign: 'center', boxShadow: '0 0 60px rgba(0,0,0,0.8)',
+          fontFamily: "'JetBrains Mono','SF Mono',monospace",
+        }}>
 
-        <div style={{ fontSize: 40, marginBottom: 12 }}>🏀</div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#f1f5f9', marginBottom: 6, letterSpacing: '-0.02em' }}>
-          {mode === 'signin' ? 'Sign in to view edge analysis' : mode === 'signup' ? 'Create your account' : 'Reset password'}
-        </div>
-        <div style={{ fontSize: 12, color: '#4a5568', marginBottom: 24, lineHeight: 1.7 }}>
-          {mode === 'signin' ? 'Unlock edge scores, B2B tiers, spread mismatches, and pick logging.' : mode === 'signup' ? 'Join OTJ and start tracking edges today.' : "We'll send a reset link to your email."}
-        </div>
-
-        {/* Blurred teaser — only on signin */}
-        {mode === 'signin' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 20 }}>
-            {[{ label: 'Edge Score', value: '██' }, { label: 'Confidence', value: '███' }, { label: 'Signals', value: '████' }].map((s, i) => (
-              <div key={i} style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, padding: '10px 8px' }}>
-                <div style={{ fontSize: 9, color: '#4a5568', textTransform: 'uppercase', marginBottom: 4 }}>{s.label}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'transparent', background: 'rgba(255,255,255,0.08)', borderRadius: 3 }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* SIGN IN */}
-        {mode === 'signin' && (
-          <>
-            <input style={{ ...inputStyle, marginBottom: 10 }} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-            <input style={{ ...inputStyle, marginBottom: 6 }} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleEmailSignIn()} />
-            <div style={{ textAlign: 'right', marginBottom: 14 }}>
-              <span onClick={() => setMode('forgot')} style={{ fontSize: 11, color: '#7C3AED', cursor: 'pointer' }}>Forgot password?</span>
-            </div>
-            <button onClick={handleEmailSignIn} disabled={loading} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#7C3AED', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0' }}>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
-              <span style={{ fontSize: 11, color: '#374151' }}>or</span>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
-            </div>
-            <button onClick={signInWithGoogle} style={{ width: '100%', padding: '11px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
-              <GoogleIcon /> Continue with Google
-            </button>
-
-            <div onClick={() => setWantsEmail(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '12px 0', cursor: 'pointer', textAlign: 'left' }}>
-              <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1px solid ${wantsEmail ? '#ef4444' : 'rgba(255,255,255,0.15)'}`, background: wantsEmail ? 'rgba(239,68,68,0.2)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {wantsEmail && <span style={{ fontSize: 9, color: '#ef4444' }}>✓</span>}
-              </div>
-              <span style={{ fontSize: 11, color: '#4a5568' }}>Email me the daily sharp pick + OTJ updates</span>
-            </div>
-
-            {!emailSubmitted ? (
-              <button onClick={handleEmailOnly} style={{ width: '100%', padding: '9px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.05)', background: 'transparent', color: '#374151', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: email ? 'pointer' : 'default', opacity: email ? 1 : 0.4, marginBottom: 8 }}>
-                Just email me picks — no account
+          {/* In-app browser warning */}
+          {showInAppWarning && (
+            <div style={{ marginBottom: 16, padding: '12px', borderRadius: 10, background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', fontSize: 12, color: '#fca5a5', textAlign: 'left' }}>
+              ⚠️ Google sign-in doesn't work here. Copy the link and open in <strong>Chrome or Safari</strong>.
+              <button onClick={() => navigator.clipboard?.writeText(window.location.href)} style={{ display: 'block', marginTop: 8, background: 'rgba(239,68,68,0.2)', border: 'none', color: '#fca5a5', borderRadius: 6, padding: '6px 12px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
+                📋 Copy Link
               </button>
-            ) : (
-              <div style={{ marginBottom: 8, fontSize: 11, color: '#22c55e' }}>✓ You're on the list — daily picks incoming</div>
-            )}
-
-            {message && <div style={msgStyle}>{message}</div>}
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 12 }}>
-              No account?{' '}<span onClick={() => setMode('signup')} style={{ color: '#7C3AED', cursor: 'pointer', fontWeight: 700 }}>Sign up free</span>
             </div>
-          </>
-        )}
+          )}
 
-        {/* SIGN UP */}
-        {mode === 'signup' && (
-          <>
-            <input style={{ ...inputStyle, marginBottom: 10 }} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-            <input style={{ ...inputStyle, marginBottom: 10 }} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
-            <input style={{ ...inputStyle, marginBottom: 14 }} type="password" placeholder="Confirm password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
-            <button onClick={handleEmailSignUp} disabled={loading} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#7C3AED', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
-              {loading ? 'Creating account...' : 'Create Account'}
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0' }}>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
-              <span style={{ fontSize: 11, color: '#374151' }}>or</span>
-              <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
-            </div>
-            <button onClick={signInWithGoogle} style={{ width: '100%', padding: '11px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14 }}>
-              <GoogleIcon /> Continue with Google
-            </button>
-            {message && <div style={msgStyle}>{message}</div>}
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 12 }}>
-              Already have an account?{' '}<span onClick={() => setMode('signin')} style={{ color: '#7C3AED', cursor: 'pointer', fontWeight: 700 }}>Sign in</span>
-            </div>
-            <button onClick={() => setMode('signin')} style={{ marginTop: 14, background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>← Back</button>
-          </>
-        )}
+          {/* MAIN VIEW */}
+          {mode === 'main' && (
+            <>
+              <div style={{ fontSize: 11, color: '#4a5568', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: 10 }}>The Overtime Journal</div>
+              <div style={{ fontSize: 26, fontWeight: 800, color: '#f1f5f9', lineHeight: 1.2, marginBottom: 8, letterSpacing: '-0.03em' }}>
+                Stop guessing.<br /><span style={{ color: '#ef4444' }}>Start edging.</span>
+              </div>
+              <div style={{ fontSize: 12, color: '#4a5568', lineHeight: 1.8, marginBottom: 20 }}>
+                NBA · NHL · MLB · NFL edge analysis.<br />
+                Bench metrics, B2B fatigue, spread mismatches.
+              </div>
 
-        {/* FORGOT PASSWORD */}
-        {mode === 'forgot' && (
-          <>
-            <input style={{ ...inputStyle, marginBottom: 14 }} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-            <button onClick={handleForgotPassword} disabled={loading} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#7C3AED', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer' }}>
-              {loading ? 'Sending...' : 'Send Reset Email'}
-            </button>
-            {message && <div style={msgStyle}>{message}</div>}
-            <button onClick={() => setMode('signin')} style={{ marginTop: 14, background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>← Back to sign in</button>
-          </>
-        )}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginBottom: 24 }}>
+                {[{ label: 'THIS MONTH', value: '11-2' }, { label: 'WIN %', value: '84%' }, { label: 'UNITS', value: '+18.3u' }].map((s, i) => (
+                  <div key={i}>
+                    <div style={{ fontSize: 9, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: '#22c55e' }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
 
-        <button onClick={onClose} style={{ marginTop: 14, background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>
-          Maybe later
-        </button>
+              <input style={{ ...inputStyle, marginBottom: 10 }} type="email" placeholder="your@email.com (optional)" value={email} onChange={e => setEmail(e.target.value)} />
 
-        <div style={{ marginTop: 12, fontSize: 10, color: '#1f2937', lineHeight: 1.6 }}>
-          <a href="/terms" style={{ color: '#374151' }}>Terms</a> · <a href="/privacy" style={{ color: '#374151' }}>Privacy Policy</a>
+              <div onClick={() => setWantsEmail(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, cursor: 'pointer', textAlign: 'left' }}>
+                <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1px solid ${wantsEmail ? '#ef4444' : 'rgba(255,255,255,0.15)'}`, background: wantsEmail ? 'rgba(239,68,68,0.2)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {wantsEmail && <span style={{ fontSize: 9, color: '#ef4444' }}>✓</span>}
+                </div>
+                <span style={{ fontSize: 11, color: '#4a5568', lineHeight: 1.4 }}>Email me the daily sharp pick + OTJ updates</span>
+              </div>
+
+              <button onClick={() => setMode('signup')} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)', background: 'linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))', color: '#f1f5f9', fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
+                Create Free Account
+              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0 8px' }}>
+                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                <span style={{ fontSize: 11, color: '#374151' }}>or</span>
+                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+              </div>
+
+              <button onClick={signInWithGoogle} style={{ width: '100%', padding: '11px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+                <GoogleIcon /> Continue with Google
+              </button>
+
+              <button onClick={() => setMode('signin')} style={{ width: '100%', padding: '10px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.05)', background: 'transparent', color: '#6b7280', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 14 }}>
+                Already have an account? Sign In
+              </button>
+
+              {!emailSubmitted ? (
+                <button onClick={handleEmailOnly} style={{ width: '100%', padding: '9px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', background: 'transparent', color: '#374151', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: email ? 'pointer' : 'default', opacity: email ? 1 : 0.4, marginBottom: 14 }}>
+                  Just email me picks — no account needed
+                </button>
+              ) : (
+                <div style={{ marginBottom: 14, fontSize: 11, color: '#22c55e' }}>✓ You're on the list — daily picks incoming</div>
+              )}
+
+              <div onClick={onClose} style={{ fontSize: 11, color: '#1f2937', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+                onMouseEnter={e => e.currentTarget.style.color = '#374151'}
+                onMouseLeave={e => e.currentTarget.style.color = '#1f2937'}>
+                <span>↓</span><span>See today's free pick first</span>
+              </div>
+            </>
+          )}
+
+          {/* SIGN IN VIEW */}
+          {mode === 'signin' && (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', marginBottom: 20 }}>Welcome back</div>
+              <input style={{ ...inputStyle, marginBottom: 10 }} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+              <input style={{ ...inputStyle, marginBottom: 6 }} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleEmailSignIn()} />
+              <div style={{ textAlign: 'right', marginBottom: 14 }}>
+                <span onClick={() => setMode('forgot')} style={{ fontSize: 11, color: '#7C3AED', cursor: 'pointer' }}>Forgot password?</span>
+              </div>
+              <button onClick={handleEmailSignIn} disabled={loading} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#7C3AED', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
+                {loading ? 'Signing in...' : 'Sign In'}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0' }}>
+                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                <span style={{ fontSize: 11, color: '#374151' }}>or</span>
+                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+              </div>
+              <button onClick={signInWithGoogle} style={{ width: '100%', padding: '11px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14 }}>
+                <GoogleIcon /> Continue with Google
+              </button>
+              {message && <div style={msgStyle}>{message}</div>}
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 12 }}>
+                No account?{' '}<span onClick={() => setMode('signup')} style={{ color: '#7C3AED', cursor: 'pointer', fontWeight: 700 }}>Sign up free</span>
+              </div>
+              <button onClick={() => setMode('main')} style={{ marginTop: 14, background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>← Back</button>
+            </>
+          )}
+
+          {/* SIGN UP VIEW */}
+          {mode === 'signup' && (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', marginBottom: 20 }}>Create your account</div>
+              <input style={{ ...inputStyle, marginBottom: 10 }} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+              <input style={{ ...inputStyle, marginBottom: 10 }} type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} />
+              <input style={{ ...inputStyle, marginBottom: 14 }} type="password" placeholder="Confirm password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} />
+              <button onClick={handleEmailSignUp} disabled={loading} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#7C3AED', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
+                {loading ? 'Creating account...' : 'Create Account'}
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0' }}>
+                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+                <span style={{ fontSize: 11, color: '#374151' }}>or</span>
+                <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.06)' }} />
+              </div>
+              <button onClick={signInWithGoogle} style={{ width: '100%', padding: '11px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', color: '#e2e8f0', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 14 }}>
+                <GoogleIcon /> Continue with Google
+              </button>
+              {message && <div style={msgStyle}>{message}</div>}
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 12 }}>
+                Already have an account?{' '}<span onClick={() => setMode('signin')} style={{ color: '#7C3AED', cursor: 'pointer', fontWeight: 700 }}>Sign in</span>
+              </div>
+              <button onClick={() => setMode('main')} style={{ marginTop: 14, background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>← Back</button>
+            </>
+          )}
+
+          {/* FORGOT PASSWORD VIEW */}
+          {mode === 'forgot' && (
+            <>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', marginBottom: 8 }}>Reset password</div>
+              <div style={{ fontSize: 12, color: '#4a5568', marginBottom: 20 }}>We'll send a reset link to your email.</div>
+              <input style={{ ...inputStyle, marginBottom: 14 }} type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+              <button onClick={handleForgotPassword} disabled={loading} style={{ width: '100%', padding: '12px 0', borderRadius: 8, border: 'none', background: '#7C3AED', color: '#fff', fontSize: 13, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer' }}>
+                {loading ? 'Sending...' : 'Send Reset Email'}
+              </button>
+              {message && <div style={msgStyle}>{message}</div>}
+              <button onClick={() => setMode('signin')} style={{ marginTop: 14, background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit' }}>← Back to sign in</button>
+            </>
+          )}
+
+          <div style={{ marginTop: 16, fontSize: 10, color: '#1f2937', lineHeight: 1.6 }}>
+            <a href="/terms" style={{ color: '#374151' }}>Terms</a> · <a href="/privacy" style={{ color: '#374151' }}>Privacy</a>
+          </div>
+
         </div>
       </div>
     </>

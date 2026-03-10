@@ -192,6 +192,18 @@ const FALLBACK_TICKER = [
 ];
 
 // ── Format a result row into ticker text ─────────────────────────────────────
+function formatGameTime(raw) {
+  if (!raw) return 'TBD';
+  try {
+    const d = new Date(raw);
+    if (isNaN(d)) return raw;
+    return d.toLocaleTimeString('en-US', {
+      hour: 'numeric', minute: '2-digit',
+      timeZone: 'America/New_York', hour12: true
+    }) + ' ET';
+  } catch { return raw; }
+}
+
 function formatTickerItem(result) {
   // result shape from yesterday_results array: { matchup, pick, result, score }
   // OR from games table: { matchup, lean, confidence, final_score }
@@ -257,7 +269,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
       // 2. 3PM–9PM ET: show today's upcoming games — matchup + tip time ONLY (no lean)
       if (etHour >= 15 && etHour < 21) {
         const upcoming = (todaySlate?.games || []).map(g => ({
-          text: `${g.matchup || ''} · ${g.game_time || 'TBD'} ET`,
+          text: `${g.matchup || ''} · ${formatGameTime(g.game_time)}`,
           win: null,
           status: 'upcoming',
         })).filter(t => t.text.length > 5);

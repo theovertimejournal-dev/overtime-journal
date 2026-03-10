@@ -41,13 +41,15 @@ const NAV_STYLES = `
   .otj-nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab-label { display: inline; }
   .nav-username-badge { display: flex; }
-  @media (max-width: 500px) {
+  @media (max-width: 860px) {
     .nav-tab-label { display: none; }
+  }
+  @media (max-width: 500px) {
     .nav-username-badge { display: none !important; }
   }
 `;
 
-function SportTabs({ user, profile }) {
+function SportTabs({ user, profile, onSignIn }) {
   const tabStyle = (isActive) => ({
     fontSize: 12, padding: "6px 10px", borderRadius: 6, textDecoration: "none", fontWeight: 600,
     color: isActive ? "#f1f5f9" : "#4a5568",
@@ -97,7 +99,7 @@ function SportTabs({ user, profile }) {
               <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
             </div>
           )}
-          <AuthButton />
+          <AuthButton onSignIn={onSignIn} />
         </div>
       </nav>
     </>
@@ -246,7 +248,7 @@ export default function App() {
       )}
 
       <div style={{ minHeight: "100vh", background: "#08080f", color: "#e2e8f0", fontFamily: "'JetBrains Mono','SF Mono',monospace" }}>
-        <SportTabs user={user} profile={profile} />
+        <SportTabs user={user} profile={profile} onSignIn={() => setShowWelcome(true)} />
         <Routes>
           <Route path="/" element={<LandingPage user={user} profile={profile} sessionValidated={sessionValidated} />} />
           <Route path="/nba" element={<NBADashboard user={user} profile={profile} sessionValidated={sessionValidated} />} />

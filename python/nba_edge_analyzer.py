@@ -1821,6 +1821,15 @@ def get_player_last10_stats(player_ids: list, season: int = 2025) -> dict:
                 "rebounds_assists":          {"last10": combo([reb,ast],l10),         "last5": combo([reb,ast],l5)},
                 "points_rebounds_assists":   {"last10": combo([pts,reb,ast],l10),     "last5": combo([pts,reb,ast],l5)},
                 "blocks_steals":             {"last10": combo([blk,stl],l10),         "last5": combo([blk,stl],l5)},
+                # raw per-game data for hit rate calculation (last 5 games)
+                "raw_games": [
+                    {
+                        "pts": pts[i], "reb": reb[i], "ast": ast[i],
+                        "blk": blk[i], "stl": stl[i], "fg3m": fg3m[i],
+                        "turnover": turnover[i],
+                    }
+                    for i in range(min(l5, len(games)))
+                ],
             }
         except Exception as e:
             print(f"  ⚠ last10 fetch failed for player {pid}: {e}", file=sys.stderr)
@@ -1864,34 +1873,130 @@ def pick_best_line(props_for_player_stat: list) -> dict | None:
     return ou_props[0]
 
 
-def score_prop(season_avg, line, last5_avg, opp_rank, b2b, opp_b2b, pace_factor):
+def score_prop(season_avg, line, last5_avg, opp_rank, b2b, opp_b2b, pace_factor, last5_games=None):
+    """
+    Score a player prop.
+    last5_games: optional list of raw per-game stat values (floats) for the relevant
+                 prop type across the last 5 games. Used to calculate actual hit rate
+                 against the line — the strongest signal we have.
+    """
     score = 50
     lean_direction = 1
     signals = []
 
+    # ── Step 1: Calculate L5 hit rate (most important signal) ─────────────────
+    # Count how many of the last 5 games the player actually went OVER the line.
+    # This is raw truth — not averages. Averages can be skewed by one blowup game.
+    l5_hit_rate = None
+    l5_overs = 0
+    l5_unders = 0
+    if last5_games and line and len(last5_games) >= 3:
+        valid = [g for g in last5_games if g is not None]
+        if valid:
+            l5_overs  = sum(1 for g in valid if g > line)
+            l5_unders = sum(1 for g in valid if g <= line)
+            l5_hit_rate = l5_overs / len(valid)
+
+    # ── Step 2: Form trend — L5 vs season avg ─────────────────────────────────
+    # If recent form diverges significantly from season avg, weight form heavily.
+    form_trending_down = False
+    form_trending_up   = False
+    form_drop_pct      = 0
+
+    if season_avg and last5_avg and season_avg > 0:
+        form_drop_pct = (season_avg - last5_avg) / season_avg
+        if form_drop_pct >= 0.30:
+            form_trending_down = True   # L5 avg is 30%+ below season — serious cold streak
+        elif form_drop_pct >= 0.15:
+            form_trending_down = True   # L5 avg is 15-29% below season — notable dip
+        elif (last5_avg - season_avg) / season_avg >= 0.20:
+            form_trending_up = True     # L5 avg is 20%+ above season — hot streak
+
+    # ── Step 3: Season avg vs line ────────────────────────────────────────────
+    # Only use season avg as a primary signal if form is NOT trending down.
+    # If form is trending down, season avg is misleading — suppress it.
     if season_avg and line:
         gap = season_avg - line
-        if abs(gap) >= 3:
-            score += min(15, abs(gap) * 2)
-            if gap > 0:
-                signals.append({"text": f"Season avg {season_avg} is +{gap:.1f} above line", "tag": "OVER"})
-                lean_direction = 1
-            else:
-                signals.append({"text": f"Season avg {season_avg} is {gap:.1f} below line", "tag": "UNDER"})
-                lean_direction = -1
-        elif abs(gap) >= 1:
-            score += 5
-            lean_direction = 1 if gap > 0 else -1
+        if form_trending_down:
+            # Season avg is stale — use it as context only, no score impact
+            if abs(gap) >= 3:
+                signals.append({
+                    "text": f"Season avg {season_avg} is {'above' if gap > 0 else 'below'} line but form trending down — stale signal",
+                    "tag": "CONTEXT"
+                })
+            lean_direction = -1  # defer to recent form
+        else:
+            if abs(gap) >= 3:
+                score += min(12, abs(gap) * 1.8)  # reduced from 15 — L5 is primary now
+                if gap > 0:
+                    signals.append({"text": f"Season avg {season_avg:.1f} is +{gap:.1f} above line", "tag": "OVER"})
+                    lean_direction = 1
+                else:
+                    signals.append({"text": f"Season avg {season_avg:.1f} is {gap:.1f} below line", "tag": "UNDER"})
+                    lean_direction = -1
+            elif abs(gap) >= 1:
+                score += 4
+                lean_direction = 1 if gap > 0 else -1
 
+    # ── Step 4: L5 avg vs line ────────────────────────────────────────────────
+    # L5 average — now weighted MORE than season avg
     if last5_avg and line:
         l5_gap = last5_avg - line
         if abs(l5_gap) >= 3:
-            score += 10
+            score += 15  # increased from 10 — recent form is primary
             tag = "OVER" if l5_gap > 0 else "UNDER"
             signals.append({"text": f"L5 avg {last5_avg:.1f} {'above' if l5_gap > 0 else 'below'} line by {abs(l5_gap):.1f}", "tag": tag})
-            if (l5_gap > 0 and lean_direction == 1) or (l5_gap < 0 and lean_direction == -1):
-                score += 5
+            lean_direction = 1 if l5_gap > 0 else -1
+            # Bonus if L5 and season agree
+            if season_avg and not form_trending_down:
+                s_gap = season_avg - line
+                if (l5_gap > 0 and s_gap > 0) or (l5_gap < 0 and s_gap < 0):
+                    score += 5
+                    signals.append({"text": "Season avg and L5 both agree on direction", "tag": tag})
+        elif abs(l5_gap) >= 1.5:
+            score += 6
+            lean_direction = 1 if l5_gap > 0 else -1
 
+    # ── Step 5: Actual hit rate — hardest signal ──────────────────────────────
+    # If we have real per-game data, use actual over/under hit rate vs the line.
+    # This overrides everything. 1/5 or 0/5 kills an OVER pick. 4/5 or 5/5 boosts it.
+    if l5_hit_rate is not None:
+        if l5_overs >= 4:
+            bonus = 18 if l5_overs == 5 else 12
+            score += bonus
+            lean_direction = 1
+            signals.append({"text": f"Hit OVER in {l5_overs} of last {l5_overs+l5_unders} games — strong recent pattern", "tag": "OVER"})
+        elif l5_overs == 3:
+            score += 6
+            signals.append({"text": f"Hit OVER in 3 of last {l5_overs+l5_unders} games — slight lean", "tag": "OVER"})
+        elif l5_unders >= 4:
+            penalty = -20 if l5_unders == 5 else -14
+            score += penalty
+            lean_direction = -1
+            signals.append({"text": f"⚠️ Went UNDER in {l5_unders} of last {l5_overs+l5_unders} games — strong fade signal", "tag": "UNDER"})
+        elif l5_unders == 3:
+            score -= 8
+            lean_direction = -1
+            signals.append({"text": f"Went UNDER in 3 of last {l5_overs+l5_unders} games — lean under", "tag": "UNDER"})
+
+    # ── Step 6: Form trending down — hard penalty ──────────────────────────────
+    if form_trending_down and season_avg and last5_avg:
+        drop_pct_display = round(form_drop_pct * 100)
+        if form_drop_pct >= 0.30:
+            score -= 20
+            signals.append({"text": f"⚠️ FORM COLLAPSE — L5 avg {last5_avg:.1f} is {drop_pct_display}% below season avg {season_avg:.1f}", "tag": "UNDER"})
+        else:
+            score -= 12
+            signals.append({"text": f"⚠️ Form trending down — L5 avg {last5_avg:.1f} is {drop_pct_display}% below season avg {season_avg:.1f}", "tag": "UNDER"})
+        lean_direction = -1
+
+    elif form_trending_up and season_avg and last5_avg:
+        up_pct = round((last5_avg - season_avg) / season_avg * 100)
+        score += 10
+        signals.append({"text": f"🔥 Hot streak — L5 avg {last5_avg:.1f} is {up_pct}% above season avg {season_avg:.1f}", "tag": "OVER"})
+        lean_direction = 1
+
+    # ── Step 7: Matchup, B2B, pace ────────────────────────────────────────────
     if opp_rank:
         if opp_rank >= 25:
             score += 8
@@ -2033,10 +2138,36 @@ def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_
         last10_min = p_last10.get("last10_min")
         last5_min  = p_last10.get("last5_min")
 
+        # Build raw per-game values for L5 hit rate calculation
+        # Maps prop_type to the game log field we stored in get_player_last10_stats
+        raw_field_map = {
+            "points": "pts", "rebounds": "reb", "assists": "ast",
+            "blocks": "blk", "steals": "stl", "turnovers": "turnover",
+            "three_pointers_made": "fg3m",
+        }
+        combo_raw_map = {
+            "points_rebounds": ["pts", "reb"],
+            "points_assists": ["pts", "ast"],
+            "rebounds_assists": ["reb", "ast"],
+            "points_rebounds_assists": ["pts", "reb", "ast"],
+        }
+        last5_games_raw = None
+        try:
+            raw_games = p_last10.get("raw_games", [])[:5]
+            if raw_games:
+                if prop_type in raw_field_map:
+                    fld = raw_field_map[prop_type]
+                    last5_games_raw = [float(g.get(fld) or 0) for g in raw_games]
+                elif prop_type in combo_raw_map:
+                    fields = combo_raw_map[prop_type]
+                    last5_games_raw = [sum(float(g.get(f) or 0) for f in fields) for g in raw_games]
+        except Exception:
+            last5_games_raw = None
+
         score, lean, confidence, signals = score_prop(
             season_avg=season_avg, line=line, last5_avg=last5_avg,
             opp_rank=opp_rank, b2b=False, opp_b2b=False,
-            pace_factor=pace_factor,
+            pace_factor=pace_factor, last5_games=last5_games_raw,
         )
 
         # Minutes trend check — if L10 minutes are down 15%+ vs season, penalize score

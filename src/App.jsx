@@ -266,7 +266,7 @@ export default function App() {
           } />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
-          <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowModal(true)} />} />
+          <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowWelcome(true)} />} />
         </Routes>
       </div>
     </BrowserRouter>

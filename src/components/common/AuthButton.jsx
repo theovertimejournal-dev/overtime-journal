@@ -16,7 +16,8 @@ function isInAppBrowser() {
 const modalOverlay = {
   position: 'fixed', inset: 0, zIndex: 9999,
   background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+  display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+  padding: '40px 24px', overflowY: 'auto',
 };
 
 const modalBox = {

@@ -37,8 +37,8 @@ function ComingSoon({ sport, emoji, phase }) {
 }
 
 const NAV_STYLES = `
-  .otj-nav { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
-  .otj-nav::-webkit-scrollbar { display: none; }
+  .otj-nav-tabs { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex: 1; display: flex; align-items: center; gap: 4; min-width: 0; }
+  .otj-nav-tabs::-webkit-scrollbar { display: none; }
   .nav-tab-label { display: inline; }
   .nav-username-badge { display: flex; }
   @media (max-width: 500px) {
@@ -60,40 +60,43 @@ function SportTabs({ user, profile }) {
   return (
     <>
       <style>{NAV_STYLES}</style>
-      <nav className="otj-nav" style={{
+      <nav style={{
         position: "sticky", top: 0, zIndex: 10,
         background: "rgba(8,8,15,0.95)", backdropFilter: "blur(12px)",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
-        padding: "10px 12px", display: "flex", gap: 4, alignItems: "center",
+        padding: "10px 12px", display: "flex", alignItems: "center", gap: 8,
         fontFamily: "'JetBrains Mono','SF Mono',monospace",
       }}>
-        <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", marginRight: 8, letterSpacing: "-0.02em", flexShrink: 0 }}>OTJ</span>
-        <NavLink to="/" end style={({ isActive }) => tabStyle(isActive)}>🏠<span className="nav-tab-label"> Home</span></NavLink>
-        <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀<span className="nav-tab-label"> NBA</span></NavLink>
-        <NavLink to="/props" style={({ isActive }) => tabStyle(isActive)}>🎯<span className="nav-tab-label"> Props</span></NavLink>
-        <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒<span className="nav-tab-label"> NHL</span></NavLink>
-        <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
-        <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
-        <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
-        <NavLink to="/arcade" style={({ isActive }) => tabStyle(isActive)}>🕹<span className="nav-tab-label"> Arcade</span></NavLink>
+        {/* Logo — always visible */}
+        <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", letterSpacing: "-0.02em", flexShrink: 0 }}>OTJ</span>
 
-        <div style={{ flex: 1, minWidth: 4 }} />
-        {user && profile && (
-          <div className="nav-username-badge" style={{
-            alignItems: "center", gap: 6, marginRight: 8, flexShrink: 0,
-          }}>
-            <div style={{
-              width: 22, height: 22, borderRadius: "50%",
-              background: profile.avatar_color || "#ef4444",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 10, fontWeight: 700, color: "#fff",
-            }}>
-              {profile.username[0].toUpperCase()}
+        {/* Scrollable tabs — takes remaining space */}
+        <div className="otj-nav-tabs">
+          <NavLink to="/" end style={({ isActive }) => tabStyle(isActive)}>🏠<span className="nav-tab-label"> Home</span></NavLink>
+          <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀<span className="nav-tab-label"> NBA</span></NavLink>
+          <NavLink to="/props" style={({ isActive }) => tabStyle(isActive)}>🎯<span className="nav-tab-label"> Props</span></NavLink>
+          <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒<span className="nav-tab-label"> NHL</span></NavLink>
+          <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
+          <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
+          <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
+          <NavLink to="/arcade" style={({ isActive }) => tabStyle(isActive)}>🕹<span className="nav-tab-label"> Arcade</span></NavLink>
+        </div>
+
+        {/* Auth section — always pinned right, never scrolls away */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {user && profile && (
+            <div className="nav-username-badge" style={{ alignItems: "center", gap: 6 }}>
+              <div style={{
+                width: 22, height: 22, borderRadius: "50%",
+                background: profile.avatar_color || "#ef4444",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 10, fontWeight: 700, color: "#fff",
+              }}>
+                {profile.username[0].toUpperCase()}
+              </div>
+              <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
             </div>
-            <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
-          </div>
-        )}
-        <div style={{ flexShrink: 0 }}>
+          )}
           <AuthButton />
         </div>
       </nav>

@@ -94,7 +94,7 @@ Sacramento at home against Indiana. Home court plus a NET_RATING_GAP advantage. 
 
 LAKERS ML (+120)
 
-LeBron at home against Minnesota. The model had LAL with a +7.2 net rating advantage and a BENCH_EDGE signal firing. Line value on the ML at +120 triggered the ML preference over the spread. This was the value anchor — the only plus-money leg on the ticket.
+Lakers at home against Minnesota. The model had LAL with a +7.2 net rating advantage and a BENCH_EDGE signal firing. Line value on the ML at +120 triggered the ML preference over the spread. This was the value anchor — the only plus-money leg on the ticket.
 
 WHY THE MODEL WORKS HERE
 

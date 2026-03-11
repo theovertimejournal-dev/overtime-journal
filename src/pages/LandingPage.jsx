@@ -43,6 +43,8 @@ THE TRACK RECORD
 
 Every pick is logged to Supabase before tip-off. Every outcome is graded automatically overnight. The record you see on this site is real, dated, and auditable — not cherry-picked from a highlight reel. That's the whole point.`,
   },
+
+  
   {
     category: 'ANALYSIS',
     date: 'Mar 11',
@@ -139,6 +141,13 @@ TAKEAWAYS
 
 The 5-2 record on SHARP picks is meaningful. The 1-1 on LEAN picks matches our expectation — LEANs are lower conviction by design. Every pick was logged before tip-off and every grade is verifiable. That's the standard.`,
   },
+  {
+  category: 'GUIDE',
+  date: 'Always updated',
+  title: 'How to Read OTJ: The Complete FAQ',
+  excerpt: '22 questions answered — edge scores, signal tags, the parlay builder, record tracking, and how props work. Start here if you\'re new.',
+  content: '', // not needed — onClick navigates to /faq instead
+}
 ];
 
 // ── Ticker ────────────────────────────────────────────────────────────────────

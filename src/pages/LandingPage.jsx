@@ -17,7 +17,7 @@ THE SIGNALS
 
 NET RATING GAP — The single most predictive team-level stat in the NBA. When one team's net rating exceeds the other by 3+ points, the model pays attention. A 6+ point gap is labeled STRONG. Max impact: ±8 pts on the edge score.
 
-BENCH EDGE — Starters are priced in. Sportsbooks know LeBron's numbers. What they consistently undervalue is the second unit. The model pulls bench net ratings from Tank01 depth charts and fires when the gap exceeds 2 points. Max impact: ±7 pts.
+BENCH EDGE — Starters are priced in. Sportsbooks know LeBron's numbers. What they consistently undervalue is the second unit. The model pulls bench net ratings from *Classified* depth charts and fires when the gap exceeds 2 points. Max impact: ±7 pts.
 
 B2B FATIGUE — Teams on back-to-backs cover the spread at a materially lower rate than rested opponents. This is the most underpriced structural edge in the NBA right now, and books are slow to adjust for travel schedules and compressed rest.
 

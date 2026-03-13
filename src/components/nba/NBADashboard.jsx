@@ -59,7 +59,8 @@ function buildParlay(games, props) {
     const ml = isHome ? g.ml_home : g.ml_away;
     const spread = isHome ? g.spread_home : g.spread_away;
     const spreadStr = spread != null ? `${g.edge.lean} ${parseFloat(spread) > 0 ? '+' : ''}${parseFloat(spread).toFixed(1)}` : g.edge.lean;
-    return { game: g, ev, ml, isHome, type: 'spread', label: spreadStr, matchup: g.matchup, score: g.edge?.score || 0 };
+    const spreadOdds = isHome ? g.spread_home_odds : g.spread_away_odds;
+    return { game: g, ev, ml, isHome, type: 'spread', spreadOdds, label: spreadStr, matchup: g.matchup, score: g.edge?.score || 0 };
   }).sort((a, b) => b.ev - a.ev);
   const spreadLeg = spreadCandidates[0] || null;
 
@@ -100,7 +101,11 @@ function buildParlay(games, props) {
   const config = TIER_CONFIG[tier];
 
   // ── Combined odds — prop assumed -115 ──
-  const decimalOdds = legs.map(leg => leg.type === 'prop' ? toDecimal(-115) : (toDecimal(leg.ml) || 1.87));
+  const decimalOdds = legs.map(leg => {
+    if (leg.type === 'prop') return toDecimal(-115);
+    if (leg.type === 'spread') return toDecimal(leg.spreadOdds) || 1.87; // spread juice ~-110, NOT moneyline
+    return toDecimal(leg.ml) || 1.87; // ML leg uses actual ML odds
+  });
   const combinedDecimal = decimalOdds.reduce((acc, d) => acc * d, 1);
   const combinedAmerican = toAmerican(combinedDecimal);
 
@@ -382,7 +387,16 @@ export default function NBADashboard({ user, profile }) {
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         {leg.score > 0 && <div style={{ fontSize: 10, color: "#4a5568" }}>score: {leg.score}</div>}
-                        {leg.type !== 'prop' && mlVal && (
+                        {leg.type === 'spread' && (() => {
+                          // Show spread juice, NOT the moneyline
+                          const sOdds = leg.spreadOdds ? parseInt(leg.spreadOdds) : -110;
+                          return (
+                            <div style={{ fontSize: 12, fontWeight: 700, color: sOdds > 0 ? "#22c55e" : "#6b7280" }}>
+                              {sOdds > 0 ? `+${sOdds}` : sOdds}
+                            </div>
+                          );
+                        })()}
+                        {leg.type === 'ml' && mlVal && (
                           <div style={{ fontSize: 12, fontWeight: 700, color: mlVal > 0 ? "#22c55e" : "#6b7280" }}>
                             {mlVal > 0 ? `+${mlVal}` : mlVal}
                           </div>

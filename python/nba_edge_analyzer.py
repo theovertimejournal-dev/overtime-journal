@@ -1197,8 +1197,20 @@ def build_b2b_and_mismatches(all_results: list, game_date: str) -> tuple:
         lean_team = r["edge"].get("lean", "")
         confidence = r["edge"].get("confidence", "INFO")
 
-        # Model implied spread = edge_score * 0.5 (rough conversion)
-        model_implied = round(edge_score * 0.5, 1)
+        # Model implied spread — use same formula as gut check for consistency:
+        # fair_spread = net_rating_diff * 0.45 (industry standard conversion)
+        # This ensures INFLATED card and gut check tell the same story to the user.
+        h_net = r["home"].get("net_rating", 0) or 0
+        a_net = r["away"].get("net_rating", 0) or 0
+        raw_net_diff = abs(h_net - a_net)
+        # Fall back to edge_score * 0.5 only if net ratings are unavailable
+        if raw_net_diff >= 1.0:
+            model_implied = round(raw_net_diff * 0.45, 1)
+            # Preserve sign: positive = home favored by that much
+            if h_net < a_net:
+                model_implied = -model_implied
+        else:
+            model_implied = round(edge_score * 0.5, 1)
         gap = round(abs(spread_val) - abs(model_implied), 1)
 
         # Only flag meaningful gaps (2+ pts) on B2B teams or SHARP/LEAN games
@@ -1213,12 +1225,20 @@ def build_b2b_and_mismatches(all_results: list, game_date: str) -> tuple:
                 # Home favored in spread, but model likes away — mismatch
                 direction = "INFLATED"
                 verdict_color = "#ef4444"
-                verdict = f"Market has {home['team']} -{abs(spread_val)} but our model only gives them a {abs(model_implied):.1f}pt edge — spread may be inflated. Fade value on {away['team']}."
+                verdict = (
+                    f"Market has {home['team']} -{abs(spread_val)} but net ratings project "
+                    f"a {abs(model_implied):.1f}-pt game — spread may be inflated. "
+                    f"Fade value on {away['team']}."
+                )
             elif spread_val > 0 and model_implied < 0:
                 # Home underdog in spread, model likes home — undervalued
                 direction = "UNDERVALUED"
                 verdict_color = "#22c55e"
-                verdict = f"Market has {home['team']} +{spread_val} but our model gives them a {abs(model_implied):.1f}pt edge — line may be soft. Value on {home['team']}."
+                verdict = (
+                    f"Market has {home['team']} +{spread_val} but net ratings project "
+                    f"a {abs(model_implied):.1f}-pt game — line may be soft. "
+                    f"Value on {home['team']}."
+                )
             elif has_b2b:
                 # B2B team still favored — fatigue not priced in
                 b2b_team_name = away["team"] if away.get("b2b") else home["team"]
@@ -1357,6 +1377,10 @@ def build_parlay(all_results: list, spread_mismatches: list) -> dict | None:
             pick_line = lean_team
 
         signals = edge.get("signals", [])
+        # Spread odds for the lean team — used by frontend to show juice, NOT moneyline
+        spread_odds = (
+            result.get("spread_home_odds") if is_home else result.get("spread_away_odds")
+        )
         return {
             "label": label,
             "matchup": result["matchup"],
@@ -1364,6 +1388,7 @@ def build_parlay(all_results: list, spread_mismatches: list) -> dict | None:
             "lean_team": lean_team,
             "pick": pick_line,
             "pick_type": pick_type,
+            "spread_odds": spread_odds,   # e.g. -110, use this for spread display NOT ml
             "confidence": edge["confidence"],
             "score": round(edge["score"], 1),
             "top_signal": signals[0]["detail"] if signals else "Model edge",

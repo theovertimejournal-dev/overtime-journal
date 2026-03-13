@@ -674,6 +674,61 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     signals = []
     score = 0.0
 
+    # ── Franchise Star Penalty ────────────────────────────────────────────────
+    # When a franchise-caliber player is out, their team's season net rating
+    # was built WITH them — it's misleading. We apply a net rating discount
+    # before scoring so the model doesn't lean on inflated team quality numbers.
+    # This fires whether the injury is "fresh" or "already priced in" — the
+    # net rating is stale either way.
+    FRANCHISE_STARS = {
+        # Format: "PLAYER NAME": ("TEAM_ABBREV", net_rating_penalty)
+        "Victor Wembanyama": ("SAS", 6.0),
+        "Joel Embiid":       ("PHI", 5.0),
+        "Giannis Antetokounmpo": ("MIL", 6.0),
+        "Nikola Jokic":      ("DEN", 6.0),
+        "Luka Doncic":       ("DAL", 6.0),
+        "Stephen Curry":     ("GSW", 5.0),
+        "LeBron James":      ("LAL", 4.0),
+        "Kevin Durant":      ("PHO", 4.5),
+        "Jayson Tatum":      ("BOS", 4.5),
+        "Damian Lillard":    ("MIL", 4.5),
+        "Anthony Davis":     ("LAL", 5.0),
+        "Kawhi Leonard":     ("LAC", 4.5),
+        "Paul George":       ("PHI", 3.5),
+        "Zion Williamson":   ("NOP", 4.0),
+        "Ja Morant":         ("MEM", 4.5),
+    }
+
+    for team_data, label in [(home, "Home"), (away, "Away")]:
+        team_injuries = team_data.get("injuries", [])
+        team_abbrev = team_data["team"]
+        for inj in team_injuries:
+            player_name = inj.get("name", "")
+            if player_name in FRANCHISE_STARS:
+                star_team, penalty = FRANCHISE_STARS[player_name]
+                if star_team == team_abbrev and inj.get("status") in ("Out", "Doubtful"):
+                    original_net = team_data.get("net_rating", 0)
+                    adjusted_net = round(original_net - penalty, 1)
+                    team_data["net_rating"] = adjusted_net
+                    team_data["net_rating_adjusted"] = True
+                    signals.append({
+                        "type": "STAR_OUT_NET_PENALTY",
+                        "detail": (
+                            f"{player_name} ({team_abbrev}) OUT — net rating adjusted "
+                            f"from {original_net:+.1f} to {adjusted_net:+.1f} "
+                            f"(season rating built with star on floor)"
+                        ),
+                        "favors": "FADE" if label == "Home" else home["team"],
+                        "strength": "CAUTION",
+                        "impact": round(-penalty, 1),
+                    })
+                    print(
+                        f"  ⚠ STAR PENALTY: {player_name} OUT — {team_abbrev} net rating "
+                        f"{original_net:+.1f} → {adjusted_net:+.1f}",
+                        file=__import__("sys").stderr,
+                    )
+    # ── End Franchise Star Penalty ────────────────────────────────────────────
+
     # Net rating gap
     h_net = home.get("net_rating", 0)
     a_net = away.get("net_rating", 0)

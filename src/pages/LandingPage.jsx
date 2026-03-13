@@ -224,6 +224,42 @@ The 5-2 record on SHARP picks is meaningful. The 1-1 on LEAN picks matches our e
 }
 ];
 
+// ── Injury Alert Banner ───────────────────────────────────────────────────────
+const INJURY_ALERTS = [
+  { player: 'Victor Wembanyama', team: 'SAS', status: 'OUT', note: 'Lines may not be fully adjusted — SAS edge scores affected' },
+];
+
+function InjuryAlertBanner() {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed || INJURY_ALERTS.length === 0) return null;
+  return (
+    <div style={{
+      background: 'rgba(239,68,68,0.08)', borderBottom: '1px solid rgba(239,68,68,0.2)',
+      padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1 }}>
+        <span style={{ fontSize: 9, fontFamily: MONO, letterSpacing: '0.15em', color: '#ef4444', fontWeight: 700, whiteSpace: 'nowrap' }}>
+          🚨 INJURY ALERT
+        </span>
+        {INJURY_ALERTS.map((a, i) => (
+          <span key={i} style={{ fontSize: 10, fontFamily: MONO, color: '#9ca3af' }}>
+            <span style={{ color: '#f87171', fontWeight: 700 }}>{a.player}</span>
+            <span style={{ color: '#4a5568' }}> · {a.team} · </span>
+            <span style={{ color: '#ef4444' }}>{a.status}</span>
+            <span style={{ color: '#4a5568' }}> — {a.note}</span>
+          </span>
+        ))}
+      </div>
+      <button onClick={() => setDismissed(true)} style={{
+        background: 'none', border: 'none', color: '#4a5568', cursor: 'pointer',
+        fontSize: 14, lineHeight: 1, padding: '0 4px', fontFamily: MONO,
+        flexShrink: 0,
+      }}>✕</button>
+    </div>
+  );
+}
+
 // ── Ticker ────────────────────────────────────────────────────────────────────
 function Ticker({ items }) {
   return (
@@ -571,6 +607,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
 
       {activePost && <PostModal post={activePost} onClose={() => setActivePost(null)} />}
 
+      <InjuryAlertBanner />
       <Ticker items={tickerItems.length ? tickerItems : FALLBACK_TICKER} />
 
       {/* ── Hero ── */}

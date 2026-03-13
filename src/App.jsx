@@ -119,11 +119,36 @@ export default function App() {
     let fetchingProfile = false;
 
     // Force server-side token validation on every load.
-    // If no session exists, mark immediately so we don't hang.
+    // CHROME FIX: Hard refresh in Chrome sometimes swallows the onAuthStateChange
+    // event after refreshSession(), leaving the app stuck on LOADING... forever.
+    // Two-layer fix:
+    //   1. After refreshSession resolves, explicitly unblock if refresh failed
+    //   2. 4s fallback timer forces sessionValidated=true if event never fires
+    const refreshFallbackTimer = setTimeout(() => {
+      setAuthChecked(prev => { if (!prev) console.warn('[Auth] Chrome fallback: forced authChecked'); return true; });
+      setSessionValidated(prev => { if (!prev) console.warn('[Auth] Chrome fallback: forced sessionValidated'); return true; });
+    }, 4000);
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
-        await supabase.auth.refreshSession();
-        // onAuthStateChange fires with refreshed session or SIGNED_OUT
+        try {
+          const { error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError) {
+            // Refresh token expired or invalid — sign out cleanly
+            console.warn('[Auth] refreshSession failed:', refreshError.message);
+            setUser(null);
+            setProfile(null);
+            setProfileLoading(false);
+            setAuthChecked(true);
+            setSessionValidated(true);
+            setShowWelcome(true);
+          }
+          // On success: onAuthStateChange fires TOKEN_REFRESHED — fallback timer covers Chrome drop
+        } catch (e) {
+          console.warn('[Auth] refreshSession exception:', e.message);
+          setAuthChecked(true);
+          setSessionValidated(true);
+        }
       } else {
         setSessionValidated(true);
         setAuthChecked(true);
@@ -214,6 +239,7 @@ export default function App() {
 
     return () => {
       subscription.unsubscribe();
+      clearTimeout(refreshFallbackTimer);
     };
   }, []);
 

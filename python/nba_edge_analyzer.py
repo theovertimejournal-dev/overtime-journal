@@ -981,12 +981,41 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
 
                     if dog_team and favored_team:
                         strength = "strong" if gap >= 6 else "moderate" if gap >= 4 else "mild"
+
+                        # ── Gut check padding ─────────────────────────────────
+                        # When model sees a closer game than Vegas, the raw dog
+                        # spread is not where the value lives — cushion is.
+                        # We recommend a padded number (+4 to +5 pts beyond
+                        # fair spread) so the bettor has real margin of error.
+                        # Example: Model says 6-pt game, Vegas -11.5
+                        #   Raw dog = +11.5 (cuts it close if model is right)
+                        #   Padded suggestion = +15 or better (real cushion)
+                        # The bettor wins even if the model undershoots slightly.
+                        try:
+                            raw_dog_num = float(dog_spread.replace("+", "")) if dog_spread else spread_val
+                            padding = 4.0 if gap < 5 else 5.0
+                            padded_num = raw_dog_num + padding
+                            # Round to nearest .5 for clean line shopping
+                            padded_num = round(padded_num * 2) / 2
+                            padded_spread = f"+{padded_num}"
+                            padding_label = (
+                                f"Gut check says {fair_spread}-pt game vs Vegas {spread_val}. "
+                                f"Raw dog {dog_spread} is on the edge — if you play this, "
+                                f"shop for {padded_spread} or better for real cushion. "
+                                f"The value is in the number, not just the side."
+                            )
+                        except Exception:
+                            padded_spread = dog_spread
+                            padding_label = None
+
                         otj_spread_rule = {
                             "fair_spread": fair_spread,
                             "vegas_spread": spread_val,
                             "gap": gap,
                             "dog_team": dog_team,
                             "dog_spread": dog_spread,
+                            "padded_spread": padded_spread,
+                            "padding_label": padding_label,
                             "favored_team": favored_team,
                             "strength": strength,
                             "label": (

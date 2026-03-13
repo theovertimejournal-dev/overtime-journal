@@ -7,6 +7,51 @@ const MONO = "'JetBrains Mono','SF Mono','Fira Code',monospace";
 // ── Blog posts with full content ─────────────────────────────────────────────
 const BLOG_POSTS = [
   {
+    category: "TONIGHT'S LESSON",
+    date: 'Mar 13',
+    title: 'We Lost. Here\'s Exactly Why. 📓',
+    excerpt: 'Two legs killed everything last night — SAS moneyline and CHI spread. The gut check was right about the game script. The number was wrong. Here\'s the lesson, and how one reader turned the same slate into $238.',
+    content: `We're not going to hide this one. That's not what OTJ is.
+
+THE OVERTIME JOURNAL IS NOT A PICKS SERVICE.
+
+It's a place for real gamblers who want to find the best edge and value for their money. No tout nonsense. No cherry-picked records. Every result — win or loss — gets logged, explained, and learned from. Over time, with a genuine edge, the math works in your favor. That's expected value. That's what we're building toward.
+
+Last night was a loss. Here's exactly what happened.
+
+THE TWO KILLERS
+
+Every ticket on the board died on the same two legs: San Antonio moneyline and Chicago Bulls spread (+11 / +11.5).
+
+The Spurs: The model flagged a value spot after the Wembanyama scratch — but it didn't have a hard stop for full roster decimation scenarios. That gap is being patched this week. When a franchise star goes down that late, the lean should die entirely. Lesson logged. Fix shipping.
+
+The Bulls: This one stings different. Vegas had Chicago as 11.5-point dogs. The gut check model projected a much closer game — and it was RIGHT. Bulls lost by 12. One point off the raw Vegas line. The game script played out almost exactly as modeled. The number just didn't have enough cushion.
+
+THE TICKETS
+
+- 6-Leg Parlay (+2346) — MIA ML ✅ BKN +16.5 ✅ MEM +10.5 ✅ SAS ML ❌ BOS +8 ✅ CHI +11.5 ❌
+- 3-Leg Parlay (+327) — SAS ML ❌ BOS +2.5 ✅ CHI +10.5 ❌
+- 2-Leg Parlays (+256 each) — BOS +8.5 ✅ CHI +11.5 ❌
+
+Same two legs. Every time.
+
+THE LESSON ON THE BULLS
+
+When gut check fires and says "closer game than Vegas thinks," the raw spread is not where the value lives. The value is in shopping for a bigger number.
+
+A reader figured this out on their own last night. Same slate, same Bulls game — but they took Chicago +16 as part of a 9-leg spread parlay. Bulls lost by 12. Covered +16 by 4 points. One number decision turned the same information into $238 on a $15 FanCash ticket.
+
+That's the correlated parlay milk applied correctly. You don't just take the side — you take the right number on the right side. The model gave the direction. The cushion made it cashable.
+
+Starting today, when the gut check fires, OTJ will show you a padded spread recommendation alongside the raw line — so you know where the actual value lives, not just which side the model likes.
+
+THE RECORD
+
+26-13. We post everything. The streak was going to end eventually. What matters is the system keeps getting smarter and we stay honest about every result.
+
+Send your bad beats. Send your wins. This journal belongs to anyone who's serious about the game. 🔥`,
+  },
+  {
     category: 'STRATEGY',
     date: 'Mar 11',
     title: 'Correlated Parlay Milk 🥛',
@@ -224,14 +269,12 @@ The 5-2 record on SHARP picks is meaningful. The 1-1 on LEAN picks matches our e
 }
 ];
 
-// ── Injury Alert Banner ───────────────────────────────────────────────────────
-const INJURY_ALERTS = [
-  { player: 'Victor Wembanyama', team: 'SAS', status: 'OUT', note: 'Lines may not be fully adjusted — SAS edge scores affected' },
-];
-
-function InjuryAlertBanner() {
+// ── Dynamic Star Injury Alert Banner ─────────────────────────────────────────
+// Reads fresh scratches from today's slate data — no hardcoding needed.
+// Auto-triggers for any player with tenure="fresh" on game day.
+function InjuryAlertBanner({ alerts }) {
   const [dismissed, setDismissed] = useState(false);
-  if (dismissed || INJURY_ALERTS.length === 0) return null;
+  if (dismissed || !alerts?.length) return null;
   return (
     <div style={{
       background: 'rgba(239,68,68,0.08)', borderBottom: '1px solid rgba(239,68,68,0.2)',
@@ -240,14 +283,15 @@ function InjuryAlertBanner() {
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1 }}>
         <span style={{ fontSize: 9, fontFamily: MONO, letterSpacing: '0.15em', color: '#ef4444', fontWeight: 700, whiteSpace: 'nowrap' }}>
-          🚨 INJURY ALERT
+          🚨 LATE INJURY
         </span>
-        {INJURY_ALERTS.map((a, i) => (
+        {alerts.map((a, i) => (
           <span key={i} style={{ fontSize: 10, fontFamily: MONO, color: '#9ca3af' }}>
             <span style={{ color: '#f87171', fontWeight: 700 }}>{a.player}</span>
             <span style={{ color: '#4a5568' }}> · {a.team} · </span>
             <span style={{ color: '#ef4444' }}>{a.status}</span>
             <span style={{ color: '#4a5568' }}> — {a.note}</span>
+            {i < alerts.length - 1 && <span style={{ color: '#374151' }}> &nbsp;·&nbsp; </span>}
           </span>
         ))}
       </div>
@@ -507,6 +551,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
   const [picks,       setPicks]       = useState([]);
   const [record,      setRecord]      = useState({ yesterday: '—', week: '—', month: '—', allTime: '—' });
   const [loading,     setLoading]     = useState(true);
+  const [starAlerts,   setStarAlerts]   = useState([]);
   const heroRef = useRef(null);
 
   const fetchSlateData = useCallback(async () => {
@@ -570,6 +615,27 @@ export default function LandingPage({ user, profile, sessionValidated }) {
         }));
 
       setPicks(topPicks);
+
+      // ── Dynamic star injury alerts ─────────────────────────────────
+      // Scan today's games for fresh scratches — auto-banner on game day
+      const freshAlerts = [];
+      for (const g of games) {
+        const allInjuries = [
+          ...(g.home?.injuries || []).map(p => ({ ...p, team: g.home?.team || '' })),
+          ...(g.away?.injuries || []).map(p => ({ ...p, team: g.away?.team || '' })),
+        ];
+        for (const inj of allInjuries) {
+          if (inj.tenure === 'fresh' && inj.status === 'Out') {
+            freshAlerts.push({
+              player: inj.name,
+              team: inj.team,
+              status: 'OUT',
+              note: 'Late scratch — lines may not be fully adjusted',
+            });
+          }
+        }
+      }
+      setStarAlerts(freshAlerts);
     } catch (err) {
       console.warn('[LandingPage] Supabase fetch failed:', err.message);
     } finally {
@@ -607,7 +673,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
 
       {activePost && <PostModal post={activePost} onClose={() => setActivePost(null)} />}
 
-      <InjuryAlertBanner />
+      <InjuryAlertBanner alerts={starAlerts} />
       <Ticker items={tickerItems.length ? tickerItems : FALLBACK_TICKER} />
 
       {/* ── Hero ── */}

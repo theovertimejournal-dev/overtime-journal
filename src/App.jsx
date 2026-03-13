@@ -121,20 +121,36 @@ export default function App() {
     // Force server-side token validation on every load.
     // CHROME FIX: Hard refresh in Chrome sometimes swallows the onAuthStateChange
     // event after refreshSession(), leaving the app stuck on LOADING... forever.
-    // Two-layer fix:
-    //   1. After refreshSession resolves, explicitly unblock if refresh failed
-    //   2. 4s fallback timer forces sessionValidated=true if event never fires
-    const refreshFallbackTimer = setTimeout(() => {
-      setAuthChecked(prev => { if (!prev) console.warn('[Auth] Chrome fallback: forced authChecked'); return true; });
-      setSessionValidated(prev => { if (!prev) console.warn('[Auth] Chrome fallback: forced sessionValidated'); return true; });
-    }, 4000);
+    // We set a longer fallback timer AND load the session directly as a rescue path.
+    const refreshFallbackTimer = setTimeout(async () => {
+      // Only fire if we're still stuck — Chrome dropped the event
+      // Re-read the session directly instead of just unblocking with empty state
+      const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+      if (fallbackSession?.user) {
+        console.warn('[Auth] Chrome fallback: loading session directly');
+        setUser(fallbackSession.user);
+        // Fetch profile for this user
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('user_id', fallbackSession.user.id)
+            .single();
+          setProfile(data || null);
+        } catch (e) { /* silent */ }
+        setProfileLoading(false);
+      } else {
+        console.warn('[Auth] Chrome fallback: no session found, showing as logged out');
+      }
+      setAuthChecked(true);
+      setSessionValidated(true);
+    }, 5000);
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         try {
           const { error: refreshError } = await supabase.auth.refreshSession();
           if (refreshError) {
-            // Refresh token expired or invalid — sign out cleanly
             console.warn('[Auth] refreshSession failed:', refreshError.message);
             setUser(null);
             setProfile(null);
@@ -143,7 +159,6 @@ export default function App() {
             setSessionValidated(true);
             setShowWelcome(true);
           }
-          // On success: onAuthStateChange fires TOKEN_REFRESHED — fallback timer covers Chrome drop
         } catch (e) {
           console.warn('[Auth] refreshSession exception:', e.message);
           setAuthChecked(true);
@@ -172,6 +187,9 @@ export default function App() {
       }
 
       if (event === 'TOKEN_REFRESHED' && session) {
+        // Chrome fix: TOKEN_REFRESHED fires but we need to set the user
+        // The fallback below handles profile fetch — just unblock here
+        setUser(session.user);
         setAuthChecked(true);
         setSessionValidated(true);
         return;

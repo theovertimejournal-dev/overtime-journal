@@ -62,8 +62,8 @@ LAST NIGHT
 
 The slate felt right. Model was firing on IND, MEM, TOR, HOU, UTA. Two tickets went in:
 
-3-Leg Parlay — $200: MIN ML ✅ UTA +16 ✅ ORL -13 ❌ — one bad leg, lost $200.
-6-Leg Parlay — $25: IND +18.5 ✅ MEM +20 ✅ TOR ML ✅ HOU ML ✅ UTA +20 ✅ ORL -7.5 ✅ — hit clean, $282 back with a 25% boost.
+3-Leg Parlay — $200: MIN ML ✅ UTA +16 ✅ LAC -13 ❌ — one bad leg, lost $200, but so close to making it a $1250 profit day!
+6-Leg Parlay — $25: IND +18.5 ✅ MEM +20 ✅ TOR ML ✅ HOU ML ✅ UTA +20 ✅ LAC -7.5 ✅ — hit clean, $282 back with a 25% boost.
 
 Down $40 on the night. But here\'s the thing — the $25 ticket was the insurance. It was built with wider spreads and more cushion on the same games. The $200 ticket was the conviction play.
 
@@ -91,7 +91,7 @@ Join here: https://discord.gg/j3nV3CBY 🔥`,
   },
   {
     category: "TONIGHT'S LESSON",
-    date: 'Mar 13',
+    date: 'Mar 12',
     title: 'We Lost. Here\'s Exactly Why. 📓',
     excerpt: 'Two legs killed everything last night — SAS moneyline and CHI spread. The gut check was right about the game script. The number was wrong. Here\'s the lesson, and how one reader turned the same slate into $238.',
     content: `We're not going to hide this one. That's not what OTJ is.

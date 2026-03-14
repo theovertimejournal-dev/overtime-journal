@@ -65,17 +65,17 @@ The slate felt right. Model was firing on IND, MEM, TOR, HOU, UTA. Two tickets w
 3-Leg Parlay — $200: MIN ML ✅ UTA +16 ✅ LAC -13 ❌ — one bad leg, lost $200, but so close to making it a $1250 profit day!
 6-Leg Parlay — $25: IND +18.5 ✅ MEM +20 ✅ TOR ML ✅ HOU ML ✅ UTA +20 ✅ LAC -7.5 ✅ — hit clean, $282 back with a 25% boost.
 
-Down $40 on the night. But here\'s the thing — the $25 ticket was the insurance. It was built with wider spreads and more cushion on the same games. The $200 ticket was the conviction play.
+Down $20 on the night. But here\'s the thing — the $25 ticket was the insurance. It was built with wider spreads and more cushion on the same games. The $200 ticket was the conviction play.
 
-The ORL -13 leg killed the conviction ticket. ORL -7.5 on the insurance ticket hit easy.
+The LAC -13 leg killed the conviction ticket. LAC -7.5 on the insurance ticket hit easy.
 
-That\'s the all-in or nothing structure working exactly as designed. The big ticket lost. The insurance caught it. Instead of being down $200, down $40.
+That\'s the all-in or nothing structure working exactly as designed. The big ticket lost. The insurance caught it. Instead of being down $200, down $20.
 
 THE LESSON
 
 If you\'re going to size up on a slate you believe in — always build the insurance ticket first. It forces you to think about where the real cushion is, not just where the model points.
 
-The insurance ticket on last night\'s slate wasn\'t random. It was the same games, same sides, but wider numbers. IND +18.5 instead of whatever the main ticket had. ORL -7.5 instead of -13. The cushion is where you don\'t get killed when one game script goes sideways.
+The insurance ticket on last night\'s slate wasn\'t random. It was the same games, same sides, but wider numbers. IND +18.5 instead of whatever the main ticket had. LAC -7.5 instead of -13. The cushion is where you don\'t get killed when one game script goes sideways.
 
 Could have profited big last night. Instead broke even. That\'s not a loss — that\'s the system working.
 

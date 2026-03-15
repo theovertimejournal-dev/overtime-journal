@@ -1,0 +1,47 @@
+name: OTJ Odds Refresh (Game Hours)
+
+on:
+  schedule:
+    # Every 10 minutes, 3PM-4AM UTC = 10AM-11PM ET
+    # Covers early tip-offs (10AM ET) all the way through late west coast games.
+    # GitHub Actions cron doesn't support hour ranges so we list each hour.
+    - cron: '0,10,20,30,40,50 15,16,17,18,19,20,21,22,23 * * *'
+    - cron: '0,10,20,30,40,50 0,1,2,3 * * *'
+
+  # Allow manual trigger from GitHub Actions UI for testing
+  workflow_dispatch:
+
+jobs:
+  refresh-odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-refresh-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-refresh-
+
+      - name: Install dependencies
+        run: pip install supabase requests python-dotenv
+
+      - name: Run odds refresh
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BALLDONTLIE_API_KEY:  ${{ secrets.BALLDONTLIE_API_KEY }}
+          TANK01_API_KEY:       ${{ secrets.TANK01_API_KEY }}
+        run: |
+          cd python
+          python refresh_odds.py

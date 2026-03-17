@@ -6,6 +6,35 @@ const MONO = "'JetBrains Mono','SF Mono','Fira Code',monospace";
 
 // ── Blog posts with full content ─────────────────────────────────────────────
 const BLOG_POSTS = [
+    {
+    category: 'PRODUCT UPDATE',
+    date: 'Mar 17',
+    title: 'New Signal: Positional Mismatch 📐',
+    excerpt: 'The model now detects when a franchise star is facing a depleted defensive matchup. Giannis vs a backup center with a -4 bench net is not the same game as Giannis vs a healthy starter. Now the edge score knows that.',
+    content: `The model just got smarter about one of the most consistently underpriced edges in the NBA — positional mismatches.
+
+WHAT IT DOES
+
+When a franchise-caliber player is active and their primary defensive matchup is either injured or backed by a weak unit, a new POSITIONAL_MISMATCH signal fires. The edge score adjusts. The signal shows up in the game card.
+
+THE REAL-WORLD EXAMPLE
+
+Say Giannis is playing tonight. The opposing team's starting center is out. Their backup is logging a -4.2 bench net rating — meaning they're actively hurting the team when they're on the floor. That's not just a personnel change. That's a structural mismatch Vegas lines often fail to fully price, especially on same-day scratches.
+
+Before today: model saw the injury, applied a fresh scratch bonus if it was recent, and moved on.
+
+After today: model cross-references the star's position against the opposing depth chart. If the defensive matchup is weak — by injury, by bench net, or both — the signal fires with a 2.0-4.5 point impact on the edge score depending on severity.
+
+WHAT IT COVERS
+
+15 franchise stars are mapped with positional types — bigs like Jokic, Wemby, Giannis. Wings like Tatum, Durant, Kawhi. Guards like Curry, Morant, Lillard. For each one, if the opposing team is thin at that position, the mismatch gets flagged.
+
+HOW IT'S WEIGHTED
+
+The signal is intentionally conservative — supporting signal only, never lead signal. It won't flip a game from INFO to SHARP on its own. But when it stacks with net rating, B2B fatigue, or fresh scratch signals, it adds meaningful conviction to an existing lean.
+
+We'll track outcomes against this signal over the next few weeks to validate it before weighting it higher. That's how OTJ builds — ship the signal, log the outcomes, let the data speak. 🔥`,
+  },
   {
     category: "TONIGHT'S LESSON",
     date: 'Mar 16',
@@ -51,35 +80,7 @@ The structure worked. Three tickets, two hit clean using the correlated milk app
 
 47-22. W5. We move. 🔥`,
   },
-  {
-    category: 'PRODUCT UPDATE',
-    date: 'Mar 17',
-    title: 'New Signal: Positional Mismatch 📐',
-    excerpt: 'The model now detects when a franchise star is facing a depleted defensive matchup. Giannis vs a backup center with a -4 bench net is not the same game as Giannis vs a healthy starter. Now the edge score knows that.',
-    content: `The model just got smarter about one of the most consistently underpriced edges in the NBA — positional mismatches.
 
-WHAT IT DOES
-
-When a franchise-caliber player is active and their primary defensive matchup is either injured or backed by a weak unit, a new POSITIONAL_MISMATCH signal fires. The edge score adjusts. The signal shows up in the game card.
-
-THE REAL-WORLD EXAMPLE
-
-Say Giannis is playing tonight. The opposing team's starting center is out. Their backup is logging a -4.2 bench net rating — meaning they're actively hurting the team when they're on the floor. That's not just a personnel change. That's a structural mismatch Vegas lines often fail to fully price, especially on same-day scratches.
-
-Before today: model saw the injury, applied a fresh scratch bonus if it was recent, and moved on.
-
-After today: model cross-references the star's position against the opposing depth chart. If the defensive matchup is weak — by injury, by bench net, or both — the signal fires with a 2.0-4.5 point impact on the edge score depending on severity.
-
-WHAT IT COVERS
-
-15 franchise stars are mapped with positional types — bigs like Jokic, Wemby, Giannis. Wings like Tatum, Durant, Kawhi. Guards like Curry, Morant, Lillard. For each one, if the opposing team is thin at that position, the mismatch gets flagged.
-
-HOW IT'S WEIGHTED
-
-The signal is intentionally conservative — supporting signal only, never lead signal. It won't flip a game from INFO to SHARP on its own. But when it stacks with net rating, B2B fatigue, or fresh scratch signals, it adds meaningful conviction to an existing lean.
-
-We'll track outcomes against this signal over the next few weeks to validate it before weighting it higher. That's how OTJ builds — ship the signal, log the outcomes, let the data speak. 🔥`,
-  },
   {
     category: 'PRODUCT UPDATE',
     date: 'Mar 15',

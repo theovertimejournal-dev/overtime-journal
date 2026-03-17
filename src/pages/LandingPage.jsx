@@ -72,7 +72,7 @@ We have a roster decimation flag in the pipeline for exactly this scenario. When
 
 THE HOUSTON MISS
 
-LAL won 100-92. The model leaned HOU at home — reasonable on paper given the matchup data. LeBron and AD had different plans. These happen. The line was close, the game was close, one team executed.
+LAL won 100-92. The model leaned HOU at home — reasonable on paper given the matchup data. Lakers had different plans. These happen. The line was close, the game was close, one team executed. Lakers have been on a roll, and the model was not confident on the Rockets. This one was on me.
 
 THE TAKEAWAY
 

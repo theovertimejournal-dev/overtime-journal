@@ -58,9 +58,7 @@ The resolve_picks pipeline runs automatically after games finish. It pulls final
 
 THE LEADERBOARD
 
-Global rankings sorted by total profit, win rate, or current balance. Every user's profile shows their bet history, W/L record, and ROI. You can search any username directly from the leaderboard page.
-
-This is the foundation for everything coming next — referral bonuses, streak rewards, and eventually real-money integration through Stripe. For now, prove you can beat the market with OTJ Bucks before real money is on the line. 🔥`,
+Global rankings sorted by total profit, win rate, or current balance. Every user's profile shows their bet history, W/L record, and ROI. You can search any username directly from the leaderboard page. 🔥`,
   },
   {
     category: 'PRODUCT UPDATE',

@@ -1,0 +1,51 @@
+name: OTJ Resolve Picks (Morning)
+
+# Runs 5 min after slate push to grade yesterday's picks
+# Safety net — live resolve handles most during game hours
+
+on:
+  schedule:
+    # 7:05 AM ET = 12:05 UTC (EST) / 11:05 UTC (EDT)
+    - cron: '5 11 * * *'
+    - cron: '5 12 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to resolve (YYYY-MM-DD) — leave blank for yesterday'
+        required: false
+        default: ''
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests tabulate
+
+      - name: Resolve picks
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BALLDONTLIE_API_KEY:  ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          cd python
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -u resolve_picks.py --date=${{ github.event.inputs.date }}
+          else
+            python -u resolve_picks.py
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Morning resolve failed — check logs above"

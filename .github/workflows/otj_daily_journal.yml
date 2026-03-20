@@ -1,0 +1,78 @@
+name: OTJ Daily Journal (Multi-Voice)
+
+# Runs every morning:
+# 1. Scrapes Reddit for voice training data
+# 2. Generates multi-voice blog with three characters
+# 3. Posts draft to Discord for approval
+
+on:
+  schedule:
+    # 10:45 AM ET — after morning resolve finishes
+    - cron: '45 14 * * *'
+    - cron: '45 15 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to blog about (YYYY-MM-DD) — leave blank for yesterday'
+        required: false
+        default: ''
+      publish:
+        description: 'Auto-publish without Discord approval?'
+        required: false
+        default: 'false'
+
+jobs:
+  daily-journal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests anthropic
+
+      - name: Scrape voice library
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          cd python
+          DATE=$(TZ="America/New_York" date -d "yesterday" +%Y-%m-%d 2>/dev/null || TZ="America/New_York" date -v-1d +%Y-%m-%d)
+          echo "Scraping voice data for: $DATE"
+          python -u scrape_voice_library.py --date=$DATE || echo "Voice scrape failed (non-fatal)"
+
+      - name: Generate multi-voice blog
+        env:
+          SUPABASE_URL:           ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:   ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
+          DISCORD_BLOG_WEBHOOK:   ${{ secrets.DISCORD_BLOG_WEBHOOK }}
+          BALLDONTLIE_API_KEY:    ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          cd python
+          
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE="${{ github.event.inputs.date }}"
+          else
+            DATE=$(TZ="America/New_York" date -d "yesterday" +%Y-%m-%d 2>/dev/null || TZ="America/New_York" date -v-1d +%Y-%m-%d)
+          fi
+          
+          PUBLISH_FLAG=""
+          if [ "${{ github.event.inputs.publish }}" = "true" ]; then
+            PUBLISH_FLAG="--publish"
+          fi
+          
+          echo "Generating blog for: $DATE"
+          python -u multi_voice_blog.py --date=$DATE $PUBLISH_FLAG
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Daily journal generation failed"

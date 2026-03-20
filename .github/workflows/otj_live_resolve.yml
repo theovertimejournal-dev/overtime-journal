@@ -1,0 +1,58 @@
+name: OTJ Live Resolve (Game Hours)
+
+# Runs every 30 minutes from 7PM ET to 1AM ET
+# Grades user bets as soon as games finish — no waiting until morning
+# Also runs the full model resolve so slate records update live
+
+on:
+  schedule:
+    # 7PM ET = 00:00 UTC (next day) through 1AM ET = 06:00 UTC
+    # Every 30 min: :00 and :30
+    # EDT: 7PM-1AM = 23:00-05:00 UTC
+    # EST: 7PM-1AM = 00:00-06:00 UTC
+    # Cover both with 23:00-06:00 UTC range
+    - cron: '0,30 23 * * *'
+    - cron: '0,30 0-6 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to resolve (YYYY-MM-DD) — leave blank for today'
+        required: false
+        default: ''
+
+jobs:
+  live-resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests tabulate
+
+      - name: Resolve picks
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BALLDONTLIE_API_KEY:  ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          cd python
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          echo "Resolving for ET date: $ET_DATE"
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -u resolve_picks.py --date=${{ github.event.inputs.date }}
+          else
+            python -u resolve_picks.py --date=$ET_DATE
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Live resolve failed — check logs above"

@@ -1,0 +1,52 @@
+name: OTJ Resolve Picks (Morning)
+
+# Safety net — runs every morning to catch any games the live resolve missed
+# (West Coast late finishes, OT games, etc.)
+
+on:
+  schedule:
+    # 10:00 AM ET = 15:00 UTC (EST) / 14:00 UTC (EDT)
+    - cron: '0 14 * * *'
+    - cron: '0 15 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to resolve (YYYY-MM-DD) — leave blank for yesterday'
+        required: false
+        default: ''
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests tabulate
+
+      - name: Resolve picks
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BALLDONTLIE_API_KEY:  ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          cd python
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -u resolve_picks.py --date=${{ github.event.inputs.date }}
+          else
+            # Default: grade yesterday (resolve_picks.py defaults to yesterday already)
+            python -u resolve_picks.py
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ Morning resolve failed — check logs above"

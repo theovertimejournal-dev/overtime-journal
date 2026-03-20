@@ -1,0 +1,39 @@
+name: OTJ News Scanner (Live)
+
+# Runs every 5 minutes during active hours (11AM - 1AM ET)
+# Scans for injuries, line movements, game results, standout performances
+
+on:
+  schedule:
+    # 11AM-11PM ET = 15:00-03:00 UTC (EDT) / 16:00-04:00 UTC (EST)
+    # Every 5 min during these hours
+    - cron: '*/5 15-23 * * *'   # 15:00-23:59 UTC
+    - cron: '*/5 0-6 * * *'     # 00:00-06:59 UTC (covers late games + EST)
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install supabase python-dotenv requests
+
+      - name: Run news scanner
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BALLDONTLIE_API_KEY:  ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          cd python
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          python -u news_scanner.py --date=$ET_DATE

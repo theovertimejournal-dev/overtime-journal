@@ -1,0 +1,52 @@
+name: OTJ Historical Data Export
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start date (YYYY-MM-DD) — default is season start'
+        required: false
+        default: '2025-10-22'
+      end_date:
+        description: 'End date (YYYY-MM-DD) — default is today'
+        required: false
+        default: ''
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests nba_api
+
+      - name: Run historical export
+        env:
+          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+        run: |
+          cd python
+          END_DATE="${{ github.event.inputs.end_date }}"
+          END_DATE=${END_DATE:-$(TZ="America/New_York" date +%Y-%m-%d)}
+          
+          echo "Exporting: ${{ github.event.inputs.start_date }} → $END_DATE"
+          python -u historical_export.py \
+            --start=${{ github.event.inputs.start_date }} \
+            --end=$END_DATE \
+            --output=training_data.csv
+
+      - name: Upload CSV as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: otj-training-data
+          path: python/training_data.csv
+          retention-days: 30

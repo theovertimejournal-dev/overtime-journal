@@ -1264,10 +1264,10 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             reg_path = os.path.join(model_dir, 'otj_xgb_regressor.pkl')
             feat_path = os.path.join(model_dir, 'otj_model_features.json')
             
-            print(f"  🤖 Looking for ML models in: {model_dir}")
-            print(f"  🤖 clf exists: {os.path.exists(clf_path)}")
-            print(f"  🤖 reg exists: {os.path.exists(reg_path)}")
-            print(f"  🤖 feat exists: {os.path.exists(feat_path)}")
+            print(f"  🤖 Looking for ML models in: {model_dir}", file=sys.stderr)
+            print(f"  🤖 clf exists: {os.path.exists(clf_path)}", file=sys.stderr)
+            print(f"  🤖 reg exists: {os.path.exists(reg_path)}", file=sys.stderr)
+            print(f"  🤖 feat exists: {os.path.exists(feat_path)}", file=sys.stderr)
             
             if os.path.exists(clf_path) and os.path.exists(feat_path):
                 import json as _json
@@ -1277,71 +1277,79 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
                     calculate_edge._ml_reg = pickle.load(f)
                 with open(feat_path) as f:
                     calculate_edge._ml_features = _json.load(f)
-                print(f"  🤖 ML models loaded ({len(calculate_edge._ml_features)} features)")
+                print(f"  🤖 ML models loaded ({len(calculate_edge._ml_features)} features)", file=sys.stderr)
             else:
                 calculate_edge._ml_clf = None
                 calculate_edge._ml_reg = None
                 calculate_edge._ml_features = None
-                print(f"  🤖 ML models NOT FOUND — running without ML")
+                print(f"  🤖 ML models NOT FOUND — running without ML", file=sys.stderr)
         
         if calculate_edge._ml_clf is not None:
             features = calculate_edge._ml_features
             
             # Build feature vector from available data
+            # All values cast to float to prevent string subtraction errors
             feat_row = {}
             
+            def _f(val, default=0):
+                """Safely convert to float."""
+                try:
+                    return float(val) if val is not None else float(default)
+                except (TypeError, ValueError):
+                    return float(default)
+            
             # Home team features
-            feat_row['h_wins'] = home.get('wins', 0)
-            feat_row['h_losses'] = home.get('losses', 0)
+            feat_row['h_wins'] = _f(home.get('wins', 0))
+            feat_row['h_losses'] = _f(home.get('losses', 0))
             h_gp = max(feat_row['h_wins'] + feat_row['h_losses'], 1)
             feat_row['h_win_pct'] = round(feat_row['h_wins'] / h_gp, 3)
-            feat_row['h_l10_wins'] = home.get('l10_wins', 5)
-            feat_row['h_l10_pct'] = home.get('l10_wins', 5) / 10.0
-            feat_row['h_l5_wins'] = home.get('l5_wins', 3)
-            feat_row['h_l5_pct'] = home.get('l5_wins', 3) / 5.0
-            feat_row['h_streak'] = home.get('streak', 0)
-            feat_row['h_home_win_pct'] = home.get('home_win_pct', 0.5)
-            feat_row['h_away_win_pct'] = home.get('away_win_pct', 0.5)
-            feat_row['h_avg_pts_scored'] = home.get('off_rating', 110)
-            feat_row['h_avg_pts_allowed'] = home.get('def_rating', 112)
-            feat_row['h_net_rating_proxy'] = home.get('net_rating', 0)
-            feat_row['h_l10_avg_scored'] = home.get('off_rating_last10', feat_row['h_avg_pts_scored'])
-            feat_row['h_l10_avg_allowed'] = home.get('def_rating_last10', feat_row['h_avg_pts_allowed'])
+            feat_row['h_l10_wins'] = _f(home.get('l10_wins', 5))
+            feat_row['h_l10_pct'] = feat_row['h_l10_wins'] / 10.0
+            feat_row['h_l5_wins'] = _f(home.get('l5_wins', 3))
+            feat_row['h_l5_pct'] = feat_row['h_l5_wins'] / 5.0
+            feat_row['h_streak'] = _f(home.get('streak', 0))
+            feat_row['h_home_win_pct'] = _f(home.get('home_win_pct', 0.5))
+            feat_row['h_away_win_pct'] = _f(home.get('away_win_pct', 0.5))
+            feat_row['h_avg_pts_scored'] = _f(home.get('off_rating', 110))
+            feat_row['h_avg_pts_allowed'] = _f(home.get('def_rating', 112))
+            feat_row['h_net_rating_proxy'] = _f(home.get('net_rating', 0))
+            feat_row['h_l10_avg_scored'] = _f(home.get('off_rating_last10', feat_row['h_avg_pts_scored']))
+            feat_row['h_l10_avg_allowed'] = _f(home.get('def_rating_last10', feat_row['h_avg_pts_allowed']))
             feat_row['h_l10_net'] = feat_row['h_l10_avg_scored'] - feat_row['h_l10_avg_allowed']
-            feat_row['h_rest_days'] = home.get('rest_days', 1)
-            feat_row['h_b2b'] = int(home.get('b2b', False))
-            feat_row['h_three_in_four'] = int(home.get('three_in_four', False))
-            feat_row['h_close_win_pct'] = home.get('close_win_pct', 0.5)
-            feat_row['h_blowout_wins'] = home.get('blowout_wins', 0)
-            feat_row['h_blowout_losses'] = home.get('blowout_losses', 0)
-            feat_row['h_avg_margin'] = home.get('avg_margin', 0)
+            feat_row['h_rest_days'] = _f(home.get('rest_days', 1))
+            feat_row['h_b2b'] = int(bool(home.get('b2b', False)))
+            feat_row['h_three_in_four'] = int(bool(home.get('three_in_four', False)))
+            feat_row['h_close_win_pct'] = _f(home.get('close_win_pct', 0.5))
+            feat_row['h_blowout_wins'] = _f(home.get('blowout_wins', 0))
+            feat_row['h_blowout_losses'] = _f(home.get('blowout_losses', 0))
+            feat_row['h_avg_margin'] = _f(home.get('avg_margin', 0))
             feat_row['h_games_played'] = h_gp
             
             # Away team features
-            feat_row['a_wins'] = away.get('wins', 0)
-            feat_row['a_losses'] = away.get('losses', 0)
+            feat_row['a_wins'] = _f(away.get('wins', 0))
+            feat_row['a_losses'] = _f(away.get('losses', 0))
             a_gp = max(feat_row['a_wins'] + feat_row['a_losses'], 1)
             feat_row['a_win_pct'] = round(feat_row['a_wins'] / a_gp, 3)
-            feat_row['a_l10_wins'] = away.get('l10_wins', 5)
-            feat_row['a_l10_pct'] = away.get('l10_wins', 5) / 10.0
-            feat_row['a_l5_wins'] = away.get('l5_wins', 3)
-            feat_row['a_l5_pct'] = away.get('l5_wins', 3) / 5.0
-            feat_row['a_streak'] = away.get('streak', 0)
-            feat_row['a_home_win_pct'] = away.get('home_win_pct', 0.5)
-            feat_row['a_away_win_pct'] = away.get('away_win_pct', 0.5)
-            feat_row['a_avg_pts_scored'] = away.get('off_rating', 110)
-            feat_row['a_avg_pts_allowed'] = away.get('def_rating', 112)
-            feat_row['a_net_rating_proxy'] = away.get('net_rating', 0)
-            feat_row['a_l10_avg_scored'] = away.get('off_rating_last10', feat_row['a_avg_pts_scored'])
-            feat_row['a_l10_avg_allowed'] = away.get('def_rating_last10', feat_row['a_avg_pts_allowed'])
+            feat_row['a_l10_wins'] = _f(away.get('l10_wins', 5))
+            feat_row['a_l10_pct'] = feat_row['a_l10_wins'] / 10.0
+            feat_row['a_l5_wins'] = _f(away.get('l5_wins', 3))
+            feat_row['a_l5_pct'] = feat_row['a_l5_wins'] / 5.0
+            feat_row['a_streak'] = _f(away.get('streak', 0))
+            feat_row['a_home_win_pct'] = _f(away.get('home_win_pct', 0.5))
+            feat_row['a_away_win_pct'] = _f(away.get('away_win_pct', 0.5))
+            feat_row['a_avg_pts_scored'] = _f(away.get('off_rating', 110))
+            feat_row['a_avg_pts_allowed'] = _f(away.get('def_rating', 112))
+            feat_row['a_net_rating_proxy'] = _f(away.get('net_rating', 0))
+            feat_row['a_l10_avg_scored'] = _f(away.get('off_rating_last10', feat_row['a_avg_pts_scored']))
+            feat_row['a_l10_avg_allowed'] = _f(away.get('def_rating_last10', feat_row['a_avg_pts_allowed']))
             feat_row['a_l10_net'] = feat_row['a_l10_avg_scored'] - feat_row['a_l10_avg_allowed']
-            feat_row['a_rest_days'] = away.get('rest_days', 1)
-            feat_row['a_b2b'] = int(away.get('b2b', False))
-            feat_row['a_three_in_four'] = int(away.get('three_in_four', False))
-            feat_row['a_close_win_pct'] = away.get('close_win_pct', 0.5)
-            feat_row['a_blowout_wins'] = away.get('blowout_wins', 0)
-            feat_row['a_blowout_losses'] = away.get('blowout_losses', 0)
-            feat_row['a_avg_margin'] = away.get('avg_margin', 0)
+            feat_row['a_rest_days'] = _f(away.get('rest_days', 1))
+            feat_row['a_b2b'] = int(bool(away.get('b2b', False)))
+            feat_row['a_three_in_four'] = int(bool(away.get('three_in_four', False)))
+            feat_row['a_close_win_pct'] = _f(away.get('close_win_pct', 0.5))
+            feat_row['a_blowout_wins'] = _f(away.get('blowout_wins', 0))
+            feat_row['a_blowout_losses'] = _f(away.get('blowout_losses', 0))
+            feat_row['a_avg_margin'] = _f(away.get('avg_margin', 0))
             feat_row['a_games_played'] = a_gp
             
             # Differentials
@@ -1397,13 +1405,14 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
                 print(
                     f"  🤖 ML: {ml_team} favored "
                     f"({home_win_prob:.0%} home, margin {ml_margin_pred:+.1f}, "
-                    f"impact {ml_impact:+.1f})"
+                    f"impact {ml_impact:+.1f})",
+                    file=sys.stderr
                 )
             else:
-                print(f"  🤖 ML: No strong conviction ({home_win_prob:.0%} home)")
+                print(f"  🤖 ML: No strong conviction ({home_win_prob:.0%} home)", file=sys.stderr)
     
     except Exception as e:
-        print(f"  ⚠ ML prediction failed: {e}")
+        print(f"  ⚠ ML prediction failed: {e}", file=sys.stderr)
     # ── End ML Prediction ─────────────────────────────────────────────────────
 
     abs_score = abs(score)

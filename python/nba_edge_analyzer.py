@@ -1264,6 +1264,11 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             reg_path = os.path.join(model_dir, 'otj_xgb_regressor.pkl')
             feat_path = os.path.join(model_dir, 'otj_model_features.json')
             
+            print(f"  🤖 Looking for ML models in: {model_dir}")
+            print(f"  🤖 clf exists: {os.path.exists(clf_path)}")
+            print(f"  🤖 reg exists: {os.path.exists(reg_path)}")
+            print(f"  🤖 feat exists: {os.path.exists(feat_path)}")
+            
             if os.path.exists(clf_path) and os.path.exists(feat_path):
                 import json as _json
                 with open(clf_path, 'rb') as f:
@@ -1272,11 +1277,12 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
                     calculate_edge._ml_reg = pickle.load(f)
                 with open(feat_path) as f:
                     calculate_edge._ml_features = _json.load(f)
-                print(f"  🤖 ML models loaded ({len(calculate_edge._ml_features)} features)", file=sys.stderr)
+                print(f"  🤖 ML models loaded ({len(calculate_edge._ml_features)} features)")
             else:
                 calculate_edge._ml_clf = None
                 calculate_edge._ml_reg = None
                 calculate_edge._ml_features = None
+                print(f"  🤖 ML models NOT FOUND — running without ML")
         
         if calculate_edge._ml_clf is not None:
             features = calculate_edge._ml_features
@@ -1391,14 +1397,13 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
                 print(
                     f"  🤖 ML: {ml_team} favored "
                     f"({home_win_prob:.0%} home, margin {ml_margin_pred:+.1f}, "
-                    f"impact {ml_impact:+.1f})",
-                    file=sys.stderr
+                    f"impact {ml_impact:+.1f})"
                 )
             else:
-                print(f"  🤖 ML: No strong conviction ({home_win_prob:.0%} home)", file=sys.stderr)
+                print(f"  🤖 ML: No strong conviction ({home_win_prob:.0%} home)")
     
     except Exception as e:
-        print(f"  ⚠ ML prediction failed (non-fatal): {e}", file=sys.stderr)
+        print(f"  ⚠ ML prediction failed: {e}")
     # ── End ML Prediction ─────────────────────────────────────────────────────
 
     abs_score = abs(score)

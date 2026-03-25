@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
 import { client } from "../lib/colyseusClient"; // adjust path to wherever you initialize Colyseus
 
+// ─── Colyseus client (already initialized in your app) ───────────────────────;
+
+// import { client } from "../lib/colyseusClient";
+// For now we mock it so the component renders standalone in dev without a server.
+
+// ─── Mock data (remove when wired to real Colyseus) ───────────────────────────
+
+
+// ─── Tier config ──────────────────────────────────────────────────────────────
 const TIERS = {
   rookie: {
     label: "Rookie",
@@ -156,7 +165,13 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
     try {
       const room = await client.joinOrCreate("poker", { tier: selectedTier });
       setStatus(null);
-      onEnterTable?.(room);
+      onEnterTable?.(room, {
+        tier: selectedTier,
+        buyIn: TIERS[selectedTier].min,
+        userId: user?.id,
+        username: profile?.username,
+        avatarConfig: profile?.avatar_config,
+      });
     } catch (e) {
       setStatus({ type: "error", msg: "Couldn't find a table. Try again." });
     }
@@ -167,7 +182,14 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
     try {
       const room = await client.joinById(roomId, {});
       setStatus(null);
-      onEnterTable?.(room);
+      const roomTier = rooms.find(r => r.roomId === roomId)?.metadata?.tier || selectedTier;
+      onEnterTable?.(room, {
+        tier: roomTier,
+        buyIn: TIERS[roomTier]?.min || TIERS[selectedTier].min,
+        userId: user?.id,
+        username: profile?.username,
+        avatarConfig: profile?.avatar_config,
+      });
     } catch (e) {
       setStatus({ type: "error", msg: "Seat taken — try another table." });
     }
@@ -186,7 +208,13 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
         tableName: name,
       });
       setStatus(null);
-      onEnterTable?.(room);
+      onEnterTable?.(room, {
+        tier: selectedTier,
+        buyIn: TIERS[selectedTier].min,
+        userId: user?.id,
+        username: profile?.username,
+        avatarConfig: profile?.avatar_config,
+      });
     } catch (e) {
       setStatus({ type: "error", msg: "Couldn't create room." });
     }

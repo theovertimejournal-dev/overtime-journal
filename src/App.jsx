@@ -130,7 +130,7 @@ function PokerLobbyWithNav({ user, profile }) {
     <PokerLobby
       user={user}
       profile={profile}
-      userBucks={profile?.otj_bucks ?? 10000}
+     userBucks={profile?.bankroll ?? 10000}
       onEnterTable={(room) => navigate(`/poker/table/${room.id}`)}
     />
   );

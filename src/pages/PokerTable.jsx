@@ -54,10 +54,10 @@ function Card({ card, faceDown = false, small = false }) {
   return (
     <div style={{
       width: w, height: h, borderRadius: 6,
-      background: '#f8f8f8', border: '1px solid rgba(0,0,0,0.12)',
+      background: '#ffffff', border: '2px solid #1a1a2e',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       fontFamily: FONT, fontWeight: 700, color,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.6)',
     }}>
       <div style={{ fontSize: small ? 12 : 16, lineHeight: 1 }}>{val}</div>
       <div style={{ fontSize: small ? 10 : 14, lineHeight: 1, marginTop: 1 }}>{suitSym}</div>

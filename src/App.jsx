@@ -303,6 +303,8 @@ export default function App() {
           <Route path="/daily" element={<DailyNewspaper />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/terms" element={<Terms />} />
+          <Route path="/poker" element={<PokerLobby user={user} profile={profile} />} />
+<Route path="/poker/table" element={<PokerTable />} />
           <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowWelcome(true)} />} />
         </Routes>
       </div>

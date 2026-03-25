@@ -18,7 +18,8 @@ import FAQ from './pages/FAQ';
 import ProfilePage from './pages/ProfilePage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import DailyNewspaper from './pages/DailyNewspaper';
-
+import PokerLobby from './pages/PokerLobby';
+import PokerTable from './pages/PokerTable';
 // ─── Protected route — redirects to / if not logged in ───────────────────────
 function ProtectedRoute({ user, authChecked, children }) {
   if (!authChecked) return null;

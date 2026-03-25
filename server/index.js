@@ -32,7 +32,7 @@ gameServer.define("nba_jam",         ArcadeRoom).filterBy(["gameType"]);
 gameServer.define("hr_derby",        ArcadeRoom).filterBy(["gameType"]);
 gameServer.define("hockey_shootout", ArcadeRoom).filterBy(["gameType"]);
 gameServer.define("football",        ArcadeRoom).filterBy(["gameType"]);
-gameServer.define("poker",           PokerRoom);
+gameServer.define("poker", PokerRoom).filterBy(["tier"]);
 
 httpServer.listen(port, () => {
   console.log(`🎮 OTJ Arcade server v2 (Colyseus 0.16) running on port ${port}`);

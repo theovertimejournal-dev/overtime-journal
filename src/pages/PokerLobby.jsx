@@ -136,7 +136,7 @@ function TierCard({ tier, selected, onClick }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
+export default function PokerLobby({ userBucks = 12450, onEnterTable, user, profile }) {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTier, setSelectedTier] = useState("regular");

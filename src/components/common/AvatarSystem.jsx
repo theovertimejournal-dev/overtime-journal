@@ -4,7 +4,7 @@
  * Supports future custom SVG parts.
  */
 import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 function buildAvatarUrl(config = {}, size = 200) {
     const p = new URLSearchParams();

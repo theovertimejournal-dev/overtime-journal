@@ -1,15 +1,7 @@
 import { useState, useEffect } from "react";
 import { client } from "../lib/colyseusClient"; // adjust path to wherever you initialize Colyseus
 
-// ─── Colyseus client (already initialized in your app) ───────────────────────;
 
-// import { client } from "../lib/colyseusClient";
-// For now we mock it so the component renders standalone in dev without a server.
-
-// ─── Mock data (remove when wired to real Colyseus) ───────────────────────────
-
-
-// ─── Tier config ──────────────────────────────────────────────────────────────
 const TIERS = {
   rookie: {
     label: "Rookie",

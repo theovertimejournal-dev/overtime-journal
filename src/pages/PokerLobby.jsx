@@ -182,7 +182,7 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
 
   async function handleJoin(roomId) {
     setStatus({ type: "info", msg: "Joining…" });
-    try {
+ try {
       const joinClient = new Client(COLYSEUS_URL);
       const roomTier = rooms.find(r => r.roomId === roomId)?.metadata?.tier || selectedTier;
       const room = await joinClient.joinById(roomId, {
@@ -191,7 +191,6 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
         avatar: { config: profile?.avatar_config },
       });
       setStatus(null);
-      const roomTier = rooms.find(r => r.roomId === roomId)?.metadata?.tier || selectedTier;
       onEnterTable?.(room, {
         tier: roomTier,
         buyIn: TIERS[roomTier]?.min || TIERS[selectedTier].min,

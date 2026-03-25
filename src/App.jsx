@@ -132,7 +132,7 @@ function PokerLobbyWithNav({ user, profile }) {
       profile={profile}
       userBucks={profile?.bankroll ?? 10000}
       onEnterTable={(room, tableState) => navigate(
-        `/poker/table/${room.id}`,
+       `/poker/table/${room.roomId}`,
         { state: tableState }
       )}
     />

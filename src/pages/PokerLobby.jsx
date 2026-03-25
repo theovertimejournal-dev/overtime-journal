@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { client } from "../lib/colyseusClient"; // adjust path to wherever you initialize Colyseus
 
-
 const TIERS = {
   rookie: {
     label: "Rookie",

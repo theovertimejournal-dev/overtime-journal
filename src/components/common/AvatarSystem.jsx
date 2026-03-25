@@ -11,7 +11,7 @@
  *  - Purchase validation (can't equip what you can't afford)
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 
 // ─── Avatar URL Builder ──────────────────────────────────────────────────────
 

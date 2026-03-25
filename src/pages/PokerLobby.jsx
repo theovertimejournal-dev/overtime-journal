@@ -1,12 +1,8 @@
 import { useState, useEffect } from "react";
-import { client } from "../lib/colyseusClient"; // adjust path to wherever you initialize Colyseus
+import { Client } from "colyseus.js";
+import { client } from "../lib/colyseusClient";
 
-// ─── Colyseus client (already initialized in your app) ───────────────────────;
-
-// import { client } from "../lib/colyseusClient";
-// For now we mock it so the component renders standalone in dev without a server.
-
-// ─── Mock data (remove when wired to real Colyseus) ───────────────────────────
+const COLYSEUS_URL = import.meta.env.VITE_COLYSEUS_URL;
 
 
 // ─── Tier config ──────────────────────────────────────────────────────────────
@@ -133,7 +129,7 @@ function TierCard({ tier, selected, onClick }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
+export default function PokerLobby({ userBucks = 12450, onEnterTable, user, profile }) {
   const [rooms, setRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedTier, setSelectedTier] = useState("regular");
@@ -164,7 +160,13 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
   async function handleQuickPlay() {
     setStatus({ type: "info", msg: "Finding you a seat…" });
     try {
-      const room = await client.joinOrCreate("poker", { tier: selectedTier });
+      const joinClient = new Client(COLYSEUS_URL);
+      const room = await joinClient.joinOrCreate("poker", {
+        tier: selectedTier,
+        userId: user?.id,
+        username: profile?.username,
+        avatar: { config: profile?.avatar_config },
+      });
       setStatus(null);
       onEnterTable?.(room, {
         tier: selectedTier,
@@ -181,7 +183,13 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
   async function handleJoin(roomId) {
     setStatus({ type: "info", msg: "Joining…" });
     try {
-      const room = await client.joinById(roomId, {});
+      const joinClient = new Client(COLYSEUS_URL);
+      const roomTier = rooms.find(r => r.roomId === roomId)?.metadata?.tier || selectedTier;
+      const room = await joinClient.joinById(roomId, {
+        userId: user?.id,
+        username: profile?.username,
+        avatar: { config: profile?.avatar_config },
+      });
       setStatus(null);
       const roomTier = rooms.find(r => r.roomId === roomId)?.metadata?.tier || selectedTier;
       onEnterTable?.(room, {
@@ -208,10 +216,7 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
       const joinClient = new Client(COLYSEUS_URL);
       const allRooms = await joinClient.getAvailableRooms("poker");
       const target = allRooms.find(r => r.metadata?.roomCode === code);
-      if (!target) {
-        setStatus({ type: "error", msg: `Room "${code}" not found.` });
-        return;
-      }
+      if (!target) { setStatus({ type: "error", msg: `Room "${code}" not found.` }); return; }
       const room = await joinClient.joinById(target.roomId, {
         userId: user?.id,
         username: profile?.username,
@@ -226,6 +231,7 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
         avatarConfig: profile?.avatar_config,
       });
     } catch (e) {
+      console.error("JoinByCode error:", e);
       setStatus({ type: "error", msg: `Room "${code}" not found.` });
     }
   }
@@ -234,7 +240,8 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
     const name = tableName.trim() || "My Table";
     setStatus({ type: "info", msg: "Creating room…" });
     try {
-      const room = await client.create("poker", {
+      const joinClient = new Client(COLYSEUS_URL);
+      const room = await joinClient.create("poker", {
         tier: selectedTier,
         tableName: name,
       });
@@ -339,7 +346,7 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
         )}
       </div>
 
-      {/* ── JOIN BY CODE ─────────────────────────────────────────────────── */}
+      {/* ── JOIN BY CODE */}
       <div style={styles.section}>
         <p style={styles.sectionLabel}>Join by room code</p>
         <div style={{ display: "flex", gap: 8 }}>
@@ -351,9 +358,7 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable }) {
             onKeyDown={(e) => e.key === "Enter" && handleJoinByCode()}
             maxLength={4}
           />
-          <button style={styles.btnCreate} onClick={handleJoinByCode}>
-            Join
-          </button>
+          <button style={styles.btnCreate} onClick={handleJoinByCode}>Join</button>
         </div>
       </div>
 

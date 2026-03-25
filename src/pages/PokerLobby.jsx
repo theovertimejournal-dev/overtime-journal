@@ -1,51 +1,13 @@
 import { useState, useEffect } from "react";
+import { client } from "../lib/colyseusClient"; // adjust path to wherever you initialize Colyseus
 
-// ─── Colyseus client (already initialized in your app) ───────────────────────
+// ─── Colyseus client (already initialized in your app) ───────────────────────;
+
 // import { client } from "../lib/colyseusClient";
 // For now we mock it so the component renders standalone in dev without a server.
-const client = {
-  getAvailableRooms: async () => mockRooms,
-  joinOrCreate: async (name, opts) => ({ id: "mock", sessionId: "s1" }),
-  joinById: async (id, opts) => ({ id, sessionId: "s1" }),
-  create: async (name, opts) => ({ id: "new-room", sessionId: "s1" }),
-};
 
 // ─── Mock data (remove when wired to real Colyseus) ───────────────────────────
-const mockRooms = [
-  {
-    roomId: "r1",
-    clients: 3,
-    maxClients: 6,
-    metadata: {
-      tableName: "Degen Den",
-      tier: "regular",
-      blinds: "25/50",
-      spectators: 2,
-    },
-  },
-  {
-    roomId: "r2",
-    clients: 1,
-    maxClients: 6,
-    metadata: {
-      tableName: "Late Night Grind",
-      tier: "rookie",
-      blinds: "5/10",
-      spectators: 0,
-    },
-  },
-  {
-    roomId: "r3",
-    clients: 5,
-    maxClients: 6,
-    metadata: {
-      tableName: "High Roller Lounge",
-      tier: "highroller",
-      blinds: "100/200",
-      spectators: 7,
-    },
-  },
-];
+
 
 // ─── Tier config ──────────────────────────────────────────────────────────────
 const TIERS = {

@@ -299,6 +299,16 @@ export default function App() {
               <NBAJamArcade user={user} profile={profile} />
             </ProtectedRoute>
           } />
+          <Route path="/poker" element={
+  <ProtectedRoute user={user} authChecked={authChecked}>
+    <PokerLobby user={user} profile={profile} />
+  </ProtectedRoute>
+} />
+<Route path="/poker/table" element={
+  <ProtectedRoute user={user} authChecked={authChecked}>
+    <PokerTable />
+  </ProtectedRoute>
+} />
           <Route path="/profile/:username" element={<ProfilePage currentUser={user} currentProfile={profile} />} />
           <Route path="/leaderboard" element={<LeaderboardPage currentUser={user} />} />
           <Route path="/daily" element={<DailyNewspaper />} />

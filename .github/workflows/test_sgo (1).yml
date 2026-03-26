@@ -1,0 +1,94 @@
+name: Test SGO API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install requests
+
+      - name: Test SGO endpoints
+        env:
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+        run: |
+          python - <<'EOF'
+          import requests, json, os
+
+          KEY = os.environ.get("SPORTSGAMEODDS_API_KEY")
+          BASE = "https://api.sportsgameodds.com/v2"
+          H = {"X-Api-Key": KEY}
+
+          def sgo(endpoint, params):
+              r = requests.get(f"{BASE}{endpoint}", headers=H, params=params, timeout=20)
+              return r.json()
+
+          # Step 1 — get real eventIDs from today's slate
+          print("\n" + "="*60)
+          print("  Step 1: Get today's NBA eventIDs")
+          print("="*60)
+          nba_events = sgo("/events", {"leagueID": "NBA"})
+          nba_ids = []
+          for item in nba_events.get("data", []):
+              eid = item.get("eventID")
+              home = item.get("teams", {}).get("home", {}).get("names", {}).get("short", "")
+              away = item.get("teams", {}).get("away", {}).get("names", {}).get("short", "")
+              status = item.get("status", "")
+              print(f"  {away} @ {home} — {eid} — {status}")
+              nba_ids.append(eid)
+
+          print("\n" + "="*60)
+          print("  Step 2: Get today's MLB eventIDs")
+          print("="*60)
+          mlb_events = sgo("/events", {"leagueID": "MLB"})
+          mlb_ids = []
+          for item in mlb_events.get("data", []):
+              eid = item.get("eventID")
+              home = item.get("teams", {}).get("home", {}).get("names", {}).get("short", "")
+              away = item.get("teams", {}).get("away", {}).get("names", {}).get("short", "")
+              status = item.get("status", "")
+              print(f"  {away} @ {home} — {eid} — {status}")
+              mlb_ids.append(eid)
+
+          # Step 2 — test odds with a real eventID
+          if nba_ids:
+              print("\n" + "="*60)
+              print(f"  Step 3: NBA Odds for first event ({nba_ids[0]})")
+              print("="*60)
+              odds = sgo("/odds", {"eventID": nba_ids[0]})
+              print(json.dumps(odds, indent=2)[:2000])
+
+          if mlb_ids:
+              print("\n" + "="*60)
+              print(f"  Step 4: MLB Odds for first event ({mlb_ids[0]})")
+              print("="*60)
+              odds = sgo("/odds", {"eventID": mlb_ids[0]})
+              print(json.dumps(odds, indent=2)[:2000])
+
+          # Step 3 — test props with a real eventID
+          if nba_ids:
+              print("\n" + "="*60)
+              print(f"  Step 5: NBA Props for first event ({nba_ids[0]})")
+              print("="*60)
+              props = sgo("/props", {"eventID": nba_ids[0]})
+              print(json.dumps(props, indent=2)[:2000])
+
+          # Step 4 — try bulk odds (comma separated)
+          if len(nba_ids) >= 2:
+              print("\n" + "="*60)
+              print("  Step 6: Try bulk odds (comma separated eventIDs)")
+              print("="*60)
+              bulk = sgo("/odds", {"eventID": ",".join(nba_ids[:3])})
+              print(json.dumps(bulk, indent=2)[:1000])
+
+          EOF

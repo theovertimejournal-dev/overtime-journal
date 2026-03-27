@@ -155,14 +155,19 @@ try:
     full_response = resp.json()
     sgo_events_all = full_response.get("data", [])
 
-    # Filter to today's date client-side (more reliable than server-side timestamp filter)
-    sgo_events = [
-        e for e in sgo_events_all
-        if game_date in (e.get("status", {}).get("startsAt", "") or "")
-    ]
+    # SGO stores game times in UTC. ET evening games (7PM ET = midnight UTC) appear
+    # under the NEXT calendar date in startsAt. So we also check previousStartsAt
+    # which contains the originally scheduled ET-based time before UTC conversion.
+    def event_matches_date(event):
+        status = event.get("status", {})
+        starts_at = status.get("startsAt", "") or ""
+        prev_starts = status.get("previousStartsAt", []) or []
+        all_dates = [starts_at] + prev_starts
+        return any(game_date in d for d in all_dates)
+
+    sgo_events = [e for e in sgo_events_all if event_matches_date(e)]
     print(f"  ✅ {len(sgo_events_all)} total SGO events, {len(sgo_events)} match {game_date}")
     if not sgo_events and sgo_events_all:
-        # Debug: show what dates SGO does have so we can diagnose the mismatch
         dates_seen = sorted(set(
             (e.get("status", {}).get("startsAt", "") or "")[:10]
             for e in sgo_events_all

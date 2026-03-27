@@ -132,6 +132,19 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
             )}
           </div>
 
+          {/* Starters line — most important context */}
+          {(analysis.away_starter?.name || game.away_starter) && (
+            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+              <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+                {analysis.away_starter?.name || game.away_starter}
+              </span>
+              <span style={{ color: "#374151", margin: "0 6px" }}>vs</span>
+              <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+                {analysis.home_starter?.name || game.home_starter}
+              </span>
+            </div>
+          )}
+
           {/* Right: lean + odds */}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {hasOdds && (
@@ -183,6 +196,39 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                 <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(96,165,250,0.04)", border: "1px solid rgba(96,165,250,0.1)", borderRadius: 8 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#60a5fa", marginBottom: 4, textTransform: "uppercase" }}>OTJ Analysis</div>
                   <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>{game.narrative}</div>
+                </div>
+              )}
+
+              {/* Starting Pitchers */}
+              {(analysis.away_starter?.name || analysis.home_starter?.name) && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>
+                    Starting Pitchers
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    {[
+                      { sp: analysis.away_starter, team: game.away_team, tto: analysis.away_tto },
+                      { sp: analysis.home_starter, team: game.home_team, tto: analysis.home_tto },
+                    ].map(({ sp, team, tto }, i) => (
+                      <div key={i} style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: "10px 12px" }}>
+                        <div style={{ fontSize: 11, color: "#4a5568", marginBottom: 4 }}>{team}</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
+                          {sp?.name || "TBD"}
+                        </div>
+                        {tto?.status === "OK" && tto?.degradation != null && (
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                            TTO degradation:{" "}
+                            <span style={{ color: tto.degradation >= 0.08 ? "#ef4444" : tto.degradation >= 0.04 ? "#f59e0b" : "#22c55e", fontWeight: 600 }}>
+                              {tto.degradation >= 0 ? "+" : ""}{(tto.degradation * 1000).toFixed(0)}pts BA 3rd time thru
+                            </span>
+                          </div>
+                        )}
+                        {tto?.status === "TBD" && (
+                          <div style={{ fontSize: 10, color: "#374151" }}>Starter TBD</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

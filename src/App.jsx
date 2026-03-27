@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import NBADashboard from './components/nba/NBADashboard';
+import MLBDashboard from './components/nba/MLBDashboard';
 import NBAJamArcade from './components/nba/NBAJamArcade';
 import { AuthButton } from './components/common/AuthButton';
 import { WelcomeModal } from './components/common/WelcomeModal';
@@ -90,6 +91,7 @@ function SportTabs({ user, profile, onSignIn }) {
           <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
           <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
           <NavLink to="/arcade" style={({ isActive }) => tabStyle(isActive)}>🕹<span className="nav-tab-label"> Arcade</span></NavLink>
+          <NavLink to="/poker" style={({ isActive }) => tabStyle(isActive)}>♠️<span className="nav-tab-label"> Poker</span></NavLink>
           <NavLink to="/leaderboard" style={({ isActive }) => tabStyle(isActive)}>🏆<span className="nav-tab-label"> Top 10</span></NavLink>
         </div>
 
@@ -301,7 +303,7 @@ export default function App() {
           <Route path="/faq" element={<FAQ />} />
           <Route path="/nba" element={<NBADashboard user={user} profile={profile} sessionValidated={sessionValidated} />} />
           <Route path="/nhl" element={<ComingSoon sport="NHL" emoji="🏒" phase="Phase 2 — March" />} />
-          <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
+          <Route path="/mlb" element={<MLBDashboard user={user} />} />
           <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />
           <Route path="/record" element={<Record />} />
           <Route path="/arcade" element={

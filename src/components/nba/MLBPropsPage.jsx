@@ -19,113 +19,9 @@
  */
 
 import { useState } from 'react';
+import { useMLBPropsSlate } from '../../hooks/useMLBPropsSlate';
 
-// ── Mock data — replace with useMLBPropsSlate() once table exists ─────────────
-const MOCK_PROPS = {
-  date: (() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-  })(),
-  props: [
-    {
-      player: "Shohei Ohtani", team: "LAD", pos: "DH",
-      game: "ARI @ LAD", matchup: "ARI @ LAD", opp_team: "ARI",
-      opp_pitcher: "Zac Gallen", pitcher_hand: "R", pitcher_hr9: 1.42,
-      batter_hand: "L", venue: "Dodger Stadium", park_factor: 96,
-      stat: "Home Runs", line: 0.5, over_odds: -130, under_odds: 105,
-      season_hr: 14, season_pa: 102, season_hr_rate: 0.137,
-      last15_hr: 5, last15_pa: 58, last15_hr_rate: 0.086,
-      weather: { dome: false, wind_speed_mph: 11, wind_direction: "out_to_cf", temp_f: 76, condition: "clear" },
-      score: 82, lean: "OVER", confidence: "HIGH",
-      narrative: "Ohtani's running hot with 5 HRs in his last 15 games, and Gallen's been giving up the long ball at a 1.42 HR/9 clip. Wind blowing out at 11mph seals it.",
-      signals: [
-        { text: "🔥 Running HOT: 5 HRs in last 58 PA (pace 1.6x season rate)", tag: "OVER" },
-        { text: "Pitcher HR/9 = 1.42 — above-average HR rate allowed", tag: "OVER" },
-        { text: "LHB vs RHP — favorable platoon split for power", tag: "OVER" },
-        { text: "🌬️ Wind 11mph blowing out to CF — HR-friendly conditions", tag: "OVER" },
-        { text: "Park factor 96 — slight pitcher advantage, but Ohtani pulls everything", tag: "NEUTRAL" },
-      ]
-    },
-    {
-      player: "Aaron Judge", team: "NYY", pos: "RF",
-      game: "NYY @ BOS", matchup: "NYY @ BOS", opp_team: "BOS",
-      opp_pitcher: "Brayan Bello", pitcher_hand: "R", pitcher_hr9: 1.65,
-      batter_hand: "R", venue: "Fenway Park", park_factor: 105,
-      stat: "Home Runs", line: 0.5, over_odds: -145, under_odds: 120,
-      season_hr: 11, season_pa: 78, season_hr_rate: 0.141,
-      last15_hr: 4, last15_pa: 52, last15_hr_rate: 0.077,
-      weather: { dome: false, wind_speed_mph: 8, wind_direction: "out_to_cf", temp_f: 62, condition: "clear" },
-      score: 76, lean: "OVER", confidence: "HIGH",
-      narrative: "Judge is mashing at 1.41/PA this year, Bello's been giving up 1.65 HR/9, and Fenway's a hitter park. Wind's blowing out — this checks every box.",
-      signals: [
-        { text: "Elite HR rate: 11 HRs in 78 PA (14.1% per PA)", tag: "OVER" },
-        { text: "Pitcher HR/9 = 1.65 — gives up HRs at well above-average rate", tag: "OVER" },
-        { text: "Park factor 105 — hitter-friendly venue", tag: "OVER" },
-        { text: "🌬️ Wind 8mph blowing out — HR-friendly conditions", tag: "OVER" },
-        { text: "RHB vs RHP — same-hand matchup, slight disadvantage", tag: "NEUTRAL" },
-      ]
-    },
-    {
-      player: "Geraldo Perdomo", team: "AZ", pos: "SS",
-      game: "ARI @ LAD", matchup: "ARI @ LAD", opp_team: "LAD",
-      opp_pitcher: "Yoshinobu Yamamoto", pitcher_hand: "R", pitcher_hr9: 0.72,
-      batter_hand: "S", venue: "Dodger Stadium", park_factor: 96,
-      stat: "Home Runs", line: 0.5, over_odds: 185, under_odds: -230,
-      season_hr: 2, season_pa: 94, season_hr_rate: 0.021,
-      last15_hr: 1, last15_pa: 45, last15_hr_rate: 0.022,
-      weather: { dome: false, wind_speed_mph: 11, wind_direction: "out_to_cf", temp_f: 76, condition: "clear" },
-      score: 28, lean: "UNDER", confidence: "LOW",
-      narrative: null,
-      signals: [
-        { text: "Below avg HR rate: 2 HRs in 94 PA (2.1%) — not a HR threat", tag: "CAUTION" },
-        { text: "Yamamoto HR/9 = 0.72 — elite at suppressing HRs", tag: "WARN" },
-        { text: "Switch hitter — always gets favorable platoon split", tag: "OVER" },
-        { text: "🌬️ Wind 11mph blowing out — minor HR boost", tag: "OVER" },
-        { text: "Park factor 96 — pitcher-friendly venue, suppresses HRs", tag: "CAUTION" },
-      ]
-    },
-    {
-      player: "Kyle Tucker", team: "LAD", pos: "RF",
-      prop_type: "hr",
-      game: "ARI @ LAD", matchup: "ARI @ LAD", opp_team: "ARI",
-      opp_pitcher: "Zac Gallen", pitcher_hand: "R", pitcher_hr9: 1.42,
-      batter_hand: "L", venue: "Dodger Stadium", park_factor: 96,
-      stat: "Home Runs", line: 0.5, over_odds: 120, under_odds: -145,
-      season_hr: 6, season_pa: 87, season_hr_rate: 0.069,
-      last15_hr: 1, last15_pa: 48, last15_hr_rate: 0.021,
-      weather: { dome: false, wind_speed_mph: 11, wind_direction: "out_to_cf", temp_f: 76, condition: "clear" },
-      score: 52, lean: "OVER", confidence: "MODERATE",
-      narrative: null,
-      signals: [
-        { text: "🥶 Running COLD: 1 HR in last 48 PA (well below season pace)", tag: "CAUTION" },
-        { text: "Pitcher HR/9 = 1.42 — above-average HR rate allowed", tag: "OVER" },
-        { text: "LHB vs RHP — favorable platoon split for power", tag: "OVER" },
-        { text: "🌬️ Wind 11mph blowing out to CF — HR-friendly conditions", tag: "OVER" },
-        { text: "Park factor 96 — pitcher-friendly, but LHB pull to RF", tag: "NEUTRAL" },
-      ]
-    },
-    {
-      player: "Yoshinobu Yamamoto", team: "LAD", pos: "SP",
-      prop_type: "k",
-      game: "ARI @ LAD", matchup: "ARI @ LAD", opp_team: "ARI",
-      venue: "Dodger Stadium", park_factor: 96,
-      stat: "Strikeouts", line: 6.5, over_odds: -115, under_odds: -105,
-      pitcher_k9: 11.2, pitcher_kpct: 0.298, pitcher_bb9: 2.1,
-      pitcher_hand: "R", last3_ks: [8, 7, 9], opp_k_rate: 0.241,
-      weather: { dome: false, wind_speed_mph: 1.9, wind_direction: "calm", temp_f: 57.7, condition: "clear" },
-      score: 79, lean: "OVER", confidence: "HIGH",
-      narrative: "Yamamoto is striking out 11.2 per 9 this year with elite command, and AZ fans out 24% of the time. Line of 6.5 looks soft — he's averaged 8 Ks in his last 3 starts.",
-      signals: [
-        { text: "Elite K/9 11.2 — among the best strikeout pitchers in baseball", tag: "OVER" },
-        { text: "Last 3 starts: [8, 7, 9] Ks (avg 8.0) — well above line of 6.5", tag: "OVER" },
-        { text: "Opponent K rate 24.1% — above-average strikeout team", tag: "OVER" },
-        { text: "Elite command (BB/9 2.1) — stays ahead in count, maximizes K opportunities", tag: "OVER" },
-        { text: "Line 6.5 slightly below projection of ~6.9 Ks", tag: "OVER" },
-      ]
-    },
-  ]
-};
-// ── End mock data ─────────────────────────────────────────────────────────────
+// Mock data removed — now using useMLBPropsSlate hook
 
 const TAG_COLORS  = { OVER: "#22c55e", UNDER: "#ef4444", NEUTRAL: "#6b7280", CAUTION: "#f59e0b", WARN: "#f59e0b" };
 const CONF_COLORS = { HIGH: "#ef4444", MODERATE: "#f59e0b", LOW: "#6b7280" };
@@ -461,11 +357,8 @@ export default function MLBPropsPage({ user, profile, onShowLogin }) {
     return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
   })();
 
-  // TODO: Replace with real hook once mlb_props_slates table exists:
-  // const { propsSlate, loading } = useMLBPropsSlate(today);
-  // const data = propsSlate || { date: today, props: [] };
-  const data    = MOCK_PROPS;
-  const loading = false;
+  const { propsSlate, loading } = useMLBPropsSlate(today);
+  const data = propsSlate || { date: today, props: [] };
 
   const [expanded,   setExpanded]   = useState({ 0: true });
   const [confFilter, setConfFilter] = useState("all");
@@ -588,34 +481,3 @@ export default function MLBPropsPage({ user, profile, onShowLogin }) {
     </div>
   );
 }
-
-/*
- * ══════════════════════════════════════════════════════════════════
- * useMLBPropsSlate hook — create this file once Supabase table exists
- * Path: src/hooks/useMLBPropsSlate.js
- * ══════════════════════════════════════════════════════════════════
- *
- * import { useState, useEffect } from 'react';
- * import { supabase } from '../lib/supabase';
- *
- * export function useMLBPropsSlate(date) {
- *   const [propsSlate, setPropsSlate] = useState(null);
- *   const [loading, setLoading]       = useState(true);
- *
- *   useEffect(() => {
- *     if (!date) return;
- *     setLoading(true);
- *     supabase
- *       .from('mlb_props_slates')
- *       .select('*')
- *       .eq('date', date)
- *       .single()
- *       .then(({ data, error }) => {
- *         if (data) setPropsSlate(data);
- *         setLoading(false);
- *       });
- *   }, [date]);
- *
- *   return { propsSlate, loading };
- * }
- */

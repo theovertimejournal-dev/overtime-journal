@@ -86,6 +86,7 @@ const MOCK_PROPS = {
     },
     {
       player: "Kyle Tucker", team: "LAD", pos: "RF",
+      prop_type: "hr",
       game: "ARI @ LAD", matchup: "ARI @ LAD", opp_team: "ARI",
       opp_pitcher: "Zac Gallen", pitcher_hand: "R", pitcher_hr9: 1.42,
       batter_hand: "L", venue: "Dodger Stadium", park_factor: 96,
@@ -101,6 +102,25 @@ const MOCK_PROPS = {
         { text: "LHB vs RHP — favorable platoon split for power", tag: "OVER" },
         { text: "🌬️ Wind 11mph blowing out to CF — HR-friendly conditions", tag: "OVER" },
         { text: "Park factor 96 — pitcher-friendly, but LHB pull to RF", tag: "NEUTRAL" },
+      ]
+    },
+    {
+      player: "Yoshinobu Yamamoto", team: "LAD", pos: "SP",
+      prop_type: "k",
+      game: "ARI @ LAD", matchup: "ARI @ LAD", opp_team: "ARI",
+      venue: "Dodger Stadium", park_factor: 96,
+      stat: "Strikeouts", line: 6.5, over_odds: -115, under_odds: -105,
+      pitcher_k9: 11.2, pitcher_kpct: 0.298, pitcher_bb9: 2.1,
+      pitcher_hand: "R", last3_ks: [8, 7, 9], opp_k_rate: 0.241,
+      weather: { dome: false, wind_speed_mph: 1.9, wind_direction: "calm", temp_f: 57.7, condition: "clear" },
+      score: 79, lean: "OVER", confidence: "HIGH",
+      narrative: "Yamamoto is striking out 11.2 per 9 this year with elite command, and AZ fans out 24% of the time. Line of 6.5 looks soft — he's averaged 8 Ks in his last 3 starts.",
+      signals: [
+        { text: "Elite K/9 11.2 — among the best strikeout pitchers in baseball", tag: "OVER" },
+        { text: "Last 3 starts: [8, 7, 9] Ks (avg 8.0) — well above line of 6.5", tag: "OVER" },
+        { text: "Opponent K rate 24.1% — above-average strikeout team", tag: "OVER" },
+        { text: "Elite command (BB/9 2.1) — stays ahead in count, maximizes K opportunities", tag: "OVER" },
+        { text: "Line 6.5 slightly below projection of ~6.9 Ks", tag: "OVER" },
       ]
     },
   ]
@@ -167,7 +187,7 @@ function toAmerican(decimal) {
 
 function HRParlayBuilder({ props, user, onShowLogin }) {
   const [selected, setSelected] = useState([]);
-  const eligible = props.filter(p => p.confidence !== "LOW" && p.lean === "OVER");
+  const eligible = props.filter(p => p.prop_type === "hr" && p.confidence !== "LOW" && p.lean === "OVER");
 
   function toggle(player) {
     setSelected(prev =>
@@ -350,15 +370,20 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick }) {
 
           {/* Stats grid */}
           <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-            {[
+            {(prop.prop_type === "k" ? [
+              ["Line",    prop.line,                                          "#e2e8f0", "Ks"],
+              ["K/9",     prop.pitcher_k9,                                   prop.pitcher_k9 >= 10 ? "#22c55e" : prop.pitcher_k9 >= 8 ? "#e2e8f0" : "#ef4444", "season"],
+              ["BB/9",    prop.pitcher_bb9,                                  prop.pitcher_bb9 <= 2 ? "#22c55e" : prop.pitcher_bb9 >= 4 ? "#ef4444" : "#e2e8f0", "control"],
+              ["Opp K%",  prop.opp_k_rate ? `${(prop.opp_k_rate*100).toFixed(0)}%` : "—", prop.opp_k_rate >= 0.25 ? "#22c55e" : prop.opp_k_rate <= 0.18 ? "#ef4444" : "#e2e8f0", "vs lineup"],
+            ] : [
               ["Line",       prop.line,              "#e2e8f0",  ""],
               ["Season HR",  prop.season_hr,          "#e2e8f0",  `${prop.season_pa} PA`],
-              ["HR Rate",    `${(prop.season_hr_rate * 100).toFixed(1)}%`,
+              ["HR Rate",    prop.season_hr_rate != null ? `${(prop.season_hr_rate * 100).toFixed(1)}%` : "—",
                               prop.season_hr_rate >= 0.07 ? "#22c55e" : prop.season_hr_rate <= 0.025 ? "#ef4444" : "#e2e8f0", "per PA"],
               ["L15 HRs",    prop.last15_hr,
                               hasPace ? (diff15 > 0.02 ? "#22c55e" : diff15 < -0.02 ? "#ef4444" : "#e2e8f0") : "#6b7280",
                               hasPace ? `${prop.last15_pa} PA` : "—"],
-            ].map(([label, val, color, sub], i) => (
+            ]).map(([label, val, color, sub], i) => (
               <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 10px" }}>
                 <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase" }}>{label}</div>
                 <div style={{ fontSize: 17, fontWeight: 700, color }}>{val}</div>
@@ -369,9 +394,15 @@ function PropCard({ prop, isExpanded, onToggle, locked, onLockClick }) {
 
           {/* Pitcher stat */}
           <div style={{ marginTop: 8, padding: "8px 12px", background: "rgba(255,255,255,0.02)", borderRadius: 8, display: "flex", gap: 20, flexWrap: "wrap", fontSize: 11 }}>
-            <span style={{ color: "#6b7280" }}>Pitcher: <strong style={{ color: "#e2e8f0" }}>{prop.opp_pitcher}</strong></span>
-            <span style={{ color: "#6b7280" }}>HR/9: <strong style={{ color: prop.pitcher_hr9 >= 1.4 ? "#22c55e" : prop.pitcher_hr9 <= 0.7 ? "#ef4444" : "#e2e8f0" }}>{prop.pitcher_hr9}</strong></span>
-            <span style={{ color: "#6b7280" }}>Hand: <strong style={{ color: "#e2e8f0" }}>{prop.pitcher_hand}HP</strong></span>
+            {prop.prop_type === "k" ? (<>
+              <span style={{ color: "#6b7280" }}>Last 3 starts: <strong style={{ color: "#e2e8f0" }}>{(prop.last3_ks || []).join(", ")} Ks</strong></span>
+              <span style={{ color: "#6b7280" }}>K%: <strong style={{ color: "#e2e8f0" }}>{prop.pitcher_kpct ? `${(prop.pitcher_kpct*100).toFixed(0)}%` : "—"}</strong></span>
+              <span style={{ color: "#6b7280" }}>Opp: <strong style={{ color: "#e2e8f0" }}>{prop.opp_team}</strong></span>
+            </>) : (<>
+              <span style={{ color: "#6b7280" }}>Pitcher: <strong style={{ color: "#e2e8f0" }}>{prop.opp_pitcher}</strong></span>
+              <span style={{ color: "#6b7280" }}>HR/9: <strong style={{ color: prop.pitcher_hr9 >= 1.4 ? "#22c55e" : prop.pitcher_hr9 <= 0.7 ? "#ef4444" : "#e2e8f0" }}>{prop.pitcher_hr9}</strong></span>
+              <span style={{ color: "#6b7280" }}>Hand: <strong style={{ color: "#e2e8f0" }}>{prop.pitcher_hand}HP</strong></span>
+            </>)}
           </div>
 
           {/* Odds row */}
@@ -470,7 +501,7 @@ export default function MLBPropsPage({ user, profile, onShowLogin }) {
           <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 3, background: "#ef444418", color: "#ef4444", fontWeight: 600 }}>v1.0</span>
         </div>
         <p style={{ fontSize: 11, color: "#4a5568", margin: "0 0 12px" }}>
-          Park Factor · Wind Direction · Pitcher HR/9 · Batter Hand · Recent HR Pace
+          ⚾ HR Props: Park · Wind · Pitcher HR/9 · Batter Splits · Pace   🎯 K Props: K/9 · Last 3 Starts · Opp K Rate · Command
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Pill text={`📅 ${data.date} · ${data.props.length} batters scored`} color="#6b7280" />

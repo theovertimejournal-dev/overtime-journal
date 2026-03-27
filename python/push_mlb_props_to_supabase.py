@@ -196,25 +196,25 @@ def get_todays_games():
 # STEP 2 — SGO HR PROP LINES
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_sgo_hr_props():
+def get_sgo_props():
     """
-    Pull HR over/under lines from SGO for today's games.
-    Returns dict: { sgo_player_id → { "over_odds": int, "under_odds": int, "line": float, "team": str } }
-
-    TODO: Confirm SGO HR prop oddID format. Expected:
-      batting_homeRuns-PLAYER_ID-game-ou-over
-    where PLAYER_ID is the SGO player ID like SHOHEI_OHTANI_1_MLB.
-
-    If SGO doesn't have HR props on your plan, this returns {} and the script
-    falls back to showing props without real odds (line = 0.5, odds = -115 default).
+    Pull HR + pitcher strikeout over/under lines from SGO for today's games.
+    Returns dict: { sgo_player_id → { prop_type, over_odds, under_odds, line, away_team, home_team } }
+    prop_type: "hr" or "k"
     """
-    print("\n⏳ Fetching HR prop lines from SportsGameOdds...")
+    print("\n⏳ Fetching HR + Pitcher K prop lines from SportsGameOdds...")
+
+    # Fetch both prop types in one call using comma-separated oddIDs
+    ODD_IDS = ",".join([
+        "batting_homeRuns-PLAYER_ID-game-ou-over",
+        "pitching_strikeouts-PLAYER_ID-game-ou-over",
+    ])
 
     events = sgo_get({
         "leagueID":            "MLB",
         "oddsPresent":         "true",
         "finalized":           "false",
-        "oddID":               "batting_homeRuns-PLAYER_ID-game-ou-over",
+        "oddID":               ODD_IDS,
         "includeOpposingOdds": "true",
         "limit":               "30",
     })
@@ -229,18 +229,18 @@ def get_sgo_hr_props():
         game_pk = str(event.get("eventID", ""))
 
         for odd_id, odd_data in odds_dict.items():
-            # odd_id format: batting_homeRuns-MIKE_TROUT_1_MLB-game-ou-over
-            # Strip prefix "batting_homeRuns-" and suffix "-game-ou-over" to get player ID
-            if not odd_id.startswith("batting_homeRuns-") or not odd_id.endswith("-game-ou-over"):
+            # Identify prop type from oddID prefix
+            if odd_id.startswith("batting_homeRuns-") and odd_id.endswith("-game-ou-over"):
+                PREFIX    = "batting_homeRuns-"
+                prop_type = "hr"
+            elif odd_id.startswith("pitching_strikeouts-") and odd_id.endswith("-game-ou-over"):
+                PREFIX    = "pitching_strikeouts-"
+                prop_type = "k"
+            else:
                 continue
 
-            # Extract player_id from the middle segment
-            # e.g. "batting_homeRuns-MIKE_TROUT_1_MLB-game-ou-over"
-            #   → strip prefix → "MIKE_TROUT_1_MLB-game-ou-over"
-            #   → strip suffix → "MIKE_TROUT_1_MLB"
-            PREFIX = "batting_homeRuns-"
-            SUFFIX = "-game-ou-over"
-            player_id = odd_id[len(PREFIX):-len(SUFFIX)]  # MIKE_TROUT_1_MLB
+            SUFFIX    = "-game-ou-over"
+            player_id = odd_id[len(PREFIX):-len(SUFFIX)]
 
             # Use playerID field directly from odd data as confirmation
             confirmed_id = odd_data.get("playerID", player_id)
@@ -298,6 +298,7 @@ def get_sgo_hr_props():
                 continue  # No usable odds — skip
 
             props[player_id] = {
+                "prop_type":  prop_type,   # "hr" or "k"
                 "line":       line,
                 "over_odds":  over_odds,
                 "under_odds": under_odds or -115,
@@ -404,6 +405,200 @@ def get_pitcher_stats(mlb_id):
     hand = people[0].get("pitchHand", {}).get("code", "R") if people else "R"
 
     return {"hr9": hr9, "era": era, "hand": hand, "games": games, "ip": ip}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STEP 4b — PITCHER K STATS + OPPONENT K RATE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_pitcher_k_stats(mlb_id):
+    """Season K/9, K%, BB/9, IP, and last 3 start K counts for a starter."""
+    if not mlb_id:
+        return {"k9": 8.0, "k_pct": 0.22, "bb9": 3.0, "ip": 0, "last3_ks": [], "hand": "R"}
+
+    season = datetime.now().year
+    data = mlb_get(f"/people/{mlb_id}/stats", {
+        "stats": "season", "group": "pitching", "season": season
+    })
+    s = {}
+    for split in data.get("stats", []):
+        splits = split.get("splits", [])
+        if splits:
+            s = splits[0].get("stat", {})
+            break
+
+    ip   = float(s.get("inningsPitched", "0") or 0)
+    ks   = int(s.get("strikeOuts", 0))
+    bb   = int(s.get("baseOnBalls", 0))
+    bf   = int(s.get("battersFaced", 0))
+    k9   = round(ks / ip * 9, 2) if ip > 0 else 0.0
+    kpct = round(ks / bf, 3)     if bf > 0 else 0.0
+    bb9  = round(bb / ip * 9, 2) if ip > 0 else 0.0
+
+    # Last 3 starts K counts from game log
+    log = mlb_get(f"/people/{mlb_id}/stats", {
+        "stats": "gameLog", "group": "pitching", "season": season, "limit": 3
+    })
+    last3_ks = []
+    for split in log.get("stats", []):
+        for entry in split.get("splits", []):
+            ks_game = int(entry.get("stat", {}).get("strikeOuts", 0))
+            last3_ks.append(ks_game)
+
+    # Pitcher hand
+    pdata = mlb_get(f"/people/{mlb_id}")
+    people = pdata.get("people", [])
+    hand = people[0].get("pitchHand", {}).get("code", "R") if people else "R"
+
+    return {"k9": k9, "k_pct": kpct, "bb9": bb9, "ip": ip, "last3_ks": last3_ks, "hand": hand}
+
+
+def get_team_k_rate(team_id, season=None):
+    """Get a team's season strikeout rate as a batter (K per PA)."""
+    if not season: season = datetime.now().year
+    data = mlb_get("/teams/stats", {
+        "stats": "season", "group": "hitting",
+        "season": season, "sportId": 1
+    })
+    for split in data.get("stats", []):
+        for entry in split.get("splits", []):
+            if entry.get("team", {}).get("id") == team_id:
+                s   = entry.get("stat", {})
+                pa  = int(s.get("plateAppearances", 0))
+                ks  = int(s.get("strikeOuts", 0))
+                return round(ks / pa, 3) if pa > 0 else 0.22
+    return 0.22  # league average fallback
+
+
+def score_pitcher_k_prop(pitcher_stats, opp_k_rate, weather, line):
+    """
+    Score a pitcher K prop 0-100.
+    Signals:
+      - Pitcher K/9 season     (25pts)
+      - Pitcher last 3 starts  (20pts)
+      - Opponent K rate        (20pts)
+      - Pitcher BB/9 (control) (15pts)
+      - Weather / dome         (10pts)
+      - Line value             (10pts)
+    """
+    score   = 0
+    signals = []
+
+    k9     = pitcher_stats.get("k9", 0)
+    kpct   = pitcher_stats.get("k_pct", 0)
+    bb9    = pitcher_stats.get("bb9", 3.0)
+    ip     = pitcher_stats.get("ip", 0)
+    last3  = pitcher_stats.get("last3_ks", [])
+
+    # ── Pitcher K/9 (25pts max) ───────────────────────────────────────────────
+    if ip < 10:
+        score += 10
+        signals.append({"text": f"Limited sample ({ip:.0f} IP) — early season K/9 not reliable", "tag": "NEUTRAL"})
+    elif k9 >= 11.0:
+        score += 25
+        signals.append({"text": f"Elite K/9 {k9} — among the best strikeout pitchers in baseball", "tag": "OVER"})
+    elif k9 >= 9.5:
+        score += 20
+        signals.append({"text": f"Strong K/9 {k9} — above-average strikeout pitcher", "tag": "OVER"})
+    elif k9 >= 8.0:
+        score += 12
+        signals.append({"text": f"Average K/9 {k9} — consistent but not a strikeout artist", "tag": "NEUTRAL"})
+    elif k9 >= 6.5:
+        score += 5
+        signals.append({"text": f"Below-avg K/9 {k9} — relies on contact management, not Ks", "tag": "CAUTION"})
+    else:
+        score -= 5
+        signals.append({"text": f"Poor K/9 {k9} — avoid K props on this pitcher", "tag": "WARN"})
+
+    # ── Last 3 starts K pace (20pts max) ─────────────────────────────────────
+    if last3:
+        avg_last3 = sum(last3) / len(last3)
+        signals.append({"text": f"Last {len(last3)} starts: {last3} Ks (avg {avg_last3:.1f})", "tag": "OVER" if avg_last3 >= line else "CAUTION"})
+        if avg_last3 >= line + 2:
+            score += 20
+        elif avg_last3 >= line + 0.5:
+            score += 14
+        elif avg_last3 >= line - 0.5:
+            score += 8
+        elif avg_last3 >= line - 2:
+            score += 2
+        else:
+            score -= 8
+            signals[-1]["tag"] = "CAUTION"
+    else:
+        signals.append({"text": "No recent start data — first or early season start", "tag": "NEUTRAL"})
+        score += 8  # neutral
+
+    # ── Opponent K rate (20pts max) ───────────────────────────────────────────
+    if opp_k_rate >= 0.27:
+        score += 20
+        signals.append({"text": f"Opponent K rate {opp_k_rate:.1%} — one of the most swing-and-miss lineups", "tag": "OVER"})
+    elif opp_k_rate >= 0.24:
+        score += 15
+        signals.append({"text": f"Opponent K rate {opp_k_rate:.1%} — above-average strikeout team", "tag": "OVER"})
+    elif opp_k_rate >= 0.21:
+        score += 8
+        signals.append({"text": f"Opponent K rate {opp_k_rate:.1%} — average contact team", "tag": "NEUTRAL"})
+    elif opp_k_rate >= 0.18:
+        score += 3
+        signals.append({"text": f"Opponent K rate {opp_k_rate:.1%} — below-average K team, makes contact", "tag": "CAUTION"})
+    else:
+        score -= 5
+        signals.append({"text": f"Opponent K rate {opp_k_rate:.1%} — elite contact team, avoid K overs", "tag": "WARN"})
+
+    # ── Control / BB/9 (15pts max) ────────────────────────────────────────────
+    # Good control = more hittable counts = more K opportunities (pitcher ahead in count)
+    if bb9 <= 1.5:
+        score += 15
+        signals.append({"text": f"Elite command (BB/9 {bb9}) — stays ahead in count, maximizes K opportunities", "tag": "OVER"})
+    elif bb9 <= 2.5:
+        score += 10
+        signals.append({"text": f"Good command (BB/9 {bb9}) — consistent strike thrower", "tag": "OVER"})
+    elif bb9 <= 3.5:
+        score += 5
+        signals.append({"text": f"Average command (BB/9 {bb9})", "tag": "NEUTRAL"})
+    else:
+        score -= 3
+        signals.append({"text": f"Poor command (BB/9 {bb9}) — wastes pitches on walks, fewer K counts", "tag": "CAUTION"})
+
+    # ── Weather (10pts max) ───────────────────────────────────────────────────
+    # For Ks: domes are neutral/slight positive (no wind distraction)
+    # Cold air = slightly harder to grip = slightly fewer Ks
+    if weather.get("dome"):
+        score += 5
+        signals.append({"text": "Indoor park — consistent conditions, no wind distraction", "tag": "OVER"})
+    else:
+        temp = weather.get("temp_f", 70)
+        if temp <= 45:
+            score -= 5
+            signals.append({"text": f"Cold {temp}°F — pitcher grip affected, may reduce K rate slightly", "tag": "CAUTION"})
+        elif temp >= 80:
+            score += 3
+            signals.append({"text": f"Warm {temp}°F — good pitching conditions", "tag": "OVER"})
+
+    # ── Line value (10pts max) ────────────────────────────────────────────────
+    # If line is low relative to pitcher's K/9 projection, that's value
+    # Rough expected Ks = K/9 * expected_innings (assume 5.5 IP for starter)
+    expected_ks = round(k9 / 9 * 5.5, 1) if k9 > 0 else line
+    gap = expected_ks - float(line)
+    if gap >= 2.0:
+        score += 10
+        signals.append({"text": f"Line {line} looks LOW — K/9 projects ~{expected_ks} Ks over 5.5 IP", "tag": "OVER"})
+    elif gap >= 0.5:
+        score += 6
+        signals.append({"text": f"Line {line} slightly below projection of ~{expected_ks} Ks", "tag": "OVER"})
+    elif gap >= -0.5:
+        score += 3
+        signals.append({"text": f"Line {line} roughly in line with projection of ~{expected_ks} Ks", "tag": "NEUTRAL"})
+    else:
+        score -= 4
+        signals.append({"text": f"Line {line} looks HIGH — K/9 only projects ~{expected_ks} Ks over 5.5 IP", "tag": "CAUTION"})
+
+    score      = max(0, min(100, score))
+    lean       = "OVER" if score >= 45 else "UNDER"
+    confidence = "HIGH" if score >= 70 else "MODERATE" if score >= 50 else "LOW"
+
+    return score, lean, confidence, signals
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -680,13 +875,24 @@ def generate_prop_narrative(prop):
     try:
         import anthropic
         top_signals = [s["text"] for s in prop["signals"][:3]]
-        prompt = f"""You are OTJ's MLB analyst. Write a sharp 1-2 sentence prop note for bettors.
+        if prop.get("prop_type") == "k":
+            prompt = f"""You are OTJ's MLB analyst. Write a sharp 1-2 sentence prop note for bettors.
+
+Pitcher: {prop["player"]} ({prop["team"]}) — Over {prop["line"]} Strikeouts
+Score: {prop["score"]}/100 ({prop["confidence"]})
+K/9: {prop.get("pitcher_k9", "N/A")} | Last 3 starts: {prop.get("last3_ks", [])} Ks
+Opponent K rate: {prop.get("opp_k_rate", 0):.1%} | Opponent: {prop["opp_team"]}
+Key signals: {" | ".join(top_signals)}
+
+Be specific, punchy, under 40 words. Reference the pitcher and opponent by name."""
+        else:
+            prompt = f"""You are OTJ's MLB analyst. Write a sharp 1-2 sentence prop note for bettors.
 
 Player: {prop["player"]} ({prop["team"]}) — HR Over {prop["line"]}
 Score: {prop["score"]}/100 ({prop["confidence"]})
 Key signals: {" | ".join(top_signals)}
-Park: {prop["venue"]} (PF {prop["park_factor"]})
-Pitcher: {prop["opp_pitcher"]} (HR/9: {prop.get("pitcher_hr9", "N/A")})
+Park: {prop["venue"]} (PF {prop.get("park_factor", 100)})
+Pitcher: {prop.get("opp_pitcher", "TBD")} (HR/9: {prop.get("pitcher_hr9", "N/A")})
 
 Be specific, punchy, under 40 words. Reference the player and pitcher by name."""
 
@@ -737,7 +943,7 @@ def main():
         }
 
     # Step 2 — SGO HR prop lines
-    sgo_props = get_sgo_hr_props()
+    sgo_props = get_sgo_props()
 
     # Step 3 — Weather (one fetch per unique home team)
     print("\n⏳ Fetching weather for each venue...")
@@ -871,48 +1077,109 @@ def main():
         starter_id   = game_info["starter_id"]
         starter_name = game_info["starter_name"]
 
-        pitcher_stats = get_pitcher_stats(starter_id) if starter_id else {"hr9": 1.0, "era": 4.00, "hand": "R", "games": 0}
-        batter_stats  = get_batter_stats(mlb_id)
-        batter_hand   = get_batter_hand(mlb_id)
+        prop_type = prop_line_data.get("prop_type", "hr")
+        line      = prop_line_data["line"]
 
-        if batter_stats.get("season_games", 0) < MIN_GAMES_PLAYED:
-            print(f"  ⏭ {full_name} — only {batter_stats.get('season_games',0)} games played (min {MIN_GAMES_PLAYED})")
-            continue
+        if prop_type == "k":
+            # ── Pitcher K prop ────────────────────────────────────────────────
+            # The SGO player IS the pitcher — they pitch against the opponent team
+            # In team_game_map, a team's entry has "starter_id" = the OPPONENT's starter
+            # For K props, the pitcher IS this player, so we need game_info for their team
+            # but use mlb_id directly as the pitcher
+            pitcher_k_stats = get_pitcher_k_stats(mlb_id)
 
-        score, lean, confidence, signals = score_hr_prop(
-            batter_stats, batter_hand, pitcher_stats, park_factor, weather,
-            line=prop_line_data["line"]
-        )
+            # Opponent team is whoever this pitcher faces
+            # If team == away_team, pitcher bats against home lineup (team_game_map[away].opponent = home)
+            opp_team_abbr = game_info.get("opponent", "")
+            opp_team_id   = None
+            for g in games:
+                if g["away_team"] == opp_team_abbr: opp_team_id = g["away_id"]
+                if g["home_team"] == opp_team_abbr: opp_team_id = g["home_id"]
 
-        if score < MIN_SCORE_SHOW:
-            continue
+            opp_k_rate = get_team_k_rate(opp_team_id) if opp_team_id else 0.22
 
-        prop = {
-            "player":          full_name,
-            "sgo_player_id":   sgo_player_id,
-            "mlb_player_id":   mlb_id,
-            "team":            team,
-            "pos":             "",  # filled below
-            "game":            game_info["matchup"],
-            "matchup":         game_info["matchup"],
-            "opp_team":        game_info["opponent"],
-            "opp_pitcher":     starter_name,
-            "pitcher_hand":    pitcher_stats.get("hand", "R"),
-            "pitcher_hr9":     pitcher_stats.get("hr9", 1.0),
-            "batter_hand":     batter_hand,
-            "venue":           game_info["venue"],
-            "park_factor":     park_factor,
-            "stat":            "Home Runs",
-            "line":            prop_line_data["line"],
-            "over_odds":       prop_line_data["over_odds"],
-            "under_odds":      prop_line_data["under_odds"],
-            "vendor":          prop_line_data["vendor"],
-            "season_hr":       batter_stats["season_hr"],
-            "season_pa":       batter_stats["season_pa"],
-            "season_hr_rate":  batter_stats["season_hr_rate"],
-            "last15_hr":       batter_stats["last15_hr"],
-            "last15_pa":       batter_stats["last15_pa"],
-            "last15_hr_rate":  batter_stats["last15_hr_rate"],
+            score, lean, confidence, signals = score_pitcher_k_prop(
+                pitcher_k_stats, opp_k_rate, weather, line
+            )
+
+            if score < MIN_SCORE_SHOW:
+                continue
+
+            prop = {
+                "player":          full_name,
+                "prop_type":       "k",
+                "sgo_player_id":   sgo_player_id,
+                "mlb_player_id":   mlb_id,
+                "team":            team,
+                "pos":             "SP",
+                "game":            game_info["matchup"],
+                "matchup":         game_info["matchup"],
+                "opp_team":        opp_team_abbr,
+                "venue":           game_info["venue"],
+                "park_factor":     park_factor,
+                "stat":            "Strikeouts",
+                "line":            line,
+                "over_odds":       prop_line_data["over_odds"],
+                "under_odds":      prop_line_data["under_odds"],
+                "vendor":          prop_line_data["vendor"],
+                "pitcher_k9":      pitcher_k_stats.get("k9", 0),
+                "pitcher_kpct":    pitcher_k_stats.get("k_pct", 0),
+                "pitcher_bb9":     pitcher_k_stats.get("bb9", 0),
+                "pitcher_hand":    pitcher_k_stats.get("hand", "R"),
+                "last3_ks":        pitcher_k_stats.get("last3_ks", []),
+                "opp_k_rate":      opp_k_rate,
+                "weather":         weather,
+                "score":           score,
+                "lean":            lean,
+                "confidence":      confidence,
+                "signals":         signals,
+                "narrative":       "",
+            }
+
+        else:
+            # ── HR prop (default) ─────────────────────────────────────────────
+            pitcher_stats = get_pitcher_stats(starter_id) if starter_id else {"hr9": 1.0, "era": 4.00, "hand": "R", "games": 0}
+            batter_stats  = get_batter_stats(mlb_id)
+            batter_hand   = get_batter_hand(mlb_id)
+
+            if batter_stats.get("season_games", 0) < MIN_GAMES_PLAYED:
+                print(f"  ⏭ {full_name} — only {batter_stats.get('season_games',0)} games played (min {MIN_GAMES_PLAYED})")
+                continue
+
+            score, lean, confidence, signals = score_hr_prop(
+                batter_stats, batter_hand, pitcher_stats, park_factor, weather, line=line
+            )
+
+            if score < MIN_SCORE_SHOW:
+                continue
+
+            prop = {
+                "player":          full_name,
+                "prop_type":       "hr",
+                "sgo_player_id":   sgo_player_id,
+                "mlb_player_id":   mlb_id,
+                "team":            team,
+                "pos":             "",
+                "game":            game_info["matchup"],
+                "matchup":         game_info["matchup"],
+                "opp_team":        game_info["opponent"],
+                "opp_pitcher":     starter_name,
+                "pitcher_hand":    pitcher_stats.get("hand", "R"),
+                "pitcher_hr9":     pitcher_stats.get("hr9", 1.0),
+                "batter_hand":     batter_hand,
+                "venue":           game_info["venue"],
+                "park_factor":     park_factor,
+                "stat":            "Home Runs",
+                "line":            line,
+                "over_odds":       prop_line_data["over_odds"],
+                "under_odds":      prop_line_data["under_odds"],
+                "vendor":          prop_line_data["vendor"],
+                "season_hr":       batter_stats["season_hr"],
+                "season_pa":       batter_stats["season_pa"],
+                "season_hr_rate":  batter_stats["season_hr_rate"],
+                "last15_hr":       batter_stats["last15_hr"],
+                "last15_pa":       batter_stats["last15_pa"],
+                "last15_hr_rate":  batter_stats["last15_hr_rate"],
             "weather":         weather,
             "score":           score,
             "lean":            lean,
@@ -945,9 +1212,11 @@ def main():
     print(f"\n{'─' * 60}")
     print(f"  💣 TOP HR PROPS — {game_date}")
     print(f"{'─' * 60}")
-    for p in scored_props[:15]:
+    for p in scored_props[:20]:
         conf_icon = "🔥" if p["confidence"] == "HIGH" else "⚡" if p["confidence"] == "MODERATE" else "ℹ️"
-        print(f"  {conf_icon} {p['player']:25} {p['team']:4} {p['lean']:5} {p['score']:3}/100 | vs {p['opp_pitcher']} | PF {p['park_factor']}")
+        ptype = "⚾ HR" if p.get("prop_type") == "hr" else "🎯 K "
+        detail = f"vs {p.get('opp_pitcher','?')} | PF {p.get('park_factor','?')}" if p.get("prop_type") == "hr" else f"K/9 {p.get('pitcher_k9','?')} | vs {p.get('opp_team','?')} ({p.get('opp_k_rate',0):.0%} K rate)"
+        print(f"  {conf_icon} {ptype} {p['player']:25} {p['team']:4} {p['lean']:5} {p['score']:3}/100 | {detail}")
 
     # Step 7 — Push to Supabase
     if dry_run:

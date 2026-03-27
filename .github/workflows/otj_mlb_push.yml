@@ -1,0 +1,72 @@
+name: OTJ MLB Slate Push (11AM ET)
+
+on:
+  schedule:
+    # 11:00 AM ET = 16:00 UTC (EST) / 15:00 UTC (EDT)
+    # MLB games typically start 1:05 PM ET earliest — this gives ~2hr buffer
+    - cron: '0 15 * * *'
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to push (YYYY-MM-DD) — leave blank for today'
+        required: false
+        default: ''
+      no_narrative:
+        description: 'Skip Claude narratives (faster, cheaper)'
+        required: false
+        default: 'false'
+
+jobs:
+  push-mlb-slate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   # MLB analyzer makes more API calls than NBA — give it room
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        # Versions pinned to prevent silent breakage on cron runs.
+        # To upgrade a lib: test locally first, then bump the version here.
+        run: |
+          pip install \
+            supabase==2.15.1 \
+            python-dotenv==1.1.0 \
+            requests==2.32.3 \
+            tabulate==0.9.0 \
+            pandas==2.2.3
+
+      - name: Run MLB slate push
+        env:
+          SUPABASE_URL:           ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY:   ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+          ANTHROPIC_API_KEY:      ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          cd python
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          echo "ET date: $ET_DATE"
+
+          # Build the command — add --no-narrative flag if requested
+          CMD="python -u push_mlb_to_supabase.py"
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            CMD="$CMD --date=${{ github.event.inputs.date }}"
+          else
+            CMD="$CMD --date=$ET_DATE"
+          fi
+          if [ "${{ github.event.inputs.no_narrative }}" = "true" ]; then
+            CMD="$CMD --no-narrative"
+          fi
+
+          echo "Running: $CMD"
+          $CMD
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ MLB slate push failed — check logs above"

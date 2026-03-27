@@ -135,23 +135,39 @@ MLB_ODD_IDS = ",".join([
 ])
 
 try:
+    # First pass: no date filter, just get whatever MLB events SGO has right now.
+    # oddsPresent=true (not oddsAvailable) catches games where odds exist but
+    # aren't yet "available for wagering" (common early morning before line opens).
     resp = requests.get(
         f"{SGO_BASE}/events",
         headers=SGO_HEADERS,
         params={
             "leagueID":            "MLB",
-            "startsAfter":         f"{game_date}T00:00:00Z",
-            "startsBefore":        f"{game_date}T23:59:59Z",
-            "oddsAvailable":       "true",
+            "oddsPresent":         "true",   # broader than oddsAvailable
             "oddID":               MLB_ODD_IDS,
             "includeOpposingOdds": "true",
+            "finalized":           "false",  # only upcoming/live, not final
             "limit":               "30",
         },
         timeout=20
     )
     resp.raise_for_status()
-    sgo_events = resp.json().get("data", [])
-    print(f"  ✅ {len(sgo_events)} SGO events returned")
+    full_response = resp.json()
+    sgo_events_all = full_response.get("data", [])
+
+    # Filter to today's date client-side (more reliable than server-side timestamp filter)
+    sgo_events = [
+        e for e in sgo_events_all
+        if game_date in (e.get("status", {}).get("startsAt", "") or "")
+    ]
+    print(f"  ✅ {len(sgo_events_all)} total SGO events, {len(sgo_events)} match {game_date}")
+    if not sgo_events and sgo_events_all:
+        # Debug: show what dates SGO does have so we can diagnose the mismatch
+        dates_seen = sorted(set(
+            (e.get("status", {}).get("startsAt", "") or "")[:10]
+            for e in sgo_events_all
+        ))
+        print(f"  ℹ️  SGO has events for dates: {dates_seen}")
 
     for event in sgo_events:
         teams = event.get("teams", {})

@@ -767,6 +767,17 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     # report, their team's season stats are depressed by the absence. We boost
     # the net rating and add score impact to reflect the team's TRUE strength.
     #
+    # SEASON_ENDING: players confirmed out for the season — skip boost even
+    # if they drop off the daily injury report.
+    # Updated: 2026-03-28.
+    SEASON_ENDING = {
+        "Ja Morant",         # MEM — out for season
+        "Jaren Jackson Jr.", # MEM — out for season
+        "Chet Holmgren",     # OKC — out for season
+        "Kawhi Leonard",     # LAC — out for season
+        "Zion Williamson",   # NOP — out for season
+    }
+
     # STAR_ABSENCE_HISTORY: players who missed 8+ games this season.
     # Updated: 2026-03-28. Source: NBA.com on/off splits + manual tracking.
     STAR_ABSENCE_HISTORY = {
@@ -807,6 +818,9 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             if star_info["team"] != team_abbrev:
                 continue
             if star_info["games_missed"] < 8:
+                continue
+            # Skip players confirmed out for the season
+            if star_name in SEASON_ENDING:
                 continue
 
             if star_name not in injured_names:

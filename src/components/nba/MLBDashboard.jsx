@@ -291,9 +291,9 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
               {(ab.team || hb.team) && (
                 <div style={{ marginTop: 14 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 6 }}>Bullpen Comparison (7d)</div>
-                  {((ab.bullpen_ip_7d || 0) < 8 || (hb.bullpen_ip_7d || 0) < 8) && (
+                  {((ab.bullpen_ip_7d || 0) < 15 || (hb.bullpen_ip_7d || 0) < 15) && (
                     <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, padding: "4px 8px", background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)", borderRadius: 4 }}>
-                      ⚠ Opening week — ERA/WHIP showing 2025 season where current IP &lt;5
+                      ⚠ Early season — ERA/WHIP showing 2025 season where current IP &lt;15
                     </div>
                   )}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -302,7 +302,7 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>{bp.team || (i === 0 ? game.away_team : game.home_team)}</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                           {(() => {
-                            const isSmall = (bp.bullpen_ip_7d || 0) < 5;
+                            const isSmall = (bp.bullpen_ip_7d || 0) < 15;
                             const teamKey = i === 0 ? game.away_team : game.home_team;
                             const staticFallback = PRIOR_BULLPEN_ERA[teamKey] || {};
                             const priorEra  = bp.prior_era  ?? staticFallback.era;

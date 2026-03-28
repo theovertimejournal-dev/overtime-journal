@@ -1309,10 +1309,54 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         })
     # ── End Tier Matchup Signals ─────────────────────────────────────────────
 
+    # ── Form Momentum Signals ─────────────────────────────────────────────
+    # Surface when a team is trending significantly up or down
+    h_off_l10 = float(home.get('off_rating_last10', 0) or 0)
+    h_def_l10 = float(home.get('def_rating_last10', 0) or 0)
+    a_off_l10 = float(away.get('off_rating_last10', 0) or 0)
+    a_def_l10 = float(away.get('def_rating_last10', 0) or 0)
+    h_off_season = float(home.get('off_rating', 0) or 0)
+    h_def_season = float(home.get('def_rating', 0) or 0)
+    a_off_season = float(away.get('off_rating', 0) or 0)
+    a_def_season = float(away.get('def_rating', 0) or 0)
+
+    if h_off_l10 and h_off_season:
+        h_def_trend = h_def_season - h_def_l10  # positive = defense improving
+        if abs(h_def_trend) >= 3.0:
+            direction = "improving" if h_def_trend > 0 else "slipping"
+            signals.append({
+                "type": "FORM_TREND",
+                "detail": (
+                    f"{home['team']} defense L10: {h_def_l10:.1f} ppg allowed "
+                    f"vs season {h_def_season:.1f} — {direction} {abs(h_def_trend):.1f} pts"
+                ),
+                "favors": home["team"] if h_def_trend > 0 else away["team"],
+                "strength": "MODERATE",
+                "impact": 0,
+            })
+
+    if a_off_l10 and a_off_season:
+        a_def_trend = a_def_season - a_def_l10
+        if abs(a_def_trend) >= 3.0:
+            direction = "improving" if a_def_trend > 0 else "slipping"
+            signals.append({
+                "type": "FORM_TREND",
+                "detail": (
+                    f"{away['team']} defense L10: {a_def_l10:.1f} ppg allowed "
+                    f"vs season {a_def_season:.1f} — {direction} {abs(a_def_trend):.1f} pts"
+                ),
+                "favors": away["team"] if a_def_trend > 0 else home["team"],
+                "strength": "MODERATE",
+                "impact": 0,
+            })
+    # ── End Form Momentum Signals ─────────────────────────────────────────
+
     # ── ML MODEL PREDICTION ──────────────────────────────────────────────────
-    # LightGBM classifier (68.4% accuracy) + XGBoost margin regressor
-    # Trained on 1,043 games with 60 features. Adds a data-driven signal
-    # that captures patterns the hand-tuned rules miss.
+    # LightGBM classifier + XGBoost margin regressor (v2)
+    # Trained on 1,043 games with 97 features including:
+    #   - Win rate vs good/bad teams, form momentum, L5 momentum
+    #   - Scoring/defense trends, blowout tendency, venue edge
+    # ULTRA confidence tier (>20%): 74.2% accuracy
     ml_prediction = None
     ml_margin_pred = None
     try:
@@ -1428,6 +1472,61 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             feat_row['both_b2b'] = int(feat_row['h_b2b'] and feat_row['a_b2b'])
             feat_row['home_3in4'] = feat_row['h_three_in_four']
             feat_row['away_3in4'] = feat_row['a_three_in_four']
+            
+            # ── NEW v2 FEATURES (37 features from retrain) ───────────────────
+            
+            # Opponent tier — is tonight's opponent good or bad?
+            feat_row['h_opp_is_good'] = int(feat_row['a_win_pct'] >= 0.500)
+            feat_row['a_opp_is_good'] = int(feat_row['h_win_pct'] >= 0.500)
+            feat_row['h_opp_strength'] = feat_row['a_win_pct']
+            feat_row['a_opp_strength'] = feat_row['h_win_pct']
+            feat_row['diff_opp_strength'] = feat_row['h_opp_strength'] - feat_row['a_opp_strength']
+            
+            # Win rate vs good/bad teams (from supplemental or computed at runtime)
+            feat_row['h_win_rate_vs_good'] = _f(home.get('win_rate_vs_good', 0.5))
+            feat_row['h_win_rate_vs_bad'] = _f(home.get('win_rate_vs_bad', 0.5))
+            feat_row['a_win_rate_vs_good'] = _f(away.get('win_rate_vs_good', 0.5))
+            feat_row['a_win_rate_vs_bad'] = _f(away.get('win_rate_vs_bad', 0.5))
+            feat_row['h_margin_vs_good'] = _f(home.get('margin_vs_good', 0))
+            feat_row['h_margin_vs_bad'] = _f(home.get('margin_vs_bad', 0))
+            feat_row['a_margin_vs_good'] = _f(away.get('margin_vs_good', 0))
+            feat_row['a_margin_vs_bad'] = _f(away.get('margin_vs_bad', 0))
+            feat_row['diff_wr_vs_good'] = feat_row['h_win_rate_vs_good'] - feat_row['a_win_rate_vs_good']
+            feat_row['diff_wr_vs_bad'] = feat_row['h_win_rate_vs_bad'] - feat_row['a_win_rate_vs_bad']
+            feat_row['diff_margin_vs_good'] = feat_row['h_margin_vs_good'] - feat_row['a_margin_vs_good']
+            feat_row['diff_margin_vs_bad'] = feat_row['h_margin_vs_bad'] - feat_row['a_margin_vs_bad']
+            
+            # Form momentum — L10 net vs season net (positive = trending UP)
+            feat_row['h_form_momentum'] = feat_row['h_l10_net'] - feat_row['h_net_rating_proxy']
+            feat_row['a_form_momentum'] = feat_row['a_l10_net'] - feat_row['a_net_rating_proxy']
+            feat_row['diff_form_momentum'] = feat_row['h_form_momentum'] - feat_row['a_form_momentum']
+            
+            # L5 momentum — even more recent trend
+            feat_row['h_l5_momentum'] = feat_row['h_l5_pct'] - feat_row['h_win_pct']
+            feat_row['a_l5_momentum'] = feat_row['a_l5_pct'] - feat_row['a_win_pct']
+            feat_row['diff_l5_momentum'] = feat_row['h_l5_momentum'] - feat_row['a_l5_momentum']
+            
+            # Scoring/defense trends — recent vs season
+            feat_row['h_scoring_trend'] = feat_row['h_l10_avg_scored'] - feat_row['h_avg_pts_scored']
+            feat_row['a_scoring_trend'] = feat_row['a_l10_avg_scored'] - feat_row['a_avg_pts_scored']
+            feat_row['h_defense_trend'] = feat_row['h_avg_pts_allowed'] - feat_row['h_l10_avg_allowed']
+            feat_row['a_defense_trend'] = feat_row['a_avg_pts_allowed'] - feat_row['a_l10_avg_allowed']
+            feat_row['diff_scoring_trend'] = feat_row['h_scoring_trend'] - feat_row['a_scoring_trend']
+            feat_row['diff_defense_trend'] = feat_row['h_defense_trend'] - feat_row['a_defense_trend']
+            
+            # Blowout tendency
+            feat_row['h_blowout_rate'] = feat_row['h_blowout_wins'] / max(feat_row['h_games_played'], 1)
+            feat_row['a_blowout_rate'] = feat_row['a_blowout_wins'] / max(feat_row['a_games_played'], 1)
+            feat_row['h_blowout_loss_rate'] = feat_row['h_blowout_losses'] / max(feat_row['h_games_played'], 1)
+            feat_row['a_blowout_loss_rate'] = feat_row['a_blowout_losses'] / max(feat_row['a_games_played'], 1)
+            feat_row['diff_blowout_rate'] = feat_row['h_blowout_rate'] - feat_row['a_blowout_rate']
+            
+            # Home/away split strength
+            feat_row['h_home_away_split'] = feat_row['h_home_win_pct'] - feat_row['h_away_win_pct']
+            feat_row['a_home_away_split'] = feat_row['a_home_win_pct'] - feat_row['a_away_win_pct']
+            feat_row['h_venue_edge'] = feat_row['h_home_win_pct'] - feat_row['a_away_win_pct']
+            
+            # ── END v2 FEATURES ──────────────────────────────────────────────
             
             # Build feature vector in correct order
             import pandas as pd

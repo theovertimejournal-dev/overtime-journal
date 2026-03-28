@@ -774,8 +774,6 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Ja Morant",         # MEM — out for season
         "Jaren Jackson Jr.", # MEM — out for season
         "Chet Holmgren",     # OKC — out for season
-        "Kawhi Leonard",     # LAC — out for season
-        "Zion Williamson",   # NOP — out for season
     }
 
     # STAR_ABSENCE_HISTORY: players who missed 8+ games this season.

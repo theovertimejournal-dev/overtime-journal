@@ -1282,34 +1282,6 @@ export default function LandingPage({ user, profile, sessionValidated }) {
   const [feedFilter, setFeedFilter] = useState('all');
   const [tickerBySport, setTickerBySport] = useState({});
   const [allSlates, setAllSlates]         = useState([]);
-
-  // Fetch today's slates for all sports — powers ticker + floating countdown
-  useEffect(() => {
-    supabase
-      .from('slates')
-      .select('sport, date, games, yesterday_results, live_ticker, cumulative_record')
-      .eq('date', today)
-      .then(({ data }) => {
-        if (!data?.length) return;
-        setAllSlates(data);
-        const bySport = {};
-        for (const slate of data) {
-          const sport = slate.sport || 'nba';
-          const results = slate.yesterday_results || [];
-          const live    = slate.live_ticker || [];
-          const items = live.length > 0
-            ? live.map(t => ({ text: t.display, win: t.pick_result === 'W' ? true : t.pick_result === 'L' ? false : null }))
-            : results.map(r => {
-                const win = r.result === 'W' || r.result === 'win';
-                const loss = r.result === 'L' || r.result === 'loss';
-                const text = [r.matchup || r.game, r.pick || r.lean, r.score || r.final_score || ''].filter(Boolean).join(' · ');
-                return { text, win: win ? true : loss ? false : null };
-              }).filter(x => x.text);
-          if (items.length) bySport[sport] = items;
-        }
-        setTickerBySport(bySport);
-      });
-  }, [today]); // all, nba, ncaa, injuries, scores, journal
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedLimit, setFeedLimit] = useState(25);
 
@@ -1452,6 +1424,34 @@ export default function LandingPage({ user, profile, sessionValidated }) {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Fetch all sport slates — powers multi-sport ticker + floating countdown
+  useEffect(() => {
+    supabase
+      .from('slates')
+      .select('sport, date, games, yesterday_results, live_ticker, cumulative_record')
+      .eq('date', today)
+      .then(({ data }) => {
+        if (!data?.length) return;
+        setAllSlates(data);
+        const bySport = {};
+        for (const slate of data) {
+          const sport   = slate.sport || 'nba';
+          const results = slate.yesterday_results || [];
+          const live    = slate.live_ticker || [];
+          const items   = live.length > 0
+            ? live.map(t => ({ text: t.display, win: t.pick_result === 'W' ? true : t.pick_result === 'L' ? false : null }))
+            : results.map(r => {
+                const win  = r.result === 'W' || r.result === 'win';
+                const loss = r.result === 'L' || r.result === 'loss';
+                const text = [r.matchup || r.game, r.pick || r.lean, r.score || r.final_score || ''].filter(Boolean).join(' · ');
+                return { text, win: win ? true : loss ? false : null };
+              }).filter(x => x.text);
+          if (items.length) bySport[sport] = items;
+        }
+        setTickerBySport(bySport);
+      });
+  }, [today]);
 
   return (
     <div style={{ minHeight: '100vh', background: '#08080f', color: '#e2e8f0', fontFamily: MONO }}>

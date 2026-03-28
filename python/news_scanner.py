@@ -23,6 +23,8 @@ import os
 import json
 import requests
 import hashlib
+import re
+import urllib.parse
 from datetime import datetime, timedelta
 
 # ── Nickname lookup ──────────────────────────────────────────────────────────
@@ -72,6 +74,69 @@ if not SUPABASE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 BDL_HEADERS = {"Authorization": BDL_KEY}
 BDL_BASE = "https://api.balldontlie.io"
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")  # optional — falls back to RSS if not set
+
+
+def find_youtube_highlight(query, max_results=3):
+    """
+    Search YouTube for a highlight clip. Returns embed URL or None.
+    Uses YouTube Data API v3 if key is set, otherwise YouTube RSS search (free).
+    """
+    if not query:
+        return None
+
+    # Try YouTube Data API first (best results, needs key)
+    if YOUTUBE_API_KEY:
+        try:
+            params = {
+                "part": "snippet",
+                "q": query,
+                "type": "video",
+                "videoEmbeddable": "true",
+                "maxResults": max_results,
+                "key": YOUTUBE_API_KEY,
+            }
+            r = requests.get("https://www.googleapis.com/youtube/v3/search",
+                             params=params, timeout=10)
+            r.raise_for_status()
+            items = r.json().get("items", [])
+            if items:
+                vid_id = items[0]["id"]["videoId"]
+                return f"https://www.youtube.com/watch?v={vid_id}"
+        except Exception as e:
+            pass  # fall through to RSS fallback
+
+    # Fallback: YouTube search via unofficial search URL
+    # Returns first result embed URL without needing API key
+    try:
+        encoded = urllib.parse.quote(query)
+        r = requests.get(
+            f"https://www.youtube.com/results?search_query={encoded}",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; OTJ/1.0)"},
+            timeout=10
+        )
+        # Extract first video ID from page source
+        match = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', r.text)
+        if match:
+            vid_id = match.group(1)
+            return f"https://www.youtube.com/watch?v={vid_id}"
+    except Exception:
+        pass
+
+    return None
+
+
+def yt_query_for_standout(name, stat_line, sport="nba"):
+    """Build a good YouTube search query for a standout performance."""
+    short_stat = stat_line.split(",")[0]  # e.g. "42 pts" from "42 pts / 8 reb / 5 ast"
+    return f"{name} {short_stat} highlights {datetime.now().strftime('%Y')}"
+
+
+def yt_query_for_sport_event(headline, sport):
+    """Build a YouTube search query from a news headline."""
+    # Strip emojis and clean up
+    clean = re.sub(r'[^\w\s@\-]', '', headline)[:80]
+    return f"{clean} {sport} highlights"
 
 # ── Args ──────────────────────────────────────────────────────────────────────
 scan_date = datetime.now().strftime("%Y-%m-%d")
@@ -247,54 +312,170 @@ def get_line_move_reaction(voice, matchup, move, direction):
     return reactions.get(voice, "")
 
 def get_game_final_reaction(voice, winner, loser, margin, score_str):
-    """Game result reaction."""
+    """Game result reaction — expanded variety pool."""
     if margin >= 25:
-        reactions = {
-            "yumi": f"{winner} by {margin}. That stopped being a game in the third quarter.",
-            "johnnybot": f"{winner} by {margin} and the starters sat the whole fourth. {loser} has questions to answer.",
-            "krash": f"{winner} absolutely dismantled {loser}. {margin} points. That's not a game, that's a statement.",
+        options = {
+            "yumi": [
+                f"{winner} by {margin}. That stopped being a game in the third quarter.",
+                f"{loser} never found their footing. {winner} runs away with it — {score_str}.",
+                f"Dominant from start to finish. {winner} by {margin}. Clean performance.",
+                f"{winner} set the tone early and never looked back. {loser} had no answers.",
+            ],
+            "johnnybot": [
+                f"{winner} by {margin} and the starters sat the whole fourth. {loser} has questions to answer.",
+                f"Was this a game? {winner} up {margin}. {loser} needs a serious film session.",
+                f"I expected more from {loser}. {winner} made them look amateur tonight. {score_str}.",
+                f"{margin} points. That's a beatdown. {loser} looked like they forgot to show up.",
+            ],
+            "krash": [
+                f"{winner} absolutely dismantled {loser}. {margin} points. That's not a game, that's a statement.",
+                f"{winner} was DOMINANT tonight. {score_str}. {loser} never had a chance.",
+                f"I felt bad for {loser} by halftime. {winner} just took their soul. {margin}-point final.",
+                f"RUTHLESS. {winner} showed zero mercy. {score_str}. When they're clicking like that, it's a problem for EVERYONE.",
+            ],
         }
     elif margin <= 3:
-        reactions = {
-            "yumi": f"{winner} survives by {margin}. The kind of game that ages you.",
-            "johnnybot": f"{winner} by {margin}. That could've gone either way and we all know it.",
-            "krash": f"My heart. {winner} by {margin}. That finish was INTENSE. This is why we watch every night.",
+        options = {
+            "yumi": [
+                f"{winner} survives by {margin}. The kind of game that ages you.",
+                f"Either team could have won that. {winner} made one more play. {score_str}.",
+                f"{score_str}. {winner} holds on. {loser} will be thinking about the final possession for a while.",
+                f"Decided at the wire. {winner} by {margin}. That's why you watch every second.",
+            ],
+            "johnnybot": [
+                f"{winner} by {margin}. That could've gone either way and we all know it.",
+                f"If {loser} makes one more shot, we're talking about a different outcome. {winner} by {margin}.",
+                f"Coin flip game. {winner} called heads. {score_str}.",
+                f"I had {loser} in that spot. {winner} by {margin}. The margin for error was zero and they found it.",
+            ],
+            "krash": [
+                f"My heart. {winner} by {margin}. That finish was INTENSE. This is why we watch every night.",
+                f"I literally couldn't breathe at the end. {winner} holds on by {margin}. INCREDIBLE FINISH.",
+                f"THE BASKETBALL GODS WERE WATCHING TONIGHT. {winner} by {margin}. That was INSANE.",
+                f"Every single possession mattered. {winner} makes the plays. {score_str}. THAT'S SPORTS.",
+            ],
         }
     elif margin <= 7:
-        reactions = {
-            "yumi": f"{winner} pulls it out. Competitive game, good basketball.",
-            "johnnybot": f"{winner} by {margin}. Close enough to make you sweat if you had action on it.",
-            "krash": f"Fun game. {winner} came through when it mattered. {score_str} final.",
+        options = {
+            "yumi": [
+                f"{winner} pulls it out. Competitive game, good basketball.",
+                f"Close throughout. {winner} had just enough. {score_str}.",
+                f"{loser} kept it interesting but {winner} made the plays that mattered. {score_str}.",
+                f"Good game. {winner} by {margin}. {loser} will feel like they left some things out there.",
+            ],
+            "johnnybot": [
+                f"{winner} by {margin}. Close enough to make you sweat if you had action on it.",
+                f"Competitive. {winner} pulls it out. {loser} gave them everything they had.",
+                f"{margin} points. That's a real game. {winner} earned that W tonight.",
+                f"{loser} was right there until they weren't. {winner} by {margin}. That's how it goes sometimes.",
+            ],
+            "krash": [
+                f"Fun game. {winner} came through when it mattered. {score_str} final.",
+                f"I was into this one the whole way. {winner} by {margin}. Great basketball tonight.",
+                f"{winner} had to work for it and they got it done. That's a quality win. {score_str}.",
+                f"Both teams competed hard. {winner} just had a little more in the tank at the end. {score_str}.",
+            ],
         }
     else:
-        reactions = {
-            "yumi": f"{winner} handles business. {score_str}. Clean.",
-            "johnnybot": f"{winner} gets the W. {score_str}. Nothing to overthink here.",
-            "krash": f"{winner} solid tonight. {score_str}. On to the next one.",
+        options = {
+            "yumi": [
+                f"{winner} handles business. {score_str}. Clean.",
+                f"Controlled performance from {winner}. {score_str}.",
+                f"{winner} takes care of {loser} without drama. {score_str}.",
+                f"Efficient. Decisive. {winner} by {margin}. On to the next.",
+            ],
+            "johnnybot": [
+                f"{winner} gets the W. {score_str}. Nothing to overthink here.",
+                f"Standard night for {winner}. {score_str}. They did what they were supposed to do.",
+                f"{winner} by {margin}. Not flashy, just effective. The W is what matters.",
+                f"Business trip for {winner}. {score_str}. Clean, efficient, done.",
+            ],
+            "krash": [
+                f"{winner} solid tonight. {score_str}. On to the next one.",
+                f"Smooth performance from {winner}. {score_str}. Love when a team just handles their business.",
+                f"{winner} looked good tonight. {score_str}. That's a team playing with confidence.",
+                f"No drama needed. {winner} by {margin}. That's a team that knows what it's doing.",
+            ],
         }
-    return reactions.get(voice, "")
+    voice_options = options.get(voice, [f"{winner} wins {score_str}."])
+    return random.choice(voice_options)
 
 def get_standout_reaction(voice, name, stat_line, pts):
-    """Standout performance reaction."""
+    """Standout performance reaction — large variety pool to avoid repetition."""
     if pts >= 50:
-        reactions = {
-            "yumi": f"{name} with {stat_line}. You don't see this often. Remember where you were tonight.",
-            "johnnybot": f"{name} just dropped {pts}. Incredible. Even I can't find something to question about that.",
-            "krash": f"ARE YOU KIDDING ME. {name}. {stat_line}. I'm still processing what I just watched. HISTORIC.",
+        options = {
+            "yumi": [
+                f"{name} with {stat_line}. You don't see this often. Remember where you were tonight.",
+                f"50+ from {name}. That's a moment, not just a game.",
+                f"{name} just had one of those nights that ends up on a career highlight reel.",
+                f"The {stat_line} from {name} tonight was genuinely historic. Rare air.",
+                f"When {name} is in this kind of zone, the defense literally doesn't matter. {stat_line}.",
+            ],
+            "johnnybot": [
+                f"{name} just dropped {pts}. Incredible. Even I can't find something to question about that.",
+                f"{pts} points. I've been watching basketball for 20 years. Tonight was different.",
+                f"I was ready to be skeptical. Then {name} dropped {stat_line} and I had to just sit with it.",
+                f"Okay. {name}. {stat_line}. I'll give credit where it's due — that was something else.",
+                f"{name} made everyone look silly tonight. {stat_line}. This one goes in the archives.",
+            ],
+            "krash": [
+                f"ARE YOU KIDDING ME. {name}. {stat_line}. I'm still processing what I just watched. HISTORIC.",
+                f"WHAT. {name} just put up {stat_line}. I don't even have words. That's an all-timer.",
+                f"The basketball gods blessed us tonight. {name} was POSSESSED. {stat_line}.",
+                f"My jaw is on the floor. {name} went absolutely nuclear. {stat_line}. GOAT conversation starting NOW.",
+                f"Everyone stop what you're doing. {name} just dropped {stat_line}. WITNESS.",
+            ],
         }
     elif pts >= 40:
-        reactions = {
-            "yumi": f"{name} with a casual {stat_line}. That's an elite performance any way you slice it.",
-            "johnnybot": f"{name} drops {pts} and everyone's going to overreact. Let me see it twice before I crown anyone.",
-            "krash": f"{name} was ON ONE tonight. {stat_line}. When a player locks in like that, it's beautiful to watch.",
+        options = {
+            "yumi": [
+                f"{name} with a casual {stat_line}. That's an elite performance any way you slice it.",
+                f"The efficiency from {name} tonight was something else. {stat_line}.",
+                f"{name} looked locked in from the first possession. {stat_line} is the result.",
+                f"Quiet masterclass from {name}. {stat_line}. That's what elite looks like.",
+                f"{name} was the best player on the floor tonight and it wasn't particularly close. {stat_line}.",
+            ],
+            "johnnybot": [
+                f"{name} drops {pts} and everyone's going to overreact. Let me see it twice before I crown anyone.",
+                f"Is {name} playing at a different level right now? The numbers say yes. {stat_line}.",
+                f"I want to poke holes in this. I really do. But {stat_line} from {name} is hard to argue with.",
+                f"{name} put up {stat_line}. The league is going to have to make adjustments. Real talk.",
+                f"Forty-plus from {name}. Not a fluke. This is becoming a pattern and the rest of the league should be worried.",
+            ],
+            "krash": [
+                f"{name} was ON ONE tonight. {stat_line}. When a player locks in like that, it's beautiful to watch.",
+                f"I had to stand up for some of those shots from {name} tonight. {stat_line}. LOCKED IN.",
+                f"The crowd felt it. I felt it. {name} was in a different universe tonight. {stat_line}.",
+                f"Don't sleep on what just happened. {name} with {stat_line}. That's a special night.",
+                f"{name} just put the league on notice. {stat_line}. When he's this hot, there's no stopping it.",
+            ],
         }
     else:
-        reactions = {
-            "yumi": f"{name} put together a strong night. {stat_line}.",
-            "johnnybot": f"Solid line from {name}. {stat_line}. Quietly impressive.",
-            "krash": f"{name} showed up tonight. {stat_line}. Love watching players compete at that level.",
+        options = {
+            "yumi": [
+                f"{name} put together a strong night. {stat_line}.",
+                f"Consistent, efficient, impactful. {name} with {stat_line} tonight.",
+                f"{name}'s {stat_line} line doesn't jump off the page but the impact was real.",
+                f"Right guy, right moment. {name} delivered tonight with {stat_line}.",
+                f"The {stat_line} from {name} was exactly what the team needed.",
+            ],
+            "johnnybot": [
+                f"Solid line from {name}. {stat_line}. Quietly impressive.",
+                f"{name} does this so consistently that people forget to be impressed. {stat_line}.",
+                f"Not flashy. Just effective. {name} with {stat_line} tonight.",
+                f"{name}'s {stat_line} won't trend on Twitter. But the advanced metrics are going to love it.",
+                f"If you watched closely, {name} was the most important player on the floor tonight. {stat_line}.",
+            ],
+            "krash": [
+                f"{name} showed up tonight. {stat_line}. Love watching players compete at that level.",
+                f"This is why {name} is different. {stat_line} and made it look easy.",
+                f"Big time player, big time moment. {name} with {stat_line}. That's the good stuff.",
+                f"Every game {name} steps up like this reminds me why I love this sport. {stat_line}.",
+                f"{name} was the engine tonight. {stat_line}. That's what carrying looks like.",
+            ],
         }
-    return reactions.get(voice, "")
+    voice_options = options.get(voice, [f"{name} with {stat_line}."])
+    return random.choice(voice_options)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -564,7 +745,8 @@ def scan_game_results():
                         severity = "important"
                     
                     body = get_standout_reaction(voice, name, stat_line, pts)
-                    
+                    yt_url = find_youtube_highlight(f"{name} {pts} points highlights {scan_date[:7]}") if pts >= 35 else None
+
                     if insert_news({
                         "type": "standout",
                         "sport": "nba",
@@ -573,13 +755,15 @@ def scan_game_results():
                         "character": voice,
                         "team": team_abbr,
                         "matchup": matchup,
+                        "source_url": yt_url,
                         "severity": severity,
                         "data": json.dumps({"player": name, "team": team_abbr, "pts": pts, "reb": reb, "ast": ast, "fg3m": fg3m}),
                         "date": scan_date,
                         "dedup_key": dk2,
                     }):
                         count += 1
-                        print(f"\n    🔥 {name} — {stat_line}")
+                        yt_tag = " 📹" if yt_url else ""
+                        print(f"\n    🔥 {name} — {stat_line}{yt_tag}")
                 
                 # Triple-double
                 elif doubles >= 3:
@@ -589,6 +773,7 @@ def scan_game_results():
                     headline = f"🎯 {name} TRIPLE-DOUBLE — {stat_line} vs {loser if team_abbr == winner else winner}"
                     body = get_standout_reaction(voice, name, f"TRIPLE-DOUBLE {stat_line}", pts)
                     
+                    yt_url_td = find_youtube_highlight(f"{name} triple double highlights {scan_date[:7]}")
                     if insert_news({
                         "type": "standout",
                         "sport": "nba",
@@ -597,13 +782,15 @@ def scan_game_results():
                         "character": voice,
                         "team": team_abbr,
                         "matchup": matchup,
+                        "source_url": yt_url_td,
                         "severity": "important",
                         "data": json.dumps({"player": name, "team": team_abbr, "pts": pts, "reb": reb, "ast": ast, "triple_double": True}),
                         "date": scan_date,
                         "dedup_key": dk2,
                     }):
                         count += 1
-                        print(f"\n    🎯 {name} TRIPLE-DOUBLE — {stat_line}")
+                        yt_tag_td = " 📹" if yt_url_td else ""
+                        print(f"\n    🎯 {name} TRIPLE-DOUBLE — {stat_line}{yt_tag_td}")
                 
                 # 7+ threes
                 elif fg3m >= 7:
@@ -1178,6 +1365,157 @@ def scan_live_games():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SCANNER: VIRAL SPORTS (golf, UFC, boxing, tennis, soccer)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def scan_viral_sports():
+    """
+    Covers golf, UFC/boxing, tennis, soccer — plus searches YouTube for highlights.
+    Characters react to Tiger meltdowns, UFC finishes, walk-off moments, anything notable.
+    Runs alongside the main NBA/MLB/NHL scanner so the feed isn't just basketball.
+    """
+    print("  Scanning viral sports moments...", end=" ")
+    count = 0
+
+    GOLF_STARS = {
+        "Tiger Woods", "Rory McIlroy", "Jon Rahm", "Scottie Scheffler",
+        "Xander Schauffele", "Brooks Koepka", "Jordan Spieth", "Justin Thomas",
+        "Collin Morikawa", "Viktor Hovland", "Hideki Matsuyama", "Wyndham Clark",
+        "Nelly Korda", "Lexi Thompson", "Lydia Ko", "Brooke Henderson",
+    }
+
+    GOLF_REACTIONS = {
+        "yumi": [
+            "Golf has a way of exposing every weakness in your mental game. Today was someone's reckoning.",
+            "The composure required to compete at this level is extraordinary. Not everyone has it every day.",
+            "Sunday on the back nine tells you everything about a player's character. Today we got a full story.",
+            "Golf is the most honest sport — the scorecard doesn't lie and neither does the leaderboard.",
+            "What separates the great ones isn't talent on the good days. It's execution on the hard ones.",
+        ],
+        "johnnybot": [
+            "Golf does this. Builds you up over 71 holes and then the 72nd hole ends careers. Ruthless.",
+            "If you think golf isn't a sport, watch the final round of any major. That's pure pressure.",
+            "I can't make a six-footer at the driving range for fun. These people do it for their livelihood. Different breed.",
+            "The leaderboard moved. Somebody made a putt. Somebody missed one. This is golf.",
+            "Sunday golf is a completely different animal than Thursday golf. The oxygen gets thinner.",
+        ],
+        "krash": [
+            "THE GOLF GODS WERE WATCHING TODAY AND THEY WERE NOT KIND. That back nine was PAINFUL.",
+            "I had to stand up for that putt. I literally stood up. In my living room. For golf.",
+            "Golf is so cruel. One shot. One moment. Everything changes. That's why I watch every week.",
+            "When a golfer gets in the zone on Sunday you can feel it through the screen. That was SPECIAL.",
+            "I don't care what anyone says — golf under pressure is the most intense thing in sports. PERIOD.",
+        ],
+    }
+
+    UFC_REACTIONS = {
+        "yumi": [
+            "A finish in combat sports is always jarring. The margin between winning and losing is razor thin.",
+            "MMA is the most honest sport — there's nowhere to hide when you step in that cage.",
+            "That finish changes everything. The rankings, the narratives, the next fight. One moment rewrites it all.",
+        ],
+        "johnnybot": [
+            "Didn't see that finish coming. The oddsmakers didn't either, I'd bet.",
+            "MMA is the one sport where everything can change in a single second. Tonight it changed.",
+            "When the cage door closes, all the pre-fight talk stops mattering. What matters is what happens in there.",
+        ],
+        "krash": [
+            "LIGHTS OUT. The Octagon is RUTHLESS. Did not see that coming AT ALL.",
+            "ONE SHOT. ONE MOMENT. MMA just reminded everyone why it's the most electric sport on the planet.",
+            "I jumped out of my seat. Combat sports does this to you. UNBELIEVABLE finish.",
+        ],
+    }
+
+    VIRAL_SPORTS_CFGS = [
+        {"url": "https://site.api.espn.com/apis/site/v2/sports/golf/pga/scoreboard", "sport": "golf", "emoji": "⛳"},
+        {"url": "https://site.api.espn.com/apis/site/v2/sports/golf/lpga/scoreboard", "sport": "golf", "emoji": "⛳"},
+        {"url": "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/scoreboard", "sport": "mma", "emoji": "🥊"},
+        {"url": "https://site.api.espn.com/apis/site/v2/sports/boxing/boxing/scoreboard", "sport": "boxing", "emoji": "🥊"},
+    ]
+
+    for cfg in VIRAL_SPORTS_CFGS:
+        try:
+            resp = requests.get(cfg["url"], timeout=10)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+        except Exception:
+            continue
+
+        for event in data.get("events", []):
+            status_type = event.get("status", {}).get("type", {}).get("name", "")
+            if status_type != "STATUS_FINAL":
+                continue
+
+            short_name = event.get("shortName", event.get("name", ""))
+            comps = event.get("competitions", [{}])
+            comp = comps[0] if comps else {}
+            competitors = comp.get("competitors", [])
+            if not competitors:
+                continue
+
+            voice = pick_voice()
+
+            if cfg["sport"] == "golf":
+                for c in competitors:
+                    athlete = c.get("athlete", {})
+                    aname = athlete.get("displayName", "")
+                    if aname not in GOLF_STARS and not c.get("winner"):
+                        continue
+
+                    is_winner = c.get("winner", False)
+                    dk = dedup_key("golf", aname, scan_date)
+                    body = random.choice(GOLF_REACTIONS.get(voice, GOLF_REACTIONS["yumi"]))
+                    headline = f"⛳ {aname} wins {short_name}" if is_winner else f"⛳ {aname} — {short_name}"
+                    yt_url = find_youtube_highlight(f"{aname} golf highlights {scan_date[:7]}")
+
+                    if insert_news({
+                        "type": "highlights",
+                        "sport": "golf",
+                        "headline": headline,
+                        "body": body,
+                        "character": voice,
+                        "source_url": yt_url,
+                        "severity": "important" if is_winner else "normal",
+                        "data": json.dumps({"athlete": aname, "event": short_name}),
+                        "date": scan_date,
+                        "dedup_key": dk,
+                    }):
+                        count += 1
+                        print(f"\n    ⛳ {aname}: {short_name[:50]}")
+
+            elif cfg["sport"] in ("mma", "boxing"):
+                winner_name = next((c.get("athlete", {}).get("displayName") or c.get("team", {}).get("displayName", "")
+                                    for c in competitors if c.get("winner")), None)
+                loser_name = next((c.get("athlete", {}).get("displayName") or c.get("team", {}).get("displayName", "")
+                                   for c in competitors if not c.get("winner")), "opponent")
+                if not winner_name:
+                    continue
+
+                dk = dedup_key("combat", winner_name, loser_name, scan_date)
+                body = random.choice(UFC_REACTIONS.get(voice, UFC_REACTIONS["yumi"]))
+                yt_url = find_youtube_highlight(f"{winner_name} vs {loser_name} fight highlights")
+
+                if insert_news({
+                    "type": "highlights",
+                    "sport": cfg["sport"],
+                    "headline": f"{cfg['emoji']} {winner_name} defeats {loser_name}",
+                    "body": body,
+                    "character": voice,
+                    "source_url": yt_url,
+                    "severity": "important",
+                    "data": json.dumps({"winner": winner_name, "loser": loser_name}),
+                    "date": scan_date,
+                    "dedup_key": dk,
+                }):
+                    count += 1
+                    print(f"\n    {cfg['emoji']} {winner_name} def {loser_name}")
+
+    print(f"{count} new" if count else "no viral moments")
+    return count
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1190,5 +1528,6 @@ total += scan_live_games()
 total += scan_espn_sport("nhl")
 total += scan_espn_sport("mlb")
 total += scan_espn_sport("nfl")
+total += scan_viral_sports()   # Golf, UFC, boxing — the fun stuff
 
 print(f"\n  📡 Scan complete — {total} new items published")

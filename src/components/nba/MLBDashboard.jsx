@@ -118,6 +118,8 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
   const apyth = analysis.away_pythagorean || {};
   const hpyth = analysis.home_pythagorean || {};
   const park = analysis.park_factor || {};
+  const realFeel = analysis.real_feel || {};
+  const weather = analysis.weather || {};
 
   const lean = game.lean;
   const conf = game.confidence || "LOW";
@@ -159,6 +161,21 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
               {park.factor && (
                 <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: `${parkColor}15`, color: parkColor, fontWeight: 600 }}>
                   PF {park.factor}
+                </span>
+              )}
+              {realFeel.score != null && (
+                <span style={{
+                  fontSize: 9, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
+                  background: realFeel.score >= 70 ? "rgba(239,68,68,0.12)"
+                            : realFeel.score >= 50 ? "rgba(245,158,11,0.12)"
+                            : realFeel.score >= 35 ? "rgba(107,114,128,0.12)"
+                            : "rgba(96,165,250,0.12)",
+                  color: realFeel.score >= 70 ? "#ef4444"
+                       : realFeel.score >= 50 ? "#f59e0b"
+                       : realFeel.score >= 35 ? "#6b7280"
+                       : "#60a5fa",
+                }}>
+                  🌡️ {realFeel.score} {realFeel.label || ""}
                 </span>
               )}
               {game.status && (
@@ -350,6 +367,77 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                 </div>
               )}
 
+              {/* Real Feel HR Conditions */}
+              {realFeel.score != null && (
+                <div style={{
+                  marginTop: 14, padding: "12px 14px", borderRadius: 8,
+                  background: realFeel.score >= 70 ? "rgba(239,68,68,0.04)"
+                            : realFeel.score >= 50 ? "rgba(245,158,11,0.04)"
+                            : "rgba(255,255,255,0.02)",
+                  border: `1px solid ${
+                    realFeel.score >= 70 ? "rgba(239,68,68,0.12)"
+                  : realFeel.score >= 50 ? "rgba(245,158,11,0.12)"
+                  : "rgba(255,255,255,0.06)"
+                  }`,
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
+                      🌡️ Real Feel HR Conditions
+                    </div>
+                    <div style={{
+                      fontSize: 18, fontWeight: 800, letterSpacing: "-0.02em",
+                      color: realFeel.score >= 70 ? "#ef4444"
+                           : realFeel.score >= 50 ? "#f59e0b"
+                           : realFeel.score >= 35 ? "#94a3b8"
+                           : "#60a5fa",
+                    }}>
+                      {realFeel.score}<span style={{ fontSize: 11, fontWeight: 600, opacity: 0.6 }}>/100</span>
+                    </div>
+                  </div>
+
+                  {/* Score bar */}
+                  <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.06)", overflow: "hidden", marginBottom: 10 }}>
+                    <div style={{
+                      height: "100%", borderRadius: 3, transition: "width 0.4s ease",
+                      width: `${Math.min(realFeel.score, 100)}%`,
+                      background: realFeel.score >= 70 ? "#ef4444"
+                                : realFeel.score >= 50 ? "#f59e0b"
+                                : realFeel.score >= 35 ? "#6b7280"
+                                : "#60a5fa",
+                    }} />
+                  </div>
+
+                  {/* Breakdown */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>Park</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>{realFeel.park_pts ?? "—"}<span style={{ fontSize: 9, color: "#4a5568" }}>/30</span></div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>Wind</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: realFeel.wind_pts < 0 ? "#60a5fa" : "#e2e8f0" }}>
+                        {realFeel.wind_pts ?? "—"}<span style={{ fontSize: 9, color: "#4a5568" }}>/30</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>Temp</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>{realFeel.temp_pts ?? "—"}<span style={{ fontSize: 9, color: "#4a5568" }}>/20</span></div>
+                    </div>
+                  </div>
+
+                  {/* Weather detail line */}
+                  {weather.temp_f != null && (
+                    <div style={{ fontSize: 10, color: "#4a5568", marginTop: 8, textAlign: "center" }}>
+                      {weather.dome ? "🏟 Dome — controlled environment" : (
+                        <>
+                          {weather.temp_f}°F · {weather.wind_speed_mph || 0}mph {(weather.wind_direction || "").replace(/_/g, " ")}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Park factor note */}
               {park.factor && (
                 <div style={{ marginTop: 10, fontSize: 10, color: parkColor }}>
@@ -499,6 +587,9 @@ export default function MLBDashboard({ user }) {
           <strong style={{ color: "#4a5568" }}>Fatigue:</strong> 0 = fresh, 100 = gassed. &nbsp;
           <strong style={{ color: "#4a5568" }}>Luck:</strong> negative = due for regression UP. &nbsp;
           <strong style={{ color: "#4a5568" }}>Park Factor:</strong> 100 = neutral, &gt;105 = hitter friendly.
+          <br />
+          <strong style={{ color: "#4a5568" }}>Real Feel:</strong> 0-100 HR conditions (park + wind + temp). &nbsp;
+          <span style={{ color: "#ef4444" }}>70+ ELITE</span> · <span style={{ color: "#f59e0b" }}>50-69 WARM</span> · 35-49 NEUTRAL · <span style={{ color: "#60a5fa" }}>&lt;35 COLD</span>
           <br />⚠ One factor among many. Always check line value. Gamble responsibly.
         </div>
       )}

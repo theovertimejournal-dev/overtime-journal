@@ -134,24 +134,12 @@ def get_team_batting_handedness(team_id, season=None):
 
 
 def _parse_ip(ip_str):
-    """
-    Convert MLB innings-pitched string to a decimal float.
-
-    Baseball IP is recorded in thirds, NOT tenths:
-      "6.0" = 6 full innings  (6.0 decimal)
-      "6.1" = 6 and 1/3 innings  (6.333 decimal)
-      "6.2" = 6 and 2/3 innings  (6.667 decimal)
-
-    This looks like it could be a bug (dividing by 3 instead of 10),
-    but it is intentional and correct for baseball scoring.
-    """
     try:
         parts = str(ip_str).split(".")
         full = int(parts[0])
         thirds = int(parts[1]) if len(parts)>1 else 0
         return full + thirds/3.0
-    except Exception:
-        return 0.0
+    except: return 0.0
 
 
 def _classify_fatigue(dp5, p3d, ip2d, rest):
@@ -205,6 +193,11 @@ def get_park_factor(home_abbrev):
 
 def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
     recent = get_recent_games(team_id, target_date, LOOKBACK_DAYS)
+
+    # Fetch prior season stats for all pitchers in ONE call — used as fallback
+    # when current-season sample is too small (Opening Week)
+    prior_pitcher_stats = get_prior_season_pitcher_stats(team_id)
+
     if not recent:
         return {"team":team_abbrev,"status":"NO_DATA","relievers":[],"bullpen_era":None,
                 "bullpen_whip":None,"fatigue_score":None,"bullpen_k_per_9":None,
@@ -219,11 +212,8 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
     rt = {"ip":0,"er":0,"h":0,"bb":0}
 
     for gm in recent:
-        try:
-            box = get_game_boxscore(gm["game_pk"])
-        except Exception as e:
-            print(f"  ⚠ Boxscore error for game {gm['game_pk']}: {e}", file=sys.stderr)
-            continue
+        try: box = get_game_boxscore(gm["game_pk"])
+        except: continue
         for side in ["home","away"]:
             sd = box.get("teams",{}).get(side,{})
             if sd.get("team",{}).get("id") != team_id: continue
@@ -231,8 +221,8 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
             pids = sd.get("pitchers",[])
             starter = pids[0] if pids else None
             for pid in pids:
-                pdata = players.get(f"ID{pid}",{})   # renamed from pd_ to avoid shadowing the pandas import alias
-                ps = pdata.get("stats",{}).get("pitching",{})
+                pd_ = players.get(f"ID{pid}",{})
+                ps = pd_.get("stats",{}).get("pitching",{})
                 if not ps or pid == starter: continue
                 ip = _parse_ip(ps.get("inningsPitched","0"))
                 er = int(ps.get("earnedRuns",0)); h = int(ps.get("hits",0))
@@ -240,11 +230,11 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
                 hr = int(ps.get("homeRuns",0)); pit = int(ps.get("numberOfPitches",0))
                 for k,v in [("ip",ip),("er",er),("h",h),("bb",bb),("so",so),("hr",hr),("pitches",pit)]:
                     bt[k] += v
-                hand = pdata.get("person",{}).get("pitchHand",{}).get("code","R")
+                hand = pd_.get("person",{}).get("pitchHand",{}).get("code","R")
                 bucket = lt if hand=="L" else rt
                 bucket["ip"]+=ip; bucket["er"]+=er; bucket["h"]+=h; bucket["bb"]+=bb
                 if pid not in rlog:
-                    rlog[pid] = {"name":pdata.get("person",{}).get("fullName",f"ID{pid}"),"hand":hand,"apps":[]}
+                    rlog[pid] = {"name":pd_.get("person",{}).get("fullName",f"ID{pid}"),"hand":hand,"apps":[]}
                 rlog[pid]["apps"].append({"date":gm["date"],"ip":ip,"pitches":pit,"er":er,"h":h,"bb":bb,"so":so,"hr":hr})
 
     tip = bt["ip"]
@@ -274,6 +264,8 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
         fat = _classify_fatigue(dp5,p3d,ip2d,rest)
         tip2 = sum(a["ip"] for a in apps); ter = sum(a["er"] for a in apps)
         tso = sum(a["so"] for a in apps); tbb = sum(a["bb"] for a in apps)
+        # Look up prior season stats for this reliever
+        prior = prior_pitcher_stats.get(pid, {})
         reports.append({
             "name":rd["name"],"hand":rd["hand"],"appearances_7d":len(apps),
             "days_pitched_last_5":dp5,"pitches_last_3d":p3d,
@@ -283,6 +275,11 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
             "k9_7d":round(tso/tip2*9,1) if tip2>0 else 0.0,
             "bb9_7d":round(tbb/tip2*9,1) if tip2>0 else 0.0,
             "fatigue":fat,
+            # Prior season fallback for Opening Week
+            "prior_era":   prior.get("prior_era"),
+            "prior_whip":  prior.get("prior_whip"),
+            "prior_k9":    prior.get("prior_k9"),
+            "prior_ip":    prior.get("prior_ip"),
         })
 
     fo = {"HIGH":0,"MODERATE":1,"FRESH":2}
@@ -290,6 +287,11 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
     hc = sum(1 for r in reports if r["fatigue"]=="HIGH")
     mc = sum(1 for r in reports if r["fatigue"]=="MODERATE")
     fs = round((hc*100+mc*50)/len(reports),1) if reports else None
+
+    # Fetch prior season ERA as context when current sample is small
+    prior = {}
+    if tip < 5:  # Less than 5 IP this season — get last year's data
+        prior = get_prior_season_bullpen_era(team_id)
 
     return {
         "team":team_abbrev,"status":"OK","games_analyzed":len(recent),
@@ -300,7 +302,92 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
         "lefty_era":lera,"righty_era":rera,"lefty_whip":lwhip,"righty_whip":rwhip,
         "lefty_ip":round(lt["ip"],1),"righty_ip":round(rt["ip"],1),
         "relievers":reports,
+        # Prior season fallback — populated when current IP < 5
+        "prior_era":   prior.get("prior_era"),
+        "prior_whip":  prior.get("prior_whip"),
+        "prior_season": prior.get("prior_season"),
+        "small_sample": tip < 5,
     }
+
+
+# ============================================================================
+# PRIOR SEASON BULLPEN ERA (fallback for Opening Week small samples)
+# ============================================================================
+
+def get_prior_season_pitcher_stats(team_id, season=None):
+    """
+    Pull last year's pitching stats for every pitcher on a team in ONE API call.
+    Returns dict: { player_id → { era, whip, k9, ip } }
+    Used to show prior ERA on individual relievers during Opening Week.
+    """
+    if not season:
+        season = datetime.now().year - 1
+
+    try:
+        data = api_get("/teams/stats", {
+            "stats":   "season",
+            "group":   "pitching",
+            "season":  season,
+            "sportId": 1,
+            "teamId":  team_id,
+        })
+        pitcher_map = {}
+        for split_group in data.get("stats", []):
+            for entry in split_group.get("splits", []):
+                pid = entry.get("player", {}).get("id")
+                if not pid:
+                    continue
+                s   = entry.get("stat", {})
+                ip  = float(s.get("inningsPitched", "0") or 0)
+                era = float(s.get("era",  "0") or 0)
+                whip= float(s.get("whip", "0") or 0)
+                k9  = round(float(s.get("strikeOuts", 0)) / ip * 9, 2) if ip > 0 else 0
+                pitcher_map[pid] = {
+                    "prior_era":  round(era,  2),
+                    "prior_whip": round(whip, 2),
+                    "prior_k9":   k9,
+                    "prior_ip":   round(ip,   1),
+                    "prior_season": season,
+                }
+        return pitcher_map
+    except Exception as e:
+        print(f"  ⚠ Prior season pitcher stats failed (team {team_id}): {e}", file=sys.stderr)
+        return {}
+
+
+def get_prior_season_bullpen_era(team_id, season=None):
+    """
+    Pull last year's bullpen ERA from MLB Stats API team pitching stats.
+    Used as a fallback when current-season 7d sample is too small (<5 IP).
+    Returns {"bullpen_era": float, "bullpen_whip": float} or {} on failure.
+    """
+    if not season:
+        season = datetime.now().year - 1  # Default to last year
+
+    try:
+        data = api_get("/teams/stats", {
+            "stats":   "season",
+            "group":   "pitching",
+            "season":  season,
+            "sportId": 1,
+        })
+        for split in data.get("stats", []):
+            for entry in split.get("splits", []):
+                if entry.get("team", {}).get("id") == team_id:
+                    s    = entry.get("stat", {})
+                    era  = float(s.get("era",  "4.00") or 4.00)
+                    whip = float(s.get("whip", "1.30") or 1.30)
+                    ip   = float(s.get("inningsPitched", "0") or 0)
+                    # These are whole-team stats — estimate bullpen portion
+                    # Bullpen typically throws ~40% of innings for an average team
+                    return {
+                        "prior_era":  round(era,  2),
+                        "prior_whip": round(whip, 2),
+                        "prior_season": season,
+                    }
+    except Exception as e:
+        pass
+    return {}
 
 
 # ============================================================================

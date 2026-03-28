@@ -1485,33 +1485,204 @@ def scan_viral_sports():
                         print(f"\n    ⛳ {aname}: {short_name[:50]}")
 
             elif cfg["sport"] in ("mma", "boxing"):
-                winner_name = next((c.get("athlete", {}).get("displayName") or c.get("team", {}).get("displayName", "")
-                                    for c in competitors if c.get("winner")), None)
-                loser_name = next((c.get("athlete", {}).get("displayName") or c.get("team", {}).get("displayName", "")
-                                   for c in competitors if not c.get("winner")), "opponent")
+                winner_name = None
+                loser_name  = "opponent"
+                method      = ""
+
+                for c in competitors:
+                    aname = (c.get("athlete", {}).get("displayName") or
+                             c.get("team", {}).get("displayName", ""))
+                    if c.get("winner"):
+                        winner_name = aname
+                        for stat in c.get("statistics", []):
+                            if stat.get("name") in ("winBy", "method"):
+                                method = stat.get("displayValue", "")
+                    else:
+                        loser_name = aname
+
                 if not winner_name:
                     continue
 
-                dk = dedup_key("combat", winner_name, loser_name, scan_date)
-                body = random.choice(UFC_REACTIONS.get(voice, UFC_REACTIONS["yumi"]))
-                yt_url = find_youtube_highlight(f"{winner_name} vs {loser_name} fight highlights")
+                method_str = f" ({method})" if method else ""
+
+                # Pick reaction based on finish type
+                method_lower = method.lower()
+                if any(k in method_lower for k in ["ko", "tko", "knockout"]):
+                    react_pool = {
+                        "yumi": [
+                            f"{winner_name} puts {loser_name} away by KO. One moment, everything changes.",
+                            f"Knockout finish for {winner_name}. The margin in combat sports is absolutely brutal.",
+                            f"{winner_name} lands the finishing shot and it is OVER. That is MMA.",
+                        ],
+                        "johnnybot": [
+                            f"{winner_name} by KO. Short night for {loser_name}. The oddsmakers are checking their math.",
+                            f"One punch. One moment. {winner_name} over {loser_name}. That is combat sports.",
+                            f"Lights out for {loser_name}. {winner_name} finishes it and moves on.",
+                        ],
+                        "krash": [
+                            f"KNOCKED OUT COLD. {winner_name} SLEPT {loser_name}. The Octagon does not care about feelings.",
+                            f"OH MY GOD. {winner_name} LANDS IT AND IT IS OVER. I AM SCREAMING RIGHT NOW.",
+                            f"THE HIGHLIGHT REEL JUST GOT A NEW ENTRY. {winner_name} by KO. UNREAL.",
+                        ],
+                    }
+                elif "sub" in method_lower:
+                    react_pool = {
+                        "yumi": [
+                            f"{winner_name} submits {loser_name}{method_str}. The grappling game was elite tonight.",
+                            f"Tap out. {winner_name} catches {loser_name} and the submission finish is clean.",
+                            f"Ground game IQ on full display. {winner_name} gets the submission.",
+                        ],
+                        "johnnybot": [
+                            f"{winner_name} by submission. {loser_name} tapped. The ground game wins fights.",
+                            f"Caught and finished. {winner_name} over {loser_name}{method_str}.",
+                            f"The submission of {winner_name} is legitimate. {loser_name} just found out.",
+                        ],
+                        "krash": [
+                            f"TAPPED OUT. {winner_name} locks it in and {loser_name} has no choice. BEAUTIFUL.",
+                            f"The submission was INEVITABLE once {winner_name} got that position. CHEF'S KISS.",
+                            f"{winner_name} is an ARTIST on the ground. {loser_name} taps. THAT IS HOW IT IS DONE.",
+                        ],
+                    }
+                else:
+                    react_pool = UFC_REACTIONS
+
+                dk     = dedup_key("combat", winner_name, loser_name, scan_date)
+                voice  = pick_voice()
+                body   = random.choice(react_pool.get(voice, react_pool.get("yumi", [f"{winner_name} wins."])))
+                ck     = f"ufc_{winner_name}_{loser_name}_{scan_date}".replace(" ", "_")
+                yt_url = find_youtube_highlight(
+                    f"{winner_name} vs {loser_name} UFC fight highlights {scan_date[:7]}",
+                    cache_key=ck
+                )
 
                 if insert_news({
-                    "type": "highlights",
-                    "sport": cfg["sport"],
-                    "headline": f"{cfg['emoji']} {winner_name} defeats {loser_name}",
-                    "body": body,
-                    "character": voice,
+                    "type":       "highlights",
+                    "sport":      cfg["sport"],
+                    "headline":   f"🥊 {winner_name} def. {loser_name}{method_str}",
+                    "body":       body,
+                    "character":  voice,
                     "source_url": yt_url,
-                    "severity": "important",
-                    "data": json.dumps({"winner": winner_name, "loser": loser_name}),
-                    "date": scan_date,
-                    "dedup_key": dk,
+                    "severity":   "breaking" if any(k in method_lower for k in ["ko", "tko"]) else "important",
+                    "data":       json.dumps({"winner": winner_name, "loser": loser_name, "method": method}),
+                    "date":       scan_date,
+                    "dedup_key":  dk,
                 }):
                     count += 1
-                    print(f"\n    {cfg['emoji']} {winner_name} def {loser_name}")
+                    yt_tag = " 📹" if yt_url else ""
+                    print(f"\n    🥊 {winner_name} def {loser_name}{method_str}{yt_tag}")
 
     print(f"{count} new" if count else "no viral moments")
+    return count
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCANNER: UFC NEWS FEED (fight week previews, weigh-ins, post-fight drama)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def scan_ufc_news():
+    """
+    Pull UFC news from ESPN MMA news feed.
+    Covers fight week hype, weigh-in results, fighter interviews, post-fight drama.
+    Gives the feed MMA content on non-fight days too.
+    """
+    print("  Scanning UFC/MMA news...", end=" ")
+    count = 0
+
+    UFC_STARS = {
+        "Jon Jones", "Islam Makhachev", "Alex Pereira", "Leon Edwards",
+        "Sean O'Malley", "Dricus du Plessis", "Tom Aspinall", "Max Holloway",
+        "Conor McGregor", "Paddy Pimblett", "Dustin Poirier", "Charles Oliveira",
+        "Khamzat Chimaev", "Colby Covington", "Justin Gaethje", "Nate Diaz",
+        "Valentina Shevchenko", "Amanda Nunes", "Zhang Weili", "Julianna Pena",
+        "Francis Ngannou", "Stipe Miocic", "Ciryl Gane", "Sergei Pavlovich",
+        "Michael Chandler", "Tony Ferguson", "Deiveson Figueiredo", "Brandon Moreno",
+    }
+
+    UFC_NEWS_REACTIONS = {
+        "yumi": [
+            "The fight game never stops moving. This is worth paying attention to.",
+            "MMA news cycles fast. File this away before fight night.",
+            "Context matters in MMA. This changes how I am looking at the upcoming card.",
+            "The mental side of fighting is underrated. This is a storyline worth tracking.",
+            "Every piece of fight week news is a data point. This one matters.",
+        ],
+        "johnnybot": [
+            "MMA is 50% fighting and 50% mind games. This is the mind games part.",
+            "Fight week always produces news. Whether it matters is another question I plan to answer.",
+            "I need to see how this affects the line before I form a full opinion.",
+            "In MMA, every piece of information is potentially actionable. This is one of them.",
+            "The narrative is shifting. Whether the oddsmakers have caught up is a different story.",
+        ],
+        "krash": [
+            "FIGHT WEEK IS DIFFERENT. Everything matters. Every word. Every look. I AM LOCKED IN.",
+            "The MMA world is buzzing right now and I am fully HERE FOR IT.",
+            "This sport never sleeps and neither do I when a card is coming up.",
+            "FIGHT WEEK NEWS HITS DIFFERENT. My blood pressure is already up.",
+            "When MMA Twitter starts moving like this, something real is happening. Pay attention.",
+        ],
+    }
+
+    try:
+        resp = requests.get(
+            "https://site.api.espn.com/apis/site/v2/sports/mma/ufc/news",
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"error: {e}")
+        return 0
+
+    for article in data.get("articles", [])[:10]:
+        headline = article.get("headline", "")
+        desc     = article.get("description", "")
+        url      = article.get("links", {}).get("web", {}).get("href", "")
+
+        if not headline:
+            continue
+
+        # Only cover articles mentioning known stars or key fight week terms
+        headline_lower = headline.lower()
+        is_star_news   = any(star.lower() in headline_lower for star in UFC_STARS)
+        is_fight_week  = any(k in headline_lower for k in [
+            "weigh", "fight week", "canceled", "injured", "pulls out",
+            "title shot", "championship", "ufc", "interim", "stripped",
+            "contract", "ko", "tko", "submission", "decision",
+        ])
+
+        if not is_star_news and not is_fight_week:
+            continue
+
+        dk    = dedup_key("ufc_news", headline[:60])
+        voice = pick_voice()
+        body  = random.choice(UFC_NEWS_REACTIONS.get(voice, UFC_NEWS_REACTIONS["yumi"]))
+
+        # Search YouTube for a related clip
+        yt_url = None
+        if is_star_news:
+            star = next((s for s in UFC_STARS if s.lower() in headline_lower), None)
+            if star:
+                yt_url = find_youtube_highlight(
+                    f"{star} UFC {scan_date[:7]}",
+                    cache_key=f"ufc_news_{star}_{scan_date}"
+                )
+
+        if insert_news({
+            "type":       "highlights",
+            "sport":      "mma",
+            "headline":   f"🥊 {headline}",
+            "body":       body,
+            "character":  voice,
+            "source_url": yt_url or url or None,
+            "severity":   "breaking" if any(k in headline_lower for k in ["pulls out", "canceled", "stripped", "injured"]) else "normal",
+            "data":       json.dumps({"headline": headline, "description": desc[:200]}),
+            "date":       scan_date,
+            "dedup_key":  dk,
+        }):
+            count += 1
+            print(f"\n    🥊 {headline[:60]}")
+
+    print(f"{count} new" if count else "no UFC news")
     return count
 
 
@@ -1528,6 +1699,7 @@ total += scan_live_games()
 total += scan_espn_sport("nhl")
 total += scan_espn_sport("mlb")
 total += scan_espn_sport("nfl")
-total += scan_viral_sports()   # Golf, UFC, boxing — the fun stuff
+total += scan_viral_sports()   # Golf, UFC results, boxing
+total += scan_ufc_news()       # UFC news feed — fight week hype, weigh-ins, drama
 
 print(f"\n  📡 Scan complete — {total} new items published")

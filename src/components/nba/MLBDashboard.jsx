@@ -15,15 +15,21 @@ function fmt(val, dec = 2) {
   return parseFloat(val).toFixed(dec);
 }
 
-function StatBox({ label, value, highlight }) {
+function StatBox({ label, value, highlight, priorValue, priorLabel }) {
+  const isSmall    = value == null;
+  const displayVal = isSmall && priorValue != null ? priorValue : (value ?? "—");
+  const color      = isSmall && priorValue != null ? "#6b7280" : highlight ? "#ef4444" : "#e2e8f0";
   return (
     <div style={{
-      background: highlight ? "rgba(239,68,68,0.08)" : "rgba(255,255,255,0.02)",
-      border: `1px solid ${highlight ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)"}`,
+      background: highlight && !isSmall ? "rgba(239,68,68,0.08)" : "rgba(255,255,255,0.02)",
+      border: `1px solid ${highlight && !isSmall ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)"}`,
       borderRadius: 6, padding: "6px 10px", textAlign: "center"
     }}>
       <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: highlight ? "#ef4444" : "#e2e8f0" }}>{value ?? "—"}</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color }}>{displayVal}</div>
+      {isSmall && priorValue != null && (
+        <div style={{ fontSize: 8, color: "#374151", marginTop: 1 }}>{priorLabel || "'25"}</div>
+      )}
     </div>
   );
 }
@@ -64,7 +70,18 @@ function RelieverTable({ relievers, team }) {
           <span style={{ color: "#e2e8f0", flex: 1 }}>{r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span></span>
           <span style={{ color: "#6b7280" }}>{r.pitches_last_3d}p/3d</span>
           <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rst</span>
-          <span style={{ color: r.era_7d > 4.5 ? "#ef4444" : "#94a3b8" }}>{fmt(r.era_7d)} ERA</span>
+          {/* ERA: show current if enough IP, else prior season */}
+          {(r.ip_last_3d || 0) >= 1 ? (
+            <span style={{ color: r.era_7d > 4.5 ? "#ef4444" : "#94a3b8" }}>
+              {fmt(r.era_7d)} ERA
+            </span>
+          ) : r.prior_era != null ? (
+            <span style={{ color: "#4a5568" }} title="2025 season ERA">
+              {fmt(r.prior_era)} <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
+            </span>
+          ) : (
+            <span style={{ color: "#374151" }}>— ERA</span>
+          )}
         </div>
       ))}
     </div>
@@ -235,14 +252,27 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
               {/* Bullpen comparison */}
               {(ab.team || hb.team) && (
                 <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 10 }}>Bullpen Comparison (7d)</div>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 6 }}>Bullpen Comparison (7d)</div>
+                  {((ab.bullpen_ip_7d || 0) < 8 || (hb.bullpen_ip_7d || 0) < 8) && (
+                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, padding: "4px 8px", background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)", borderRadius: 4 }}>
+                      ⚠ Opening week — ERA/WHIP showing 2025 season where current IP &lt;5
+                    </div>
+                  )}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     {[ab, hb].map((bp, i) => (
                       <div key={i}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>{bp.team || (i === 0 ? game.away_team : game.home_team)}</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                          <StatBox label="ERA" value={fmt(bp.bullpen_era)} highlight={bp.bullpen_era >= 4.5} />
-                          <StatBox label="WHIP" value={fmt(bp.bullpen_whip)} highlight={bp.bullpen_whip >= 1.4} />
+                          <StatBox label="ERA"
+                            value={(bp.bullpen_ip_7d || 0) >= 5 ? fmt(bp.bullpen_era) : null}
+                            highlight={bp.bullpen_era >= 4.5}
+                            priorValue={bp.prior_era != null ? fmt(bp.prior_era) : null}
+                            priorLabel="'25 ERA" />
+                          <StatBox label="WHIP"
+                            value={(bp.bullpen_ip_7d || 0) >= 5 ? fmt(bp.bullpen_whip) : null}
+                            highlight={bp.bullpen_whip >= 1.4}
+                            priorValue={bp.prior_whip != null ? fmt(bp.prior_whip) : null}
+                            priorLabel="'25 WHIP" />
                           <StatBox label="K/9" value={fmt(bp.bullpen_k_per_9 ?? bp.bullpen_k9)} />
                           <StatBox label="IP 7d" value={fmt(bp.bullpen_ip_7d, 1)} />
                         </div>

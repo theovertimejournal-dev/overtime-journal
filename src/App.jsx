@@ -12,6 +12,8 @@ import Terms from './pages/Terms';
 import Record from './pages/Record';
 import { supabase } from './lib/supabase';
 import OTJPropsPage from './components/nba/OTJPropsPage';
+import MLBDashboard from './components/nba/MLBDashboard';
+import MLBPropsPage from './components/nba/MLBPropsPage';
 import ArcadePage from './pages/ArcadePage';
 import LandingPage from './pages/LandingPage';
 import FAQ from './pages/FAQ';
@@ -829,7 +831,8 @@ export default function App() {
             <Route path="/faq" element={<FAQ />} />
             <Route path="/nba" element={<NBADashboard user={user} profile={profile} sessionValidated={sessionValidated} />} />
             <Route path="/nhl" element={<ComingSoon sport="NHL" emoji="🏒" phase="Phase 2 — March" />} />
-            <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
+            <Route path="/mlb" element={<MLBDashboard user={user} profile={profile} />} />
+            <Route path="/mlb-props" element={<MLBPropsPage user={user} profile={profile} onShowLogin={() => setShowWelcome(true)} />} />
             <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />
             <Route path="/record" element={<Record />} />
             <Route path="/arcade" element={

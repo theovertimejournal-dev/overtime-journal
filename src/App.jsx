@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import NBADashboard from './components/nba/NBADashboard';
 import NBAJamArcade from './components/nba/NBAJamArcade';
 import { AuthButton } from './components/common/AuthButton';
@@ -150,19 +150,23 @@ function WeatherCountdownPill({ slates }) {
 function NavDropdown({ label, emoji, children, activePaths }) {
   const [open, setOpen] = useState(false);
   const [path, setPath] = useState(window.location.pathname);
+  const closeTimer = useRef(null);
   useEffect(() => { setPath(window.location.pathname); });
   const isActive = activePaths?.some(p => path.startsWith(p));
 
+  const enter = () => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpen(true); };
+  const leave = () => { closeTimer.current = setTimeout(() => setOpen(false), 150); };
+
   return (
     <div style={{ position: "relative", flexShrink: 0 }}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
     >
       <button
         onClick={() => setOpen(o => !o)}
         style={{
           fontSize: 12, padding: "6px 10px", borderRadius: 6, fontWeight: 600,
-          color: isActive ? "#f1f5f9" : "#4a5568",
+          color: isActive ? "#f1f5f9" : open ? "#e2e8f0" : "#4a5568",
           background: isActive ? "rgba(255,255,255,0.08)" : open ? "rgba(255,255,255,0.05)" : "transparent",
           border: isActive ? "1px solid rgba(255,255,255,0.1)" : "1px solid transparent",
           cursor: "pointer", fontFamily: "'JetBrains Mono',monospace",
@@ -175,14 +179,22 @@ function NavDropdown({ label, emoji, children, activePaths }) {
       </button>
 
       {open && (
-        <div style={{
-          position: "absolute", top: "100%", left: 0, marginTop: 4,
-          background: "rgba(8,8,15,0.98)", backdropFilter: "blur(16px)",
-          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
-          padding: "6px", minWidth: 160, zIndex: 100,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-        }}>
-          {children}
+        <div
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+          style={{
+            position: "absolute", top: "100%", left: 0,
+            paddingTop: 8, zIndex: 100,
+          }}
+        >
+          <div style={{
+            background: "rgba(8,8,15,0.98)", backdropFilter: "blur(16px)",
+            border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+            padding: "6px", minWidth: 160,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          }}>
+            {children}
+          </div>
         </div>
       )}
     </div>
@@ -248,6 +260,11 @@ function SportTabs({ user, profile, onSignIn, slates }) {
             🏠<span className="nav-tab-label"> Home</span>
           </NavLink>
 
+          {/* Daily Journal — top level, always visible */}
+          <NavLink to="/daily" style={({ isActive }) => simpleTab(isActive)}>
+            📰<span className="nav-tab-label"> Journal</span>
+          </NavLink>
+
           {/* NBA dropdown */}
           <NavDropdown emoji="🏀" label="NBA" activePaths={["/nba", "/props"]}>
             <DropItem to="/nba"   emoji="📊" label="Edge Analyzer"  sub="ML · Spread · Totals" />
@@ -271,8 +288,7 @@ function SportTabs({ user, profile, onSignIn, slates }) {
           </NavDropdown>
 
           {/* More dropdown */}
-          <NavDropdown emoji="☰" label="More" activePaths={["/arcade", "/poker", "/record", "/leaderboard", "/daily"]}>
-            <DropItem to="/daily"       emoji="📰" label="Daily Journal" sub="Picks · Analysis" />
+          <NavDropdown emoji="☰" label="More" activePaths={["/arcade", "/poker", "/record", "/leaderboard"]}>
             <DropItem to="/record"      emoji="📊" label="Record"        sub="Full pick history" />
             <DropDivider />
             <DropItem to="/arcade"      emoji="🕹" label="Arcade"        sub="OTJ Jam · PvP" />

@@ -692,28 +692,80 @@ function InjuryAlertBanner({ alerts }) {
   );
 }
 
-// ── Ticker ────────────────────────────────────────────────────────────────────
-function Ticker({ items }) {
+// ── Multi-Sport Ticker ───────────────────────────────────────────────────────
+const SPORT_ORDER  = ['nba', 'mlb', 'nhl', 'ncaa', 'nfl'];
+const SPORT_LABELS = { nba: '🏀 NBA', mlb: '⚾ MLB', nhl: '🏒 NHL', ncaa: '🏀 NCAAB', nfl: '🏈 NFL' };
+
+function MultiSportTicker({ itemsBySport, fallbackItems }) {
+  const [idx, setIdx]   = useState(0);
+  const [fade, setFade] = useState(true);
+
+  const available = SPORT_ORDER.filter(s => (itemsBySport[s] || []).length > 0);
+
+  useEffect(() => {
+    if (available.length <= 1) return;
+    const id = setInterval(() => {
+      setFade(false);
+      setTimeout(() => { setIdx(i => (i + 1) % available.length); setFade(true); }, 300);
+    }, 9000);
+    return () => clearInterval(id);
+  }, [available.length]);
+
+  const sport  = available[idx] || null;
+  const items  = sport ? (itemsBySport[sport] || []) : (fallbackItems || []);
+  const label  = sport ? (SPORT_LABELS[sport] || sport.toUpperCase()) : '📊 OTJ';
+  const speed  = Math.max(30, Math.min(80, items.length * 7));
+
+  if (!items.length) return null;
+
   return (
     <div style={{
-      overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.04)',
-      background: 'rgba(239,68,68,0.04)', height: 28,
-      display: 'flex', alignItems: 'center',
+      borderBottom: '1px solid rgba(255,255,255,0.04)',
+      background: 'rgba(255,255,255,0.01)',
+      height: 30, display: 'flex', alignItems: 'center', overflow: 'hidden',
     }}>
+      {/* Sport label — static, left side */}
       <div style={{
-        display: 'flex', gap: 48, whiteSpace: 'nowrap',
-        animation: 'ticker 20s linear infinite',
-        fontSize: 10, color: '#6b7280', fontFamily: MONO, letterSpacing: '0.08em',
-      }}>
-        {[...items, ...items].map((item, i) => (
-          <span key={i}>
-            <span style={{ color: item.win ? '#22c55e' : item.win === false ? '#ef4444' : '#4a5568', marginRight: 6 }}>
-              {item.win ? '✓' : item.win === false ? '✗' : '·'}
+        flexShrink: 0, padding: '0 12px', height: '100%',
+        display: 'flex', alignItems: 'center',
+        borderRight: '1px solid rgba(255,255,255,0.05)',
+        background: 'rgba(255,255,255,0.02)',
+        fontSize: 9, fontWeight: 700, color: '#4a5568',
+        fontFamily: MONO, letterSpacing: '0.1em', minWidth: 72,
+        justifyContent: 'center',
+        opacity: fade ? 1 : 0, transition: 'opacity 0.25s',
+      }}>{label}</div>
+
+      {/* Scrolling scores */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', alignItems: 'center',
+        opacity: fade ? 1 : 0, transition: 'opacity 0.25s' }}>
+        <div style={{
+          display: 'flex', gap: 40, whiteSpace: 'nowrap',
+          animation: `ticker ${speed}s linear infinite`,
+          fontSize: 10, color: '#6b7280', fontFamily: MONO, letterSpacing: '0.07em',
+        }}>
+          {[...items, ...items].map((item, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ color: item.win === true ? '#22c55e' : item.win === false ? '#ef4444' : '#374151' }}>
+                {item.win === true ? '✓' : item.win === false ? '✗' : '·'}
+              </span>
+              {item.text}
             </span>
-            {item.text}
-          </span>
-        ))}
+          ))}
+        </div>
       </div>
+
+      {/* Sport dots — click to jump */}
+      {available.length > 1 && (
+        <div style={{ flexShrink: 0, display: 'flex', gap: 4, padding: '0 10px',
+          borderLeft: '1px solid rgba(255,255,255,0.05)' }}>
+          {available.map((s, i) => (
+            <div key={s} onClick={() => { setFade(false); setTimeout(() => { setIdx(i); setFade(true); }, 200); }}
+              style={{ width: 5, height: 5, borderRadius: '50%', cursor: 'pointer', transition: 'background 0.2s',
+                background: i === idx ? '#ef4444' : 'rgba(255,255,255,0.12)' }} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1061,6 +1113,159 @@ function CommunityCarousel() {
   );
 }
 
+// ── Floating Game Countdown ──────────────────────────────────────────────────
+// Gets game times once from slates — then pure client-side setInterval every second
+function FloatingCountdown({ slates }) {
+  const [games, setGames]       = useState([]);   // all upcoming games today
+  const [current, setCurrent]   = useState(0);    // which game to show
+  const [timeStr, setTimeStr]   = useState('');   // formatted countdown
+  const [isLive, setIsLive]     = useState(false);
+  const [visible, setVisible]   = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  const SPORT_EMOJI = { nba: '🏀', mlb: '⚾', nhl: '🏒', nfl: '🏈', ncaa: '🏀' };
+
+  // Parse game times once from slates
+  useEffect(() => {
+    if (!slates?.length) return;
+    const now  = new Date();
+    const upcoming = [];
+
+    for (const slate of slates) {
+      const sport = slate.sport || 'nba';
+      for (const game of slate.games || []) {
+        if (!game.game_time) continue;
+        try {
+          const gt = new Date(game.game_time);
+          // Show games starting within next 4 hours or already live (within 3 hours past)
+          const diffMs = gt - now;
+          if (diffMs > -3 * 3600000 && diffMs < 4 * 3600000) {
+            upcoming.push({
+              sport,
+              matchup: game.matchup || '',
+              gameTime: gt,
+              emoji: SPORT_EMOJI[sport] || '⚡',
+            });
+          }
+        } catch {}
+      }
+    }
+
+    // Sort by start time
+    upcoming.sort((a, b) => a.gameTime - b.gameTime);
+    setGames(upcoming);
+    if (upcoming.length > 0) setVisible(true);
+  }, [slates]);
+
+  // Live countdown — ticks every second, no API calls
+  useEffect(() => {
+    if (!games.length) return;
+    const tick = () => {
+      const game = games[current];
+      if (!game) return;
+      const diff = game.gameTime - new Date();
+
+      if (diff <= -3 * 3600000) {
+        // Game ended — move to next
+        if (current < games.length - 1) setCurrent(c => c + 1);
+        else setVisible(false);
+        return;
+      }
+
+      if (diff <= 0) {
+        setIsLive(true);
+        setTimeStr('LIVE');
+        return;
+      }
+
+      setIsLive(false);
+      const totalSecs = Math.floor(diff / 1000);
+      const h = Math.floor(totalSecs / 3600);
+      const m = Math.floor((totalSecs % 3600) / 60);
+      const s = totalSecs % 60;
+      if (h > 0) {
+        setTimeStr(`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`);
+      } else {
+        setTimeStr(`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`);
+      }
+    };
+
+    tick(); // run immediately
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [games, current]);
+
+  // Rotate through games every 8 seconds if multiple
+  useEffect(() => {
+    if (games.length <= 1) return;
+    const id = setInterval(() => {
+      setCurrent(c => (c + 1) % games.length);
+    }, 8000);
+    return () => clearInterval(id);
+  }, [games.length]);
+
+  if (!visible || dismissed || !games.length || !timeStr) return null;
+
+  const game = games[current];
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 20, right: 20, zIndex: 999,
+      background: 'rgba(8,8,15,0.95)', backdropFilter: 'blur(12px)',
+      border: `1px solid ${isLive ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.1)'}`,
+      borderRadius: 12, padding: '10px 14px',
+      display: 'flex', alignItems: 'center', gap: 10,
+      fontFamily: MONO, boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+      animation: 'slideUp 0.3s ease',
+      minWidth: 200,
+    }}>
+      {/* Live pulse or countdown */}
+      <div style={{ flexShrink: 0 }}>
+        {isLive ? (
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ef4444',
+            animation: 'pulse 1s infinite' }} />
+        ) : (
+          <span style={{ fontSize: 14 }}>{game.emoji}</span>
+        )}
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 9, color: '#4a5568', letterSpacing: '0.1em', marginBottom: 2 }}>
+          {isLive ? '🔴 LIVE NOW' : 'STARTS IN'}
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 700,
+          color: isLive ? '#ef4444' : '#e2e8f0', letterSpacing: '0.05em' }}>
+          {isLive ? game.matchup : timeStr}
+        </div>
+        {!isLive && (
+          <div style={{ fontSize: 9, color: '#4a5568', marginTop: 2, overflow: 'hidden',
+            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {game.matchup}
+          </div>
+        )}
+      </div>
+
+      {/* Game dots if multiple */}
+      {games.length > 1 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {games.slice(0, 4).map((_, i) => (
+            <div key={i} onClick={() => setCurrent(i)}
+              style={{ width: 4, height: 4, borderRadius: '50%', cursor: 'pointer',
+                background: i === current ? '#ef4444' : 'rgba(255,255,255,0.15)' }} />
+          ))}
+        </div>
+      )}
+
+      {/* Dismiss */}
+      <button onClick={() => setDismissed(true)} style={{
+        background: 'none', border: 'none', cursor: 'pointer',
+        color: '#374151', fontSize: 12, padding: 2, lineHeight: 1,
+        flexShrink: 0,
+      }}>✕</button>
+    </div>
+  );
+}
+
 export default function LandingPage({ user, profile, sessionValidated }) {
   const navigate = useNavigate();
   const [activePost,  setActivePost]  = useState(null);
@@ -1074,7 +1279,37 @@ export default function LandingPage({ user, profile, sessionValidated }) {
   // ── Live News Feed ──
   const [liveFeed, setLiveFeed] = useState([]);
   const [blogPosts, setBlogPosts] = useState([]);
-  const [feedFilter, setFeedFilter] = useState('all'); // all, nba, ncaa, injuries, scores, journal
+  const [feedFilter, setFeedFilter] = useState('all');
+  const [tickerBySport, setTickerBySport] = useState({});
+  const [allSlates, setAllSlates]         = useState([]);
+
+  // Fetch today's slates for all sports — powers ticker + floating countdown
+  useEffect(() => {
+    supabase
+      .from('slates')
+      .select('sport, date, games, yesterday_results, live_ticker, cumulative_record')
+      .eq('date', today)
+      .then(({ data }) => {
+        if (!data?.length) return;
+        setAllSlates(data);
+        const bySport = {};
+        for (const slate of data) {
+          const sport = slate.sport || 'nba';
+          const results = slate.yesterday_results || [];
+          const live    = slate.live_ticker || [];
+          const items = live.length > 0
+            ? live.map(t => ({ text: t.display, win: t.pick_result === 'W' ? true : t.pick_result === 'L' ? false : null }))
+            : results.map(r => {
+                const win = r.result === 'W' || r.result === 'win';
+                const loss = r.result === 'L' || r.result === 'loss';
+                const text = [r.matchup || r.game, r.pick || r.lean, r.score || r.final_score || ''].filter(Boolean).join(' · ');
+                return { text, win: win ? true : loss ? false : null };
+              }).filter(x => x.text);
+          if (items.length) bySport[sport] = items;
+        }
+        setTickerBySport(bySport);
+      });
+  }, [today]); // all, nba, ncaa, injuries, scores, journal
   const [feedLoading, setFeedLoading] = useState(true);
   const [feedLimit, setFeedLimit] = useState(25);
 
@@ -1240,20 +1475,16 @@ export default function LandingPage({ user, profile, sessionValidated }) {
         padding: '7px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
         fontFamily: "'JetBrains Mono','SF Mono',monospace",
       }}>
-        <span style={{ fontSize: 13 }}>🔧</span>
+        <span style={{ fontSize: 13 }}>💬</span>
         <span style={{ fontSize: 10, color: '#9ca3af' }}>
-          live line movement charts incoming — model likes the dog, they go down big, live line gets juicy — that's the window ·
+          NBA · MLB · NHL · UFC · Golf · NFL — data-driven, no hype ·
         </span>
-        <a
-          href="https://discord.gg/j3nV3CBY"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ fontSize: 10, color: '#818cf8', fontWeight: 700, textDecoration: 'none', letterSpacing: '0.05em' }}
-        >
+        <a href="https://discord.gg/j3nV3CBY" target="_blank" rel="noopener noreferrer"
+          style={{ fontSize: 10, color: '#818cf8', fontWeight: 700, textDecoration: 'none', letterSpacing: '0.05em' }}>
           JOIN THE OTJ COMMUNITY →
         </a>
       </div>
-      <Ticker items={tickerItems.length ? tickerItems : FALLBACK_TICKER} />
+      <MultiSportTicker itemsBySport={tickerBySport} fallbackItems={tickerItems.length ? tickerItems : FALLBACK_TICKER} />
 
       {/* ── Hero ── */}
       <div style={{ position: 'relative', overflow: 'hidden', borderBottom: '1px solid rgba(255,255,255,0.06)', padding: '48px 24px 40px' }}>
@@ -1554,6 +1785,9 @@ export default function LandingPage({ user, profile, sessionValidated }) {
 
         </div>
       </div>
+
+      {/* ── Floating game countdown ── */}
+      <FloatingCountdown slates={allSlates} />
 
       {/* ── Footer ── */}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, fontSize: 9, color: '#1e293b', letterSpacing: '0.1em' }}>

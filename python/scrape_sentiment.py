@@ -242,6 +242,30 @@ for thread in threads[:10]:
 
 # ── Store sentiment in Supabase ──────────────────────────────────────────────
 
+# Supplement Reddit with YouTube comments for top teams
+if YOUTUBE_API_KEY:
+    print(f"\n⏳ Pulling YouTube comment sentiment for top teams...")
+    NBA_TEAM_NAMES = {
+        "LAL": "Lakers", "BOS": "Celtics", "GSW": "Warriors", "MIA": "Heat",
+        "NYK": "Knicks", "DET": "Pistons", "OKC": "Thunder", "SAS": "Spurs",
+        "MIL": "Bucks", "PHI": "76ers", "CLE": "Cavaliers", "DEN": "Nuggets",
+        "MIN": "Timberwolves", "DAL": "Mavericks", "PHX": "Suns", "CHI": "Bulls",
+        "ATL": "Hawks", "IND": "Pacers", "TOR": "Raptors", "MEM": "Grizzlies",
+        "NOP": "Pelicans", "POR": "Trail Blazers", "SAC": "Kings", "UTA": "Jazz",
+        "HOU": "Rockets", "BKN": "Nets", "LAC": "Clippers", "ORL": "Magic",
+        "WAS": "Wizards", "CHA": "Hornets",
+    }
+    for team_abbr in list(team_sentiment.keys())[:8]:
+        team_name = NBA_TEAM_NAMES.get(team_abbr, team_abbr)
+        yt_data = scrape_youtube_team_sentiment(team_name, team_abbr, scan_date)
+        if yt_data:
+            ts = team_sentiment[team_abbr]
+            ts["positive"]  += yt_data["positive"]
+            ts["negative"]  += yt_data["negative"]
+            ts["hype"]      += yt_data["hype"]
+            ts["comments"]  += yt_data["comments"]
+            print(f"  📹 {team_abbr} YouTube: +{yt_data['positive']} pos / +{yt_data['negative']} neg")
+
 print(f"\n⏳ Storing sentiment data for {len(team_sentiment)} teams...")
 
 for team, data in team_sentiment.items():

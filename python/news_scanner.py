@@ -77,7 +77,7 @@ BDL_BASE = "https://api.balldontlie.io"
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")  # optional — falls back to RSS if not set
 
 
-def find_youtube_highlight(query, max_results=3):
+def find_youtube_highlight(query, max_results=3, cache_key=None):
     """
     Search YouTube for a highlight clip. Returns embed URL or None.
     Uses YouTube Data API v3 if key is set, otherwise YouTube RSS search (free).
@@ -1579,6 +1579,155 @@ def scan_viral_sports():
 # SCANNER: UFC NEWS FEED (fight week previews, weigh-ins, post-fight drama)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def scan_sport_news(sport_key, league, emoji, label, star_players=None, keywords=None):
+    """
+    Generic ESPN news feed scanner for any sport.
+    Pulls headlines, filters for notable news, reacts with character voices.
+    """
+    star_players = star_players or set()
+    keywords     = keywords or []
+
+    try:
+        resp = requests.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/{sport_key}/{league}/news",
+            timeout=10
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return 0
+
+    SPORT_REACTIONS = {
+        "nfl": {
+            "yumi": [
+                "The NFL never stops moving. Roster decisions like this have real implications.",
+                "This changes the calculus heading into the offseason. File it away.",
+                "In the NFL, every move is a signal. This one is worth reading carefully.",
+                "Quiet but significant. The league is always operating, even in the offseason.",
+                "The roster implications here ripple further than the headline suggests.",
+            ],
+            "johnnybot": [
+                "NFL news in the offseason hits different. Someone is making a calculated move here.",
+                "Every trade, every signing, every cut — it all connects to something bigger. This is no different.",
+                "The NFL front offices are always playing chess. This is a chess move.",
+                "I want to understand the cap implications before I react fully. But my initial read is interesting.",
+                "Follow the money in the NFL and you follow the truth. This is a financial decision first.",
+            ],
+            "krash": [
+                "THE NFL NEVER SLEEPS AND NEITHER DO I. This is huge news.",
+                "WAIT WHAT. The NFL just dropped a bomb and people are sleeping on it.",
+                "I am FIRED UP about this. The NFL offseason is genuinely must-watch content.",
+                "This changes EVERYTHING heading into next season. LOCKED IN on the implications.",
+                "The NFL is the greatest soap opera in American sports and this is a WILD episode.",
+            ],
+        },
+        "nba": {
+            "yumi": [
+                "The trade market never truly closes in the NBA. This is proof.",
+                "Roster construction is an art. This move tells you something about how this team sees itself.",
+                "Quiet news day until this dropped. The league is always moving.",
+                "NBA front offices operate 24/7. This is the result of weeks of conversations.",
+            ],
+            "johnnybot": [
+                "NBA news cycle never stops. This one actually matters though.",
+                "Woj bomb or not, this changes something. Let me think through the implications.",
+                "Every NBA transaction is a domino. What falls next is the real question.",
+                "The front office didn't do this by accident. There's a reason and I want to find it.",
+            ],
+            "krash": [
+                "THE NBA IS NEVER BORING. EVER. This just proved it again.",
+                "I WAS NOT READY FOR THIS NEWS. The NBA keeps delivering.",
+                "TRADE ALERT ENERGY. The league just shifted and I am fully awake now.",
+                "This is why I never turn off NBA notifications. WILD.",
+            ],
+        },
+        "mlb": {
+            "yumi": [
+                "Baseball moves quietly but this one deserves attention.",
+                "The MLB transaction wire never stops. This one has real implications.",
+                "Roster depth matters in baseball more than any other sport. This affects it.",
+                "A 162-game season means every roster decision compounds. This is one of those.",
+            ],
+            "johnnybot": [
+                "MLB front offices are always tinkering. This is more than tinkering.",
+                "The baseball analytics era means every move has a reason. What's the reason here?",
+                "Quietly significant MLB news. The standings implications matter more than the headline.",
+                "Baseball rewards patience and punishes panic moves. Which one is this?",
+            ],
+            "krash": [
+                "BASEBALL NEWS HITTING DIFFERENT TODAY. The Hot Stove never truly goes cold.",
+                "I love when baseball reminds you it never actually stops. This is that moment.",
+                "THE ROSTER MOVE THAT CHANGES EVERYTHING. Okay maybe not everything. But something.",
+                "Baseball fans are always watching and today we were rewarded. Big news.",
+            ],
+        },
+        "nhl": {
+            "yumi": [
+                "The NHL trade deadline mentality never fully goes away. This proves it.",
+                "Hockey roster construction is always in motion. This is the latest move.",
+                "Quiet but meaningful NHL news. The playoff implications are worth tracking.",
+            ],
+            "johnnybot": [
+                "NHL front offices are brutal and efficient. This move reflects that.",
+                "Hockey trades are always about more than what's on the surface.",
+                "The NHL salary cap makes every move a puzzle. This is an interesting piece.",
+            ],
+            "krash": [
+                "HOCKEY NEVER STOPS DELIVERING. Big news from the NHL.",
+                "The NHL is always doing something wild and I am always here for it.",
+                "PLAYOFF IMPLICATIONS. The NHL just made a move that matters. A LOT.",
+            ],
+        },
+    }
+
+    sport_short = league.split("/")[-1] if "/" in league else league
+    reactions   = SPORT_REACTIONS.get(sport_short, SPORT_REACTIONS.get("nfl", {}))
+    count       = 0
+
+    for article in data.get("articles", [])[:8]:
+        headline = article.get("headline", "")
+        desc     = article.get("description", "")
+        url      = article.get("links", {}).get("web", {}).get("href", "")
+
+        if not headline:
+            continue
+
+        headline_lower = headline.lower()
+
+        # Filter: must mention a star or a key newsworthy term
+        is_star    = any(s.lower() in headline_lower for s in star_players)
+        is_notable = any(k in headline_lower for k in keywords)
+
+        if not is_star and not is_notable:
+            continue
+
+        dk    = dedup_key(f"{sport_short}_news", headline[:60])
+        voice = pick_voice()
+        body  = random.choice(reactions.get(voice, [f"Big {label} news."]))
+
+        severity = "breaking" if any(k in headline_lower for k in [
+            "trade", "release", "cut", "suspended", "fired", "retires",
+            "signs", "arrested", "injured", "out for season", "torn"
+        ]) else "normal"
+
+        if insert_news({
+            "type":       "news",
+            "sport":      sport_short,
+            "headline":   f"{emoji} {headline}",
+            "body":       body,
+            "character":  voice,
+            "source_url": url or None,
+            "severity":   severity,
+            "data":       json.dumps({"headline": headline, "description": desc[:200]}),
+            "date":       scan_date,
+            "dedup_key":  dk,
+        }):
+            count += 1
+            print(f"\n    {emoji} {headline[:65]}")
+
+    return count
+
+
 def scan_ufc_news():
     """
     Pull UFC news from ESPN MMA news feed.
@@ -1701,5 +1850,56 @@ total += scan_espn_sport("mlb")
 total += scan_espn_sport("nfl")
 total += scan_viral_sports()   # Golf, UFC results, boxing
 total += scan_ufc_news()       # UFC news feed — fight week hype, weigh-ins, drama
+
+# ── Sport news feeds ──────────────────────────────────────────────────────────
+NFL_STARS = {
+    "Patrick Mahomes", "Josh Allen", "Lamar Jackson", "Joe Burrow",
+    "Justin Jefferson", "Tyreek Hill", "Travis Kelce", "Davante Adams",
+    "CeeDee Lamb", "Stefon Diggs", "Ja'Marr Chase", "Cooper Kupp",
+    "Aaron Rodgers", "Tua Tagovailoa", "Dak Prescott", "Justin Herbert",
+    "Jalen Hurts", "Brock Purdy", "Sam Darnold", "Anthony Richardson",
+    "Christian McCaffrey", "Derrick Henry", "Saquon Barkley", "Nick Chubb",
+    "Micah Parsons", "Myles Garrett", "TJ Watt", "Maxx Crosby",
+}
+NFL_KEYWORDS = [
+    "trade", "signs", "release", "cut", "draft", "free agent", "contract",
+    "suspended", "injured", "ir", "retired", "fired", "head coach", "nfl",
+    "super bowl", "playoff", "extension", "holdout", "franchise tag",
+]
+
+NBA_STARS = {
+    "LeBron James", "Stephen Curry", "Kevin Durant", "Giannis Antetokounmpo",
+    "Nikola Jokic", "Luka Doncic", "Jayson Tatum", "Shai Gilgeous-Alexander",
+    "Anthony Davis", "Jimmy Butler", "Damian Lillard", "Kyrie Irving",
+    "Anthony Edwards", "Donovan Mitchell", "Devin Booker", "Trae Young",
+    "Victor Wembanyama", "Cade Cunningham", "Paolo Banchero", "Tyrese Maxey",
+}
+NBA_KEYWORDS = [
+    "trade", "signs", "waived", "buyout", "extension", "max contract",
+    "free agent", "draft", "suspended", "fined", "injured", "out",
+    "all-star", "mvp", "dpoy", "championship", "playoffs",
+]
+
+MLB_KEYWORDS = [
+    "trade", "signs", "dfa", "released", "suspended", "injured", "il",
+    "no-hitter", "perfect game", "contract", "free agent", "extension",
+    "playoffs", "world series", "all-star",
+]
+
+NHL_KEYWORDS = [
+    "trade", "signs", "waived", "suspended", "injured", "ltir",
+    "contract", "free agent", "playoffs", "stanley cup", "all-star",
+]
+
+nfl_count = scan_sport_news("american-football", "nfl", "🏈", "NFL", NFL_STARS, NFL_KEYWORDS)
+nba_count = scan_sport_news("basketball", "nba", "🏀", "NBA", NBA_STARS, NBA_KEYWORDS)
+mlb_count = scan_sport_news("baseball", "mlb", "⚾", "MLB", set(), MLB_KEYWORDS)
+nhl_count = scan_sport_news("hockey", "nhl", "🏒", "NHL", set(), NHL_KEYWORDS)
+
+if nfl_count: print(f"  🏈 NFL news: {nfl_count} new")
+if nba_count: print(f"  🏀 NBA news: {nba_count} new")
+if mlb_count: print(f"  ⚾ MLB news: {mlb_count} new")
+if nhl_count: print(f"  🏒 NHL news: {nhl_count} new")
+total += nfl_count + nba_count + mlb_count + nhl_count
 
 print(f"\n  📡 Scan complete — {total} new items published")

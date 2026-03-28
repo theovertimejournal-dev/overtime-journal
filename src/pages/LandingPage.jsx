@@ -4,6 +4,65 @@ import { supabase } from '../lib/supabase';
 
 const MONO = "'JetBrains Mono','SF Mono','Fira Code',monospace";
 
+// ── Video embed helpers ───────────────────────────────────────────────────────
+function getYouTubeId(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    // youtu.be/ID
+    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0];
+    // youtube.com/watch?v=ID or /shorts/ID or /embed/ID
+    if (u.hostname.includes('youtube.com')) {
+      if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/shorts/')[1].split('?')[0];
+      if (u.pathname.startsWith('/embed/')) return u.pathname.split('/embed/')[1].split('?')[0];
+      return u.searchParams.get('v');
+    }
+  } catch {}
+  return null;
+}
+
+function isESPN(url) {
+  return url && (url.includes('espn.com') || url.includes('espn.go.com'));
+}
+
+function VideoEmbed({ url, headline }) {
+  const [expanded, setExpanded] = useState(false);
+  const ytId = getYouTubeId(url);
+
+  if (!ytId) return null;
+
+  return (
+    <div style={{ marginTop: 8 }}>
+      {!expanded ? (
+        <button
+          onClick={() => setExpanded(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '7px 12px', borderRadius: 6, cursor: 'pointer',
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+            color: '#ef4444', fontSize: 10, fontFamily: MONO, fontWeight: 700,
+            letterSpacing: '0.06em', transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.14)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(239,68,68,0.08)'}
+        >
+          ▶ WATCH HIGHLIGHT
+        </button>
+      ) : (
+        <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+          <iframe
+            src={`https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0`}
+            title={headline || 'Highlight'}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Blog posts with full content ─────────────────────────────────────────────
 const BLOG_POSTS = [
   {
@@ -1269,6 +1328,8 @@ export default function LandingPage({ user, profile, sessionValidated }) {
                 { id: 'nhl', label: '🏒 NHL' },
                 { id: 'mlb', label: '⚾ MLB' },
                 { id: 'nfl', label: '🏈 NFL' },
+                { id: 'mma', label: '🥊 MMA/UFC' },
+                { id: 'golf', label: '⛳ GOLF' },
                 { id: 'injuries', label: '🏥 INJURIES' },
                 { id: 'scores', label: '🏁 SCORES' },
                 { id: 'standout', label: '⭐ STANDOUTS' },
@@ -1302,6 +1363,8 @@ export default function LandingPage({ user, profile, sessionValidated }) {
               else if (feedFilter === 'nhl') filtered = liveFeed.filter(n => n.sport === 'nhl');
               else if (feedFilter === 'mlb') filtered = liveFeed.filter(n => n.sport === 'mlb');
               else if (feedFilter === 'nfl') filtered = liveFeed.filter(n => n.sport === 'nfl');
+              else if (feedFilter === 'mma') filtered = liveFeed.filter(n => n.sport === 'mma' || n.sport === 'boxing' || n.type === 'mma' || n.type === 'boxing');
+              else if (feedFilter === 'golf') filtered = liveFeed.filter(n => n.sport === 'golf' || n.type === 'golf');
               else if (feedFilter === 'injuries') filtered = liveFeed.filter(n => n.type === 'injury');
               else if (feedFilter === 'scores') filtered = liveFeed.filter(n => n.type?.includes('final') || n.type === 'march_madness');
               else if (feedFilter === 'trades') filtered = liveFeed.filter(n => n.type === 'trade');
@@ -1324,7 +1387,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
                           background: item.severity === 'breaking' ? 'rgba(239,68,68,0.15)' : item.severity === 'important' ? 'rgba(251,191,36,0.12)' : 'rgba(255,255,255,0.04)',
                           color: item.severity === 'breaking' ? '#ef4444' : item.severity === 'important' ? '#fbbf24' : '#4a5568',
                         }}>
-                          {item.severity === 'breaking' ? '🚨 BREAKING' : item.type === 'march_madness' ? '🏀 MADNESS' : item.type === 'highlights' ? '🎬 HIGHLIGHTS' : item.type === 'injury' ? '🏥 INJURY' : item.type === 'trade' ? '💼 TRADE' : item.type === 'line_move' ? '📈 LINE MOVE' : item.type === 'standout' ? '⭐ STANDOUT' : item.type?.includes('live') ? '📡 LIVE' : item.type?.includes('final') ? '🏁 FINAL' : '📰 NEWS'}
+                          {item.severity === 'breaking' ? '🚨 BREAKING' : item.type === 'march_madness' ? '🏀 MADNESS' : item.type === 'highlights' ? '🎬 HIGHLIGHTS' : item.type === 'mma' ? '🥊 MMA' : item.type === 'boxing' ? '🥊 BOXING' : item.type === 'golf' ? '⛳ GOLF' : item.type === 'injury' ? '🏥 INJURY' : item.type === 'trade' ? '💼 TRADE' : item.type === 'line_move' ? '📈 LINE MOVE' : item.type === 'standout' ? '⭐ STANDOUT' : item.type === 'news' ? '📰 NEWS' : item.type?.includes('live') ? '📡 LIVE' : item.type?.includes('final') ? '🏁 FINAL' : '📰 NEWS'}
                         </span>
                         <span style={{ fontSize: 9, color: '#374151', fontFamily: MONO }}>
                           {item.sport?.toUpperCase()}
@@ -1337,7 +1400,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
                         </span>
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9', lineHeight: 1.4, marginBottom: item.body ? 4 : 0 }}>
-                        {item.source_url ? (
+                        {item.source_url && !getYouTubeId(item.source_url) && !isESPN(item.source_url) ? (
                           <a href={item.source_url} target="_blank" rel="noopener noreferrer" style={{
                             color: '#f1f5f9', textDecoration: 'none', borderBottom: '1px dotted rgba(255,255,255,0.2)',
                           }}
@@ -1348,6 +1411,22 @@ export default function LandingPage({ user, profile, sessionValidated }) {
                           </a>
                         ) : item.headline}
                       </div>
+                      {/* YouTube: embed inline */}
+                      {getYouTubeId(item.source_url) && (
+                        <VideoEmbed url={item.source_url} headline={item.headline} />
+                      )}
+                      {/* ESPN: can't embed — show external link styled differently */}
+                      {isESPN(item.source_url) && !getYouTubeId(item.source_url) && (
+                        <a href={item.source_url} target="_blank" rel="noopener noreferrer" style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 6,
+                          fontSize: 10, color: '#4a5568', textDecoration: 'none', fontFamily: MONO,
+                        }}
+                          onMouseEnter={e => e.currentTarget.style.color = '#94a3b8'}
+                          onMouseLeave={e => e.currentTarget.style.color = '#4a5568'}
+                        >
+                          ↗ VIEW ON ESPN
+                        </a>
+                      )}
                       {item.body && (
                         <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.6, fontStyle: 'italic' }}>
                           {item.character && (

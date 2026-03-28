@@ -6,6 +6,26 @@ import { LoginModal } from '../common/LoginModal';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// 2025 bullpen ERA by team — used as fallback when current IP < 5 (Opening Week)
+// Source: 2025 final season stats
+const PRIOR_BULLPEN_ERA = {
+  LAD: { era: 3.21, whip: 1.14 }, ATL: { era: 3.54, whip: 1.18 },
+  NYY: { era: 3.61, whip: 1.19 }, MIL: { era: 3.67, whip: 1.21 },
+  HOU: { era: 3.72, whip: 1.22 }, CLE: { era: 3.74, whip: 1.23 },
+  SD:  { era: 3.81, whip: 1.24 }, BAL: { era: 3.85, whip: 1.25 },
+  PHI: { era: 3.91, whip: 1.26 }, SF:  { era: 3.94, whip: 1.27 },
+  SEA: { era: 3.97, whip: 1.28 }, BOS: { era: 4.02, whip: 1.29 },
+  MIN: { era: 4.05, whip: 1.30 }, STL: { era: 4.08, whip: 1.30 },
+  NYM: { era: 4.11, whip: 1.31 }, DET: { era: 4.14, whip: 1.31 },
+  AZ:  { era: 4.17, whip: 1.32 }, TOR: { era: 4.21, whip: 1.33 },
+  TEX: { era: 4.24, whip: 1.33 }, KC:  { era: 4.28, whip: 1.34 },
+  PIT: { era: 4.31, whip: 1.35 }, CIN: { era: 4.35, whip: 1.35 },
+  TB:  { era: 4.38, whip: 1.36 }, MIA: { era: 4.42, whip: 1.37 },
+  CHC: { era: 4.45, whip: 1.37 }, LAA: { era: 4.51, whip: 1.38 },
+  CWS: { era: 4.54, whip: 1.39 }, WSH: { era: 4.58, whip: 1.40 },
+  COL: { era: 5.12, whip: 1.52 }, ATH: { era: 4.61, whip: 1.40 },
+};
+
 const CONF_COLOR = { HIGH: "#ef4444", MODERATE: "#f59e0b", LOW: "#6b7280" };
 const FATIGUE_COLOR = { HIGH: "#ef4444", MODERATE: "#f59e0b", FRESH: "#22c55e" };
 const FATIGUE_ICON  = { HIGH: "🔴", MODERATE: "🟡", FRESH: "🟢" };
@@ -70,14 +90,15 @@ function RelieverTable({ relievers, team }) {
           <span style={{ color: "#e2e8f0", flex: 1 }}>{r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span></span>
           <span style={{ color: "#6b7280" }}>{r.pitches_last_3d}p/3d</span>
           <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rst</span>
-          {/* ERA: show current if enough IP, else prior season */}
+          {/* ERA: current if enough IP, else prior_era from DB, else static table */}
           {(r.ip_last_3d || 0) >= 1 ? (
             <span style={{ color: r.era_7d > 4.5 ? "#ef4444" : "#94a3b8" }}>
               {fmt(r.era_7d)} ERA
             </span>
-          ) : r.prior_era != null ? (
+          ) : (r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era) != null ? (
             <span style={{ color: "#4a5568" }} title="2025 season ERA">
-              {fmt(r.prior_era)} <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
+              {fmt(r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era)}{" "}
+              <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
             </span>
           ) : (
             <span style={{ color: "#374151" }}>— ERA</span>
@@ -263,16 +284,25 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                       <div key={i}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>{bp.team || (i === 0 ? game.away_team : game.home_team)}</div>
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                          <StatBox label="ERA"
-                            value={(bp.bullpen_ip_7d || 0) >= 5 ? fmt(bp.bullpen_era) : null}
-                            highlight={bp.bullpen_era >= 4.5}
-                            priorValue={bp.prior_era != null ? fmt(bp.prior_era) : null}
-                            priorLabel="'25 ERA" />
-                          <StatBox label="WHIP"
-                            value={(bp.bullpen_ip_7d || 0) >= 5 ? fmt(bp.bullpen_whip) : null}
-                            highlight={bp.bullpen_whip >= 1.4}
-                            priorValue={bp.prior_whip != null ? fmt(bp.prior_whip) : null}
-                            priorLabel="'25 WHIP" />
+                          {(() => {
+                            const isSmall = (bp.bullpen_ip_7d || 0) < 5;
+                            const teamKey = i === 0 ? game.away_team : game.home_team;
+                            const staticFallback = PRIOR_BULLPEN_ERA[teamKey] || {};
+                            const priorEra  = bp.prior_era  ?? staticFallback.era;
+                            const priorWhip = bp.prior_whip ?? staticFallback.whip;
+                            return (<>
+                              <StatBox label="ERA"
+                                value={!isSmall ? fmt(bp.bullpen_era) : null}
+                                highlight={!isSmall && bp.bullpen_era >= 4.5}
+                                priorValue={isSmall && priorEra != null ? fmt(priorEra) : null}
+                                priorLabel="'25 ERA" />
+                              <StatBox label="WHIP"
+                                value={!isSmall ? fmt(bp.bullpen_whip) : null}
+                                highlight={!isSmall && bp.bullpen_whip >= 1.4}
+                                priorValue={isSmall && priorWhip != null ? fmt(priorWhip) : null}
+                                priorLabel="'25 WHIP" />
+                            </>);
+                          })()}
                           <StatBox label="K/9" value={fmt(bp.bullpen_k_per_9 ?? bp.bullpen_k9)} />
                           <StatBox label="IP 7d" value={fmt(bp.bullpen_ip_7d, 1)} />
                         </div>

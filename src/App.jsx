@@ -1,8 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import NBADashboard from './components/nba/NBADashboard';
-import MLBDashboard from './components/nba/MLBDashboard';
-import MLBPropsPage from './components/nba/MLBPropsPage';
 import NBAJamArcade from './components/nba/NBAJamArcade';
 import { AuthButton } from './components/common/AuthButton';
 import { WelcomeModal } from './components/common/WelcomeModal';
@@ -46,76 +44,261 @@ function ComingSoon({ sport, emoji, phase }) {
 }
 
 const NAV_STYLES = `
-  .otj-nav-tabs { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; flex: 1; display: flex; align-items: center; gap: 4; min-width: 0; }
-  .otj-nav-tabs::-webkit-scrollbar { display: none; }
+  .otj-nav-tabs { overflow-x: visible; flex: 1; display: flex; align-items: center; gap: 2; min-width: 0; flex-wrap: nowrap; }
   .nav-tab-label { display: inline; }
+  .nav-weather-pill { display: flex; }
   .nav-username-badge { display: flex; }
   @media (max-width: 860px) {
     .nav-tab-label { display: none; }
+    .nav-weather-pill { display: none; }
   }
   @media (max-width: 500px) {
     .nav-username-badge { display: none !important; }
   }
 `;
 
-function SportTabs({ user, profile, onSignIn }) {
-  const tabStyle = (isActive) => ({
+// ── Weather + Countdown pill ─────────────────────────────────────────────────
+function WeatherCountdownPill({ slates }) {
+  const [weather, setWeather] = useState(null);
+  const [nextGame, setNextGame] = useState(null);
+  const [countdown, setCountdown] = useState("");
+
+  // Get user location + weather on mount
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude: lat, longitude: lng } = pos.coords;
+          const r = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code&temperature_unit=fahrenheit&timezone=auto`
+          );
+          const d = await r.json();
+          const temp = Math.round(d.current?.temperature_2m || 0);
+          const code = d.current?.weather_code || 0;
+          const icon = code === 0 ? "☀️" : code <= 3 ? "⛅" : code <= 67 ? "🌧️" : code <= 77 ? "❄️" : "🌩️";
+          setWeather({ temp, icon });
+        } catch {}
+      },
+      () => {} // silently ignore if denied
+    );
+  }, []);
+
+  // Find next game across all slates
+  useEffect(() => {
+    if (!slates?.length) return;
+    const now = new Date();
+    let soonest = null;
+
+    for (const slate of slates) {
+      for (const game of slate.games || []) {
+        if (!game.game_time) continue;
+        try {
+          const gt = new Date(game.game_time);
+          if (gt > now && (!soonest || gt < soonest.time)) {
+            soonest = {
+              time: gt,
+              sport: slate.sport || "nba",
+              matchup: game.matchup || "",
+            };
+          }
+        } catch {}
+      }
+    }
+    setNextGame(soonest);
+  }, [slates]);
+
+  // Live countdown ticker
+  useEffect(() => {
+    if (!nextGame) return;
+    const tick = () => {
+      const diff = nextGame.time - new Date();
+      if (diff <= 0) { setCountdown("LIVE"); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      setCountdown(h > 0 ? `${h}h ${m}m` : `${m}m`);
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [nextGame]);
+
+  const sportEmoji = { nba: "🏀", mlb: "⚾", nhl: "🏒", nfl: "🏈" };
+  const emoji = sportEmoji[nextGame?.sport] || "⚡";
+
+  if (!weather && !nextGame) return null;
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+      fontSize: 10, color: "#6b7280", fontFamily: "'JetBrains Mono',monospace",
+      padding: "3px 8px", borderRadius: 6,
+      background: "rgba(255,255,255,0.03)",
+      border: "1px solid rgba(255,255,255,0.06)",
+      whiteSpace: "nowrap",
+    }}>
+      {weather && <span>{weather.icon} {weather.temp}°</span>}
+      {weather && nextGame && <span style={{ color: "#374151" }}>·</span>}
+      {nextGame && countdown && (
+        <span>{emoji} {countdown === "LIVE" ? "🔴 LIVE" : `in ${countdown}`}</span>
+      )}
+    </div>
+  );
+}
+
+// ── Dropdown nav item ─────────────────────────────────────────────────────────
+function NavDropdown({ label, emoji, children, activePaths }) {
+  const [open, setOpen] = useState(false);
+  const ref = useState(null);
+  const location = typeof window !== "undefined" ? window.location.pathname : "";
+  const isActive = activePaths?.some(p => location.startsWith(p));
+
+  return (
+    <div style={{ position: "relative", flexShrink: 0 }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          fontSize: 12, padding: "6px 10px", borderRadius: 6, fontWeight: 600,
+          color: isActive ? "#f1f5f9" : "#4a5568",
+          background: isActive ? "rgba(255,255,255,0.08)" : open ? "rgba(255,255,255,0.05)" : "transparent",
+          border: isActive ? "1px solid rgba(255,255,255,0.1)" : "1px solid transparent",
+          cursor: "pointer", fontFamily: "'JetBrains Mono',monospace",
+          display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+          transition: "all 0.15s",
+        }}
+      >
+        {emoji} <span className="nav-tab-label">{label}</span>
+        <span style={{ fontSize: 8, opacity: 0.5, marginLeft: 1 }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, marginTop: 4,
+          background: "rgba(8,8,15,0.98)", backdropFilter: "blur(16px)",
+          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+          padding: "6px", minWidth: 160, zIndex: 100,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+        }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DropItem({ to, emoji, label, sub, onClick }) {
+  const navigate = typeof window !== "undefined" ? (path) => window.location.href = path : () => {};
+  return (
+    <NavLink
+      to={to}
+      style={({ isActive }) => ({
+        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+        borderRadius: 6, textDecoration: "none", transition: "all 0.1s",
+        background: isActive ? "rgba(239,68,68,0.1)" : "transparent",
+        color: isActive ? "#ef4444" : "#94a3b8",
+      })}
+      onMouseEnter={e => { if (!e.currentTarget.style.background.includes("ef4444")) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+      onMouseLeave={e => { if (!e.currentTarget.style.background.includes("ef4444")) e.currentTarget.style.background = "transparent"; }}
+    >
+      <span style={{ fontSize: 14 }}>{emoji}</span>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 600, fontFamily: "'JetBrains Mono',monospace" }}>{label}</div>
+        {sub && <div style={{ fontSize: 9, color: "#4a5568", marginTop: 1 }}>{sub}</div>}
+      </div>
+    </NavLink>
+  );
+}
+
+function DropDivider() {
+  return <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "4px 0" }} />;
+}
+
+// ── Main Nav ─────────────────────────────────────────────────────────────────
+function SportTabs({ user, profile, onSignIn, slates }) {
+  const simpleTab = (isActive) => ({
     fontSize: 12, padding: "6px 10px", borderRadius: 6, textDecoration: "none", fontWeight: 600,
     color: isActive ? "#f1f5f9" : "#4a5568",
     background: isActive ? "rgba(255,255,255,0.08)" : "transparent",
     border: isActive ? "1px solid rgba(255,255,255,0.1)" : "1px solid transparent",
-    transition: "all 0.15s ease",
-    whiteSpace: "nowrap", flexShrink: 0,
+    transition: "all 0.15s ease", whiteSpace: "nowrap", flexShrink: 0,
   });
 
   return (
     <>
       <style>{NAV_STYLES}</style>
       <nav style={{
-        position: "sticky", top: 0, zIndex: 10,
+        position: "sticky", top: 0, zIndex: 50,
         background: "rgba(8,8,15,0.95)", backdropFilter: "blur(12px)",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
-        padding: "10px 12px", display: "flex", alignItems: "center", gap: 8,
+        padding: "8px 12px", display: "flex", alignItems: "center", gap: 6,
         fontFamily: "'JetBrains Mono','SF Mono',monospace",
       }}>
-        {/* Logo — always visible */}
-        <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", letterSpacing: "-0.02em", flexShrink: 0 }}>OTJ</span>
+        {/* Logo */}
+        <NavLink to="/" end style={{ textDecoration: "none", flexShrink: 0 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: "#ef4444", letterSpacing: "-0.02em" }}>OTJ</span>
+        </NavLink>
 
-        {/* Scrollable tabs — takes remaining space */}
+        {/* Nav items */}
         <div className="otj-nav-tabs">
-          <NavLink to="/" end style={({ isActive }) => tabStyle(isActive)}>🏠<span className="nav-tab-label"> Home</span></NavLink>
-          <NavLink to="/daily" style={({ isActive }) => tabStyle(isActive)}>📰<span className="nav-tab-label"> Daily</span></NavLink>
-          <NavLink to="/nba" style={({ isActive }) => tabStyle(isActive)}>🏀<span className="nav-tab-label"> NBA</span></NavLink>
-          <NavLink to="/props" style={({ isActive }) => tabStyle(isActive)}>🎯<span className="nav-tab-label"> Props</span></NavLink>
-          <NavLink to="/nhl" style={({ isActive }) => tabStyle(isActive)}>🏒<span className="nav-tab-label"> NHL</span></NavLink>
-          <NavLink to="/mlb" style={({ isActive }) => tabStyle(isActive)}>⚾<span className="nav-tab-label"> MLB</span></NavLink>
-          <NavLink to="/mlb-props" style={({ isActive }) => tabStyle(isActive)}>💣<span className="nav-tab-label"> HR Props</span></NavLink>
-          <NavLink to="/nfl" style={({ isActive }) => tabStyle(isActive)}>🏈<span className="nav-tab-label"> NFL</span></NavLink>
-          <NavLink to="/record" style={({ isActive }) => tabStyle(isActive)}>📊<span className="nav-tab-label"> Record</span></NavLink>
-          <NavLink to="/arcade" style={({ isActive }) => tabStyle(isActive)}>🕹<span className="nav-tab-label"> Arcade</span></NavLink>
-          <NavLink to="/poker" style={({ isActive }) => tabStyle(isActive)}>♠️<span className="nav-tab-label"> Poker</span></NavLink>
-          <NavLink to="/leaderboard" style={({ isActive }) => tabStyle(isActive)}>🏆<span className="nav-tab-label"> Top 10</span></NavLink>
+
+          {/* Home */}
+          <NavLink to="/" end style={({ isActive }) => simpleTab(isActive)}>
+            🏠<span className="nav-tab-label"> Home</span>
+          </NavLink>
+
+          {/* NBA dropdown */}
+          <NavDropdown emoji="🏀" label="NBA" activePaths={["/nba", "/props"]}>
+            <DropItem to="/nba"   emoji="📊" label="Edge Analyzer"  sub="ML · Spread · Totals" />
+            <DropItem to="/props" emoji="🎯" label="Player Props"   sub="Points · Reb · Ast" />
+          </NavDropdown>
+
+          {/* MLB dropdown */}
+          <NavDropdown emoji="⚾" label="MLB" activePaths={["/mlb", "/mlb-props"]}>
+            <DropItem to="/mlb"       emoji="📊" label="Game Analysis" sub="Bullpen · Pythagorean" />
+            <DropItem to="/mlb-props" emoji="💣" label="HR Props"      sub="Park · Wind · Pitcher" />
+          </NavDropdown>
+
+          {/* NHL dropdown */}
+          <NavDropdown emoji="🏒" label="NHL" activePaths={["/nhl"]}>
+            <DropItem to="/nhl" emoji="📊" label="Game Analysis" sub="Coming soon" />
+          </NavDropdown>
+
+          {/* NFL dropdown */}
+          <NavDropdown emoji="🏈" label="NFL" activePaths={["/nfl"]}>
+            <DropItem to="/nfl" emoji="📊" label="Game Analysis" sub="Coming soon" />
+          </NavDropdown>
+
+          {/* More dropdown */}
+          <NavDropdown emoji="☰" label="More" activePaths={["/arcade", "/poker", "/record", "/leaderboard", "/daily"]}>
+            <DropItem to="/daily"       emoji="📰" label="Daily Journal" sub="Picks · Analysis" />
+            <DropItem to="/record"      emoji="📊" label="Record"        sub="Full pick history" />
+            <DropDivider />
+            <DropItem to="/arcade"      emoji="🕹" label="Arcade"        sub="OTJ Jam · PvP" />
+            <DropItem to="/poker"       emoji="♠️" label="Poker"         sub="Texas Hold'em" />
+            <DropDivider />
+            <DropItem to="/leaderboard" emoji="🏆" label="Top 10"        sub="Leaderboard" />
+          </NavDropdown>
+
         </div>
 
-        {/* Auth section — always pinned right, never scrolls away */}
+        {/* Right side: weather pill + auth */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {/* Weather + countdown — hidden on small mobile */}
+          <div className="nav-weather-pill">
+            <WeatherCountdownPill slates={slates || []} />
+          </div>
+
           {user && profile?.username && (
             <>
-              {/* Avatar — always visible, even on mobile */}
-              <NavLink
-                to={`/profile/${profile.username}`}
-                style={{ textDecoration: "none", flexShrink: 0 }}
-              >
-                <AvatarMini config={profile.avatar_config} size={26} style={{
-                  border: "1px solid rgba(255,255,255,0.1)",
-                }} />
+              <NavLink to={`/profile/${profile.username}`} style={{ textDecoration: "none", flexShrink: 0 }}>
+                <AvatarMini config={profile.avatar_config} size={26}
+                  style={{ border: "1px solid rgba(255,255,255,0.1)" }} />
               </NavLink>
-              {/* Username — hidden on mobile */}
-              <NavLink
-                to={`/profile/${profile.username}`}
-                className="nav-username-badge"
-                style={{ alignItems: "center", textDecoration: "none" }}
-              >
+              <NavLink to={`/profile/${profile.username}`} className="nav-username-badge"
+                style={{ alignItems: "center", textDecoration: "none" }}>
                 <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
               </NavLink>
             </>
@@ -149,7 +332,19 @@ export default function App() {
   const [showWelcome, setShowWelcome]   = useState(false);
   const [showUsername, setShowUsername] = useState(false);
   const [authChecked,      setAuthChecked]      = useState(false);
-  const [sessionValidated, setSessionValidated] = useState(false); // true only after server confirms token
+  const [sessionValidated, setSessionValidated] = useState(false);
+  const [navSlates, setNavSlates] = useState([]);
+
+  // Fetch today's slates for countdown — lightweight, just game times
+  useEffect(() => {
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+    supabase
+      .from("slates")
+      .select("sport, date, games")
+      .eq("date", dateStr)
+      .then(({ data }) => { if (data) setNavSlates(data); });
+  }, []); // true only after server confirms token
   const [profileLoading,   setProfileLoading]   = useState(true);
 
   useEffect(() => {
@@ -299,14 +494,13 @@ export default function App() {
       )}
 
       <div style={{ minHeight: "100vh", background: "#08080f", color: "#e2e8f0", fontFamily: "'JetBrains Mono','SF Mono',monospace" }}>
-        <SportTabs user={user} profile={profile} onSignIn={() => setShowWelcome(true)} />
+        <SportTabs user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />
         <Routes>
           <Route path="/" element={<LandingPage user={user} profile={profile} sessionValidated={sessionValidated} />} />
           <Route path="/faq" element={<FAQ />} />
           <Route path="/nba" element={<NBADashboard user={user} profile={profile} sessionValidated={sessionValidated} />} />
           <Route path="/nhl" element={<ComingSoon sport="NHL" emoji="🏒" phase="Phase 2 — March" />} />
-          <Route path="/mlb" element={<MLBDashboard user={user} />} />
-          <Route path="/mlb-props" element={<MLBPropsPage user={user} profile={profile} onShowLogin={() => setShowWelcome(true)} />} />
+          <Route path="/mlb" element={<ComingSoon sport="MLB" emoji="⚾" phase="Phase 3 — Opening Day" />} />
           <Route path="/nfl" element={<ComingSoon sport="NFL" emoji="🏈" phase="Phase 4 — September" />} />
           <Route path="/record" element={<Record />} />
           <Route path="/arcade" element={

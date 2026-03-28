@@ -1470,7 +1470,7 @@ def scan_viral_sports():
                     yt_url = find_youtube_highlight(f"{aname} golf highlights {scan_date[:7]}")
 
                     if insert_news({
-                        "type": "highlights",
+                        "type": "golf",
                         "sport": "golf",
                         "headline": headline,
                         "body": body,
@@ -1556,7 +1556,7 @@ def scan_viral_sports():
                 )
 
                 if insert_news({
-                    "type":       "highlights",
+                    "type":       cfg["sport"],   # "mma" or "boxing" — matches filter
                     "sport":      cfg["sport"],
                     "headline":   f"🥊 {winner_name} def. {loser_name}{method_str}",
                     "body":       body,
@@ -1712,7 +1712,7 @@ def scan_sport_news(sport_key, league, emoji, label, star_players=None, keywords
 
         if insert_news({
             "type":       "news",
-            "sport":      sport_short,
+            "sport":      sport_short,   # "nfl", "nba", "mlb", "nhl" — matches filter pills
             "headline":   f"{emoji} {headline}",
             "body":       body,
             "character":  voice,
@@ -1817,7 +1817,7 @@ def scan_ufc_news():
                 )
 
         if insert_news({
-            "type":       "highlights",
+            "type":       "mma",        # type = mma so filter works
             "sport":      "mma",
             "headline":   f"🥊 {headline}",
             "body":       body,

@@ -503,6 +503,15 @@ def generate_narrative(game_data: dict) -> str:
         park   = game_data.get("park_factor", {})
         game   = game_data.get("game", {})
 
+        # Use prior year ERA when current sample is too small (< 15 IP)
+        away_ip = abp.get('bullpen_ip_7d', 0) or 0
+        home_ip = hbp.get('bullpen_ip_7d', 0) or 0
+        away_era_display = abp.get('bullpen_era', 'N/A') if away_ip >= 15 else f"{abp.get('prior_era', 'N/A')} (2025)"
+        home_era_display = hbp.get('bullpen_era', 'N/A') if home_ip >= 15 else f"{hbp.get('prior_era', 'N/A')} (2025)"
+        sample_note = ""
+        if away_ip < 15 or home_ip < 15:
+            sample_note = "\nNOTE: Early season — bullpen ERA shown is from 2025 season. Do NOT cite tiny current-season numbers."
+
         prompt = f"""You are OTJ's MLB analyst. Write a punchy 2-3 sentence game preview for bettors.
 
 Game: {game.get('away_team')} @ {game.get('home_team')}
@@ -512,10 +521,10 @@ Starters: {game.get('away_starter', {}).get('name', 'TBD')} vs {game.get('home_s
 Edge lean: {edge.get('lean', 'None')} ({edge.get('confidence', 'LOW')})
 Key signals: {', '.join(s['type'] + ': ' + s['detail'] for s in edge.get('signals', [])[:3])}
 
-Away bullpen ERA: {abp.get('bullpen_era', 'N/A')} | Fatigue score: {abp.get('fatigue_score', 'N/A')}
-Home bullpen ERA: {hbp.get('bullpen_era', 'N/A')} | Fatigue score: {hbp.get('fatigue_score', 'N/A')}
+Away bullpen ERA: {away_era_display} | Fatigue score: {abp.get('fatigue_score', 'N/A')}
+Home bullpen ERA: {home_era_display} | Fatigue score: {hbp.get('fatigue_score', 'N/A')}
 Away Pythagorean luck: {apyth.get('luck_factor', 0):+.1f}W | Home luck: {hpyth.get('luck_factor', 0):+.1f}W
-
+{sample_note}
 Keep it sharp, specific, and under 60 words. Reference the actual teams and numbers."""
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)

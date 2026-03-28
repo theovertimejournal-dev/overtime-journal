@@ -1430,7 +1430,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
     supabase
       .from('slates')
       .select('sport, date, games, yesterday_results, live_ticker, cumulative_record')
-      .eq('date', today)
+      .eq('date', new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))
       .then(({ data }) => {
         if (!data?.length) return;
         setAllSlates(data);
@@ -1451,7 +1451,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
         }
         setTickerBySport(bySport);
       });
-  }, [today]);
+  }, []);
 
   return (
     <div style={{ minHeight: '100vh', background: '#08080f', color: '#e2e8f0', fontFamily: MONO }}>

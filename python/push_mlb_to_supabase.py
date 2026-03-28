@@ -657,6 +657,8 @@ for gd in games_raw:
             "home_lr_matchup":  hlr,
             "weather":          weather_cache.get(home, {}),
             "real_feel":        real_feel_cache.get(home, {}),
+            "away_starter":     g.get("away_starter", {}),
+            "home_starter":     g.get("home_starter", {}),
         }
     else:
         analysis = existing.get("analysis") or {}

@@ -149,9 +149,9 @@ function WeatherCountdownPill({ slates }) {
 // ── Dropdown nav item ─────────────────────────────────────────────────────────
 function NavDropdown({ label, emoji, children, activePaths }) {
   const [open, setOpen] = useState(false);
-  const ref = useState(null);
-  const location = typeof window !== "undefined" ? window.location.pathname : "";
-  const isActive = activePaths?.some(p => location.startsWith(p));
+  const [path, setPath] = useState(window.location.pathname);
+  useEffect(() => { setPath(window.location.pathname); });
+  const isActive = activePaths?.some(p => path.startsWith(p));
 
   return (
     <div style={{ position: "relative", flexShrink: 0 }}
@@ -189,8 +189,7 @@ function NavDropdown({ label, emoji, children, activePaths }) {
   );
 }
 
-function DropItem({ to, emoji, label, sub, onClick }) {
-  const navigate = typeof window !== "undefined" ? (path) => window.location.href = path : () => {};
+function DropItem({ to, emoji, label, sub }) {
   return (
     <NavLink
       to={to}
@@ -200,8 +199,8 @@ function DropItem({ to, emoji, label, sub, onClick }) {
         background: isActive ? "rgba(239,68,68,0.1)" : "transparent",
         color: isActive ? "#ef4444" : "#94a3b8",
       })}
-      onMouseEnter={e => { if (!e.currentTarget.style.background.includes("ef4444")) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
-      onMouseLeave={e => { if (!e.currentTarget.style.background.includes("ef4444")) e.currentTarget.style.background = "transparent"; }}
+      onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
+      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
     >
       <span style={{ fontSize: 14 }}>{emoji}</span>
       <div>

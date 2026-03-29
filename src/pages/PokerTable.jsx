@@ -1,749 +1,1133 @@
 /**
- * PokerTable.jsx — OTJ Poker Table (v2 — Fully Debugged)
+ * PokerRoom.js — Colyseus Texas Hold'em Room
  * 
- * Fixes applied:
- *  1. CRITICAL: Removed frontend cashout — server is single source of truth for chip returns
- *  2. sessionStorage persistence — survives page refresh
- *  3. Improved room joining — finds existing rooms by tier, room code lookup works
- *  4. Turn timer visual display
- *  5. Raise slider edge cases (can't raise if chips < minRaise)
- *  6. Showdown result display
- *  7. Proper cleanup on unmount (no double-leave)
- *  8. BettingControls useEffect at top level (React hooks rule)
- *  9. Error auto-dismiss doesn't stack
- *  10. Removed supabase import — no more frontend bankroll writes
+ * Server-authoritative. Client never sees other players' hole cards.
+ * Full game loop: blinds → deal → preflop → flop → turn → river → showdown
  */
-import { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Client } from 'colyseus.js';
-import { AvatarMini } from '../components/common/AvatarSystem';
 
-const FONT = "'JetBrains Mono','SF Mono',monospace";
-const COLYSEUS_URL = 'wss://overtime-journal-production.up.railway.app';
-const SESSION_KEY = 'otj_poker_session';
+const { Room } = require("colyseus");
+const { evaluateBest, determineWinners, createDeck, shuffleDeck, handToString } = require("./pokerEval");
+const { createClient } = require("@supabase/supabase-js");
 
-// ─── Card Rendering ──────────────────────────────────────────────────────────
+// Supabase server-side client (use service role key for server operations)
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-const SUIT_SYMBOLS = { h: '♥', d: '♦', c: '♣', s: '♠' };
-const SUIT_COLORS = { h: '#dc2626', d: '#2563eb', c: '#16a34a', s: '#1e1b4b' };
-const VALUE_DISPLAY = { T: '10', J: 'J', Q: 'Q', K: 'K', A: 'A' };
+// Tier configs
+const TIERS = {
+    rookie:      { blinds: [5, 10],    minBuy: 200,   maxBuy: 1000  },
+    regular:     { blinds: [25, 50],   minBuy: 1000,  maxBuy: 5000  },
+    high_roller: { blinds: [100, 200], minBuy: 5000,  maxBuy: 10000 },
+};
 
-function Card({ card, faceDown = false, small = false }) {
-  const w = small ? 36 : 52;
-  const h = small ? 50 : 72;
+const MAX_SEATS = 6;
+const TURN_TIME = 30; // seconds
+const RAKE_PCT = 0.05;
+const RAKE_CAP = 250;
+const DISCONNECT_RESERVE = 60000; // 60 seconds
 
-  if (faceDown || !card) {
-    return (
-      <div style={{
-        width: w, height: h, borderRadius: 6,
-        background: 'linear-gradient(135deg, #c41e3a 0%, #8b1425 100%)',
-        border: '2px solid rgba(255,255,255,0.15)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: small ? 10 : 14, color: 'rgba(255,255,255,0.3)', fontWeight: 700,
-      }}>
-        OTJ
-      </div>
-    );
-  }
-
-  const val = VALUE_DISPLAY[card[0]] || card[0];
-  const suit = card[1];
-  const suitSym = SUIT_SYMBOLS[suit];
-  const color = SUIT_COLORS[suit];
-
-  return (
-    <div style={{
-      width: w, height: h, borderRadius: 6,
-      background: '#ffffff', border: '2px solid #374151',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      fontFamily: FONT, fontWeight: 800, color,
-      boxShadow: '0 3px 10px rgba(0,0,0,0.8)',
-      position: 'relative', userSelect: 'none',
-    }}>
-      <div style={{ position: 'absolute', top: 3, left: 5, fontSize: small ? 9 : 11, lineHeight: 1, fontWeight: 800 }}>{val}</div>
-      <div style={{ fontSize: small ? 14 : 20, lineHeight: 1 }}>{suitSym}</div>
-      <div style={{ position: 'absolute', bottom: 3, right: 5, fontSize: small ? 9 : 11, lineHeight: 1, fontWeight: 800, transform: 'rotate(180deg)' }}>{val}</div>
-    </div>
-  );
-}
-
-// ─── Seat Positions (6-max oval layout) ──────────────────────────────────────
-
-const SEAT_POSITIONS = [
-  { top: '75%', left: '50%' },
-  { top: '60%', left: '10%' },
-  { top: '20%', left: '10%' },
-  { top: '5%',  left: '50%' },
-  { top: '20%', left: '90%' },
-  { top: '60%', left: '90%' },
+// ── Poker Badges ─────────────────────────────────────────────────────────────
+const POT_BADGES = [
+    { id: "first_blood",  emoji: "🃏", name: "First Blood",  minPot: 1,      desc: "Win your first pot" },
+    { id: "high_roller",  emoji: "💰", name: "High Roller",  minPot: 1000,   desc: "Win a pot ≥ $1,000" },
+    { id: "big_stack",    emoji: "💎", name: "Big Stack",    minPot: 5000,   desc: "Win a pot ≥ $5,000" },
+    { id: "table_boss",   emoji: "👑", name: "Table Boss",   minPot: 10000,  desc: "Win a pot ≥ $10,000" },
+    { id: "whale",        emoji: "🔥", name: "Whale",        minPot: 50000,  desc: "Win a pot ≥ $50,000" },
+    { id: "otj_legend",   emoji: "🐳", name: "OTJ Legend",   minPot: 100000, desc: "Win a pot ≥ $100,000" },
 ];
 
-// ─── Seat Component ──────────────────────────────────────────────────────────
+class PokerRoom extends Room {
 
-function Seat({ seat, seatIndex, isCurrentTurn, isDealer, mySeat, phase, onSitDown, turnTimeLeft }) {
-  const isEmpty = !seat;
-  const isMe = seatIndex === mySeat;
-  const pos = SEAT_POSITIONS[seatIndex];
+    onCreate(options) {
+        this.tier = options.tier || "regular";
+        this.config = TIERS[this.tier] || TIERS.regular;
+        this.tableName = options.tableName || "OTJ Table";
+        this.isPrivate = options.isPrivate || false;
+        this.roomCode = options.roomCode || this.generateRoomCode();
 
-  if (isEmpty) {
-    return (
-      <div
-        onClick={() => onSitDown && onSitDown(seatIndex)}
-        style={{
-          position: 'absolute', top: pos.top, left: pos.left,
-          transform: 'translate(-50%, -50%)',
-          width: 70, height: 70, borderRadius: '50%',
-          background: 'rgba(255,255,255,0.02)', border: '2px dashed rgba(255,255,255,0.08)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: onSitDown ? 'pointer' : 'default',
-        }}
-      >
-        <span style={{ fontSize: 10, color: '#374151' }}>SIT</span>
-      </div>
-    );
-  }
+        // Make room discoverable and joinable
+        this.maxClients = MAX_SEATS + 10; // seats + spectators
+        this.setMetadata({
+            tier: this.tier,
+            roomCode: this.roomCode,
+            tableName: this.tableName,
+        });
 
-  const statusColors = {
-    active: 'rgba(34,197,94,0.15)',
-    allin: 'rgba(239,68,68,0.15)',
-    folded: 'rgba(255,255,255,0.02)',
-    disconnected: 'rgba(251,191,36,0.1)',
-    sitting_out: 'rgba(255,255,255,0.02)',
-  };
+        // Game state
+        this.seats = new Array(MAX_SEATS).fill(null);
+        this.spectators = new Map(); // sessionId -> { userId, username }
+        this.deck = [];
+        this.communityCards = [];
+        this.pot = 0;
+        this.sidePots = [];
+        this.phase = "waiting"; // waiting/preflop/flop/turn/river/showdown
+        this.dealerSeat = -1;
+        this.currentTurn = -1;
+        this.handNumber = 0;
+        this.minRaise = this.config.blinds[1]; // big blind
+        this.lastRaise = 0;
+        this.turnTimer = null;
+        this.chatLog = [];
+        this.rakeCollected = 0;
 
-  return (
-    <div style={{
-      position: 'absolute', top: pos.top, left: pos.left,
-      transform: 'translate(-50%, -50%)',
-      textAlign: 'center', zIndex: isCurrentTurn ? 5 : 2,
-    }}>
-      {isCurrentTurn && (
-        <>
-          <div style={{
-            position: 'absolute', top: -6, left: '50%', transform: 'translateX(-50%)',
-            width: 72, height: 72, borderRadius: '50%',
-            border: `3px solid ${turnTimeLeft != null && turnTimeLeft <= 5 ? '#ef4444' : '#fbbf24'}`,
-            boxShadow: `0 0 16px ${turnTimeLeft != null && turnTimeLeft <= 5 ? 'rgba(239,68,68,0.4)' : 'rgba(251,191,36,0.4)'}`,
-            animation: 'pulse 1.5s ease-in-out infinite',
-          }} />
-          {turnTimeLeft != null && (
-            <div style={{
-              position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
-              fontSize: 10, fontWeight: 700,
-              color: turnTimeLeft <= 5 ? '#ef4444' : '#fbbf24',
-              background: 'rgba(0,0,0,0.8)', padding: '1px 6px', borderRadius: 4,
-            }}>
-              {turnTimeLeft}s
-            </div>
-          )}
-        </>
-      )}
+        // Disconnect tracking
+        this.disconnectTimers = new Map(); // sessionId -> timer
 
-      <div style={{
-        position: 'relative',
-        opacity: seat.status === 'folded' ? 0.35 : 1,
-        transition: 'opacity 0.3s ease',
-      }}>
-        <AvatarMini config={seat.avatar?.config || {}} size={60} style={{
-          border: `2px solid ${isMe ? '#ef4444' : 'rgba(255,255,255,0.1)'}`,
-          background: statusColors[seat.status] || 'transparent',
-        }} />
-        {isDealer && (
-          <div style={{
-            position: 'absolute', top: -4, right: -4,
-            width: 20, height: 20, borderRadius: '50%',
-            background: '#fbbf24', border: '2px solid #0f0f1a',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 9, fontWeight: 800, color: '#000',
-          }}>D</div>
-        )}
-      </div>
+        // Message handlers
+        this.onMessage("sit_down", (client, data) => this.handleSitDown(client, data));
+        this.onMessage("stand_up", (client) => this.handleStandUp(client));
+        this.onMessage("fold", (client) => this.handleAction(client, "fold"));
+        this.onMessage("check", (client) => this.handleAction(client, "check"));
+        this.onMessage("call", (client) => this.handleAction(client, "call"));
+        this.onMessage("raise", (client, data) => this.handleAction(client, "raise", data.amount));
+        this.onMessage("all_in", (client) => this.handleAction(client, "all_in"));
+        this.onMessage("chat", (client, data) => this.handleChat(client, data));
+        this.onMessage("add_chips", (client, data) => this.handleAddChips(client, data));
 
-      <div style={{
-        fontSize: 9, fontWeight: 600, marginTop: 4,
-        color: isMe ? '#ef4444' : seat.status === 'folded' ? '#374151' : '#f1f5f9',
-        maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        {seat.username}{isMe ? ' (you)' : ''}
-      </div>
-
-      <div style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', marginTop: 1 }}>
-        ${seat.chips?.toLocaleString()}
-      </div>
-
-      {seat.lastAction && (
-        <div style={{
-          fontSize: 8, fontWeight: 700, color: '#0f0f1a', marginTop: 2,
-          padding: '2px 6px', borderRadius: 4, display: 'inline-block',
-          background: seat.lastAction === 'fold' ? '#6b7280'
-            : seat.lastAction === 'all_in' ? '#ef4444'
-            : seat.lastAction === 'raise' ? '#fbbf24'
-            : '#22c55e',
-          textTransform: 'uppercase',
-        }}>
-          {seat.lastAction === 'all_in' ? 'ALL IN' : seat.lastAction}
-        </div>
-      )}
-
-      {seat.holeCards && seat.holeCards.length === 2 && (
-        <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginTop: 4 }}>
-          <Card card={seat.holeCards[0]} small />
-          <Card card={seat.holeCards[1]} small />
-        </div>
-      )}
-      {(!seat.holeCards || seat.holeCards.length === 0) && seat.status === 'active' && phase !== 'waiting' && (
-        <div style={{ display: 'flex', gap: 2, justifyContent: 'center', marginTop: 4 }}>
-          <Card faceDown small />
-          <Card faceDown small />
-        </div>
-      )}
-
-      {seat.currentBet > 0 && (
-        <div style={{
-          position: 'absolute',
-          top: seatIndex <= 2 ? '110%' : '-20%',
-          left: '50%', transform: 'translateX(-50%)',
-          fontSize: 10, fontWeight: 700, color: '#fbbf24',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-          background: 'rgba(0,0,0,0.7)', padding: '2px 8px', borderRadius: 10,
-          border: '1px solid rgba(251,191,36,0.3)',
-          whiteSpace: 'nowrap',
-        }}>
-          ${seat.currentBet.toLocaleString()}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Betting Controls ────────────────────────────────────────────────────────
-
-function BettingControls({ gameState, onAction }) {
-  const [raiseAmount, setRaiseAmount] = useState(0);
-  const { seats, mySeat, currentTurn, phase, minRaise } = gameState;
-  const isMyTurn = mySeat !== null && mySeat !== undefined && currentTurn === mySeat;
-  const myPlayer = mySeat != null ? seats[mySeat] : null;
-
-  const highestBet = Math.max(0, ...seats.filter(Boolean).map(s => s.currentBet || 0));
-  const toCall = myPlayer ? highestBet - (myPlayer.currentBet || 0) : 0;
-  const canCheck = toCall === 0;
-  const myChips = myPlayer?.chips || 0;
-  const myCurrentBet = myPlayer?.currentBet || 0;
-  const minRaiseTotal = highestBet + (minRaise || 0);
-  const maxRaise = myChips + myCurrentBet;
-  const canRaise = maxRaise >= minRaiseTotal;
-
-  useEffect(() => {
-    if (isMyTurn && canRaise) {
-      setRaiseAmount(Math.min(minRaiseTotal, maxRaise));
-    }
-  }, [isMyTurn, minRaiseTotal, maxRaise, canRaise]);
-
-  if (!isMyTurn || !myPlayer || phase === 'waiting' || phase === 'showdown') return null;
-
-  const btnStyle = (bg, disabled = false) => ({
-    padding: '12px 16px', borderRadius: 8, border: 'none',
-    background: bg, color: '#fff', fontSize: 12, fontWeight: 700,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    fontFamily: FONT, opacity: disabled ? 0.4 : 1,
-    flex: 1, textTransform: 'uppercase',
-  });
-
-  const isMobile = typeof window !== 'undefined' &&
-    (window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 768);
-
-  if (isMobile) {
-    // ── Mobile: left side = raise slider, right side = action buttons ──
-    return (
-      <>
-        {/* Left side — raise slider (vertical) */}
-        {canRaise && (
-          <div style={{
-            position: 'fixed', left: 0, top: '30%', bottom: '30%',
-            width: 52, zIndex: 20,
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            justifyContent: 'center', gap: 6,
-            background: 'rgba(8,8,15,0.92)', backdropFilter: 'blur(8px)',
-            borderRight: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: '0 8px 8px 0', padding: '8px 4px',
-          }}>
-            <span style={{ fontSize: 9, color: '#fbbf24', fontWeight: 700, fontFamily: FONT }}>RAISE</span>
-            <input
-              type="range"
-              min={minRaiseTotal}
-              max={maxRaise}
-              step={gameState.blinds?.[1] || 10}
-              value={raiseAmount}
-              onChange={e => setRaiseAmount(Number(e.target.value))}
-              style={{
-                writingMode: 'vertical-lr', direction: 'rtl',
-                accentColor: '#fbbf24', height: 100, width: 28,
-              }}
-            />
-            <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', fontFamily: FONT }}>
-              ${raiseAmount.toLocaleString()}
-            </span>
-          </div>
-        )}
-
-        {/* Right side — action buttons stacked vertically */}
-        <div style={{
-          position: 'fixed', right: 0, top: '25%', bottom: '25%',
-          width: 68, zIndex: 20,
-          display: 'flex', flexDirection: 'column', gap: 6,
-          justifyContent: 'center', alignItems: 'stretch',
-          background: 'rgba(8,8,15,0.92)', backdropFilter: 'blur(8px)',
-          borderLeft: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '8px 0 0 8px', padding: '8px 6px',
-        }}>
-          <button onClick={() => onAction('fold')} style={{ ...btnStyle('#6b7280'), flex: 'none', fontSize: 11, padding: '10px 4px' }}>FOLD</button>
-          {canCheck ? (
-            <button onClick={() => onAction('check')} style={{ ...btnStyle('#22c55e'), flex: 'none', fontSize: 11, padding: '10px 4px' }}>CHECK</button>
-          ) : (
-            <button onClick={() => onAction('call')} style={{ ...btnStyle('#3b82f6'), flex: 'none', fontSize: 10, padding: '8px 4px' }}>
-              CALL{'
-'}${Math.min(toCall, myChips).toLocaleString()}
-            </button>
-          )}
-          {canRaise && (
-            <button onClick={() => onAction('raise', raiseAmount)} style={{ ...btnStyle('#fbbf24'), flex: 'none', fontSize: 10, padding: '8px 4px' }}>
-              RAISE{'
-'}${raiseAmount.toLocaleString()}
-            </button>
-          )}
-          <button onClick={() => onAction('all_in')} style={{ ...btnStyle('#ef4444'), flex: 'none', fontSize: 11, padding: '10px 4px' }}>ALL IN</button>
-        </div>
-      </>
-    );
-  }
-
-  // ── Desktop: bottom bar ──────────────────────────────────────────────────
-  return (
-    <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0,
-      background: 'rgba(8,8,15,0.95)', backdropFilter: 'blur(12px)',
-      borderTop: '1px solid rgba(255,255,255,0.08)',
-      padding: '12px 16px 20px', zIndex: 20,
-    }}>
-      {canRaise && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>RAISE</span>
-          <input
-            type="range"
-            min={minRaiseTotal}
-            max={maxRaise}
-            step={gameState.blinds?.[1] || 10}
-            value={raiseAmount}
-            onChange={e => setRaiseAmount(Number(e.target.value))}
-            style={{ flex: 1, accentColor: '#fbbf24' }}
-          />
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', minWidth: 60, textAlign: 'right' }}>
-            ${raiseAmount.toLocaleString()}
-          </span>
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button onClick={() => onAction('fold')} style={btnStyle('#6b7280')}>FOLD</button>
-        {canCheck ? (
-          <button onClick={() => onAction('check')} style={btnStyle('#22c55e')}>CHECK</button>
-        ) : (
-          <button onClick={() => onAction('call')} style={btnStyle('#3b82f6')}>
-            CALL ${Math.min(toCall, myChips).toLocaleString()}
-          </button>
-        )}
-        {canRaise && (
-          <button onClick={() => onAction('raise', raiseAmount)} style={btnStyle('#fbbf24')}>
-            RAISE ${raiseAmount.toLocaleString()}
-          </button>
-        )}
-        <button onClick={() => onAction('all_in')} style={btnStyle('#ef4444')}>ALL IN</button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Chat Panel ──────────────────────────────────────────────────────────────
-
-function ChatPanel({ messages, onSend }) {
-  const [input, setInput] = useState('');
-  const scrollRef = useRef(null);
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages.length]);
-
-  function send() {
-    if (!input.trim()) return;
-    onSend(input.trim());
-    setInput('');
-  }
-
-  return (
-    <div style={{
-      background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
-      borderRadius: 10, padding: 10, maxHeight: 160, display: 'flex', flexDirection: 'column',
-    }}>
-      <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', marginBottom: 8, fontSize: 10, lineHeight: 1.6 }}>
-        {messages.length === 0 && <div style={{ color: '#374151', textAlign: 'center', padding: 8 }}>No messages yet</div>}
-        {messages.map((m, i) => (
-          <div key={i} style={{ marginBottom: 1 }}>
-            {m.type === 'system' ? (
-              <span style={{ color: '#fbbf24', fontStyle: 'italic' }}>— {m.message}</span>
-            ) : (
-              <>
-                <span style={{ color: '#ef4444', fontWeight: 600 }}>{m.username}: </span>
-                <span style={{ color: '#94a3b8' }}>{m.message}</span>
-              </>
-            )}
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && send()}
-          placeholder="Type..."
-          style={{
-            flex: 1, padding: '6px 10px', borderRadius: 6,
-            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-            color: '#f1f5f9', fontSize: 10, fontFamily: FONT, outline: 'none',
-          }}
-        />
-        <button onClick={send} style={{
-          padding: '6px 12px', borderRadius: 6, border: 'none',
-          background: '#c41e3a', color: '#fff', fontSize: 10, fontWeight: 600,
-          cursor: 'pointer', fontFamily: FONT,
-        }}>SEND</button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Showdown Banner ─────────────────────────────────────────────────────────
-
-function ShowdownBanner({ results }) {
-  if (!results || results.length === 0) return null;
-  return (
-    <div style={{
-      position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-      zIndex: 30, background: 'rgba(0,0,0,0.92)', border: '2px solid #fbbf24',
-      borderRadius: 16, padding: '24px 32px', textAlign: 'center',
-      boxShadow: '0 0 40px rgba(251,191,36,0.3)',
-      animation: 'fadeIn 0.3s ease',
-    }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: '#fbbf24', marginBottom: 12 }}>🏆 SHOWDOWN</div>
-      {results.map((r, i) => (
-        <div key={i} style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#22c55e' }}>
-            {r.username} wins ${r.chipsWon?.toLocaleString()}
-          </div>
-          <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.handName}</div>
-          {r.holeCards && (
-            <div style={{ display: 'flex', gap: 3, justifyContent: 'center', marginTop: 4 }}>
-              {r.holeCards.map((c, j) => <Card key={j} card={c} small />)}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Main Poker Table ────────────────────────────────────────────────────────
-
-export default function PokerTable() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { roomId: roomIdFromUrl } = useParams();
-
-  // FIX #2: Read from location.state, fall back to sessionStorage for refresh survival
-  const stateFromNav = location.state || {};
-  const savedSession = (() => {
-    try { return JSON.parse(sessionStorage.getItem(SESSION_KEY) || '{}'); } catch { return {}; }
-  })();
-  const params = stateFromNav.tier ? stateFromNav : savedSession;
-  const { tier, buyIn, userId, username, avatarConfig, roomCode } = params;
-
-  const [gameState, setGameState] = useState(null);
-  const [chatMessages, setChatMessages] = useState([]);
-  const [connected, setConnected] = useState(false);
-  const [error, setError] = useState(null);
-  const [turnTimeLeft, setTurnTimeLeft] = useState(null);
-  const [showdownResults, setShowdownResults] = useState(null);
-  const roomRef = useRef(null);
-  const leaveCalledRef = useRef(false);
-  const errorTimerRef = useRef(null);
-
-  // Persist session params
-  useEffect(() => {
-    if (tier && buyIn && userId) {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify({ tier, buyIn, userId, username, avatarConfig, roomCode }));
-    }
-  }, [tier, buyIn, userId]);
-
-  // Connect to Colyseus
-  useEffect(() => {
-    if (!tier || !buyIn || !userId) {
-      navigate('/poker');
-      return;
+        console.log(`🃏 PokerRoom created: ${this.tableName} (${this.tier}) — code: ${this.roomCode}`);
     }
 
-    const client = new Client(COLYSEUS_URL);
-    let mounted = true;
+    generateRoomCode() {
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let code = "";
+        for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+        return code;
+    }
 
-    async function connect() {
-      try {
-        let room;
-        const joinOptions = { userId, username, avatar: { config: avatarConfig }, buyIn };
-
-        if (roomIdFromUrl) {
-          // Came from lobby — join the exact room that was created
-          room = await client.joinById(roomIdFromUrl, joinOptions);
-        } else if (roomCode) {
-          try {
-            const rooms = await client.getAvailableRooms('poker');
-            const target = rooms.find(r => r.metadata?.roomCode === roomCode);
-            if (target) {
-              room = await client.joinById(target.roomId, joinOptions);
-            } else {
-              if (mounted) setError(`Room ${roomCode} not found`);
-              return;
+    resetIdleTimer() {
+        if (this.idleTimer) clearTimeout(this.idleTimer);
+        this.idleTimer = setTimeout(() => {
+            const hasPlayers = this.seats.some(s => s !== null);
+            const hasClients = this.clients.length > 0;
+            if (!hasPlayers && !hasClients) {
+                console.log(`🃏 PokerRoom idle timeout: ${this.tableName}`);
+                this.disconnect();
             }
-          } catch {
-            if (mounted) setError(`Room ${roomCode} not found`);
+        }, 5 * 60 * 1000); // 5 minutes
+    }
+
+    // ── Player Join/Leave ───────────────────────────────────────────────────
+
+    onJoin(client, options) {
+        console.log(`  → ${options.username || client.sessionId} joined ${this.tableName}`);
+        // Cancel idle timer — someone is here
+        // Notify chat
+        setTimeout(() => this.systemMessage(`${options.username || "Player"} joined the table`), 100);
+        if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
+        
+        // Store user info on the client
+        client.userData = {
+            userId: options.userId || client.sessionId,
+            username: options.username || "Player",
+            avatar: options.avatar || { base: "rookie" },
+        };
+
+        // Add as spectator initially
+        this.spectators.set(client.sessionId, {
+            userId: client.userData.userId,
+            username: client.userData.username,
+        });
+
+        // Send full game state
+        client.send("game_state", this.getGameState(client));
+
+        // Broadcast updated spectator count
+        this.broadcastTableInfo();
+    }
+
+    onLeave(client, consented) {
+        const seat = this.findSeatBySession(client.sessionId);
+
+        if (seat !== null) {
+            if (consented) {
+                // Clean leave — return chips
+                this.playerStandUp(seat, client);
+            } else {
+                // Disconnect — start reserve timer
+                this.seats[seat].status = "disconnected";
+                this.broadcastState();
+
+                // Auto-fold if it's their turn
+                if (this.currentTurn === seat && this.phase !== "waiting" && this.phase !== "showdown") {
+                    this.executeAction(seat, "fold");
+                }
+
+                // Reserve seat for 60 seconds
+                const timer = setTimeout(() => {
+                    if (this.seats[seat] && this.seats[seat].sessionId === client.sessionId) {
+                        this.playerStandUp(seat);
+                        this.disconnectTimers.delete(client.sessionId);
+                    }
+                }, DISCONNECT_RESERVE);
+
+                this.disconnectTimers.set(client.sessionId, timer);
+            }
+        }
+
+        this.spectators.delete(client.sessionId);
+        this.broadcastTableInfo();
+
+        // If only 1 or 0 seated players remain mid-hand, reset to waiting
+        const seatedCount = this.seats.filter(s => s !== null).length;
+        if (seatedCount < 2 && this.phase !== 'waiting') {
+            this.clearTurnTimer();
+            this.phase = 'waiting';
+            this.communityCards = [];
+            this.pot = 0;
+            this.sidePots = [];
+            // Return pot chips to remaining player if any
+            const lastSeat = this.seats.findIndex(s => s !== null);
+            if (lastSeat !== -1 && this.pot > 0) {
+                this.seats[lastSeat].chips += this.pot;
+                this.pot = 0;
+            }
+            this.broadcastState();
+            this.systemMessage('Waiting for more players...');
+        }
+
+        // Restart idle timer if room is now empty
+        const hasClients = this.clients.length > 1;
+        if (!hasClients) this.resetIdleTimer();
+    }
+
+    // ── Sit Down / Stand Up ─────────────────────────────────────────────────
+
+    async handleSitDown(client, { seatIndex, buyIn }) {
+        if (seatIndex < 0 || seatIndex >= MAX_SEATS) return;
+        if (this.seats[seatIndex] !== null) {
+            client.send("error", { message: "Seat is taken" });
             return;
-          }
-        } else {
-          try {
-            const rooms = await client.getAvailableRooms('poker');
-            const openRoom = rooms.find(r => r.metadata?.tier === tier && r.clients < 6);
-            if (openRoom) {
-              room = await client.joinById(openRoom.roomId, joinOptions);
-            } else {
-              room = await client.create('poker', { ...joinOptions, tier });
-            }
-          } catch {
-            room = await client.create('poker', { ...joinOptions, tier });
-          }
         }
 
-        if (!mounted) { room.leave(); return; }
-        roomRef.current = room;
-        setConnected(true);
+        // Validate buy-in range
+        if (buyIn < this.config.minBuy || buyIn > this.config.maxBuy) {
+            client.send("error", { message: `Buy-in must be ${this.config.minBuy}-${this.config.maxBuy}` });
+            return;
+        }
 
-        let hasAutoSat = false;
-        room.onMessage('game_state', (state) => {
-          if (!mounted) return;
-          setGameState(state);
-          if (!hasAutoSat && (state.mySeat === null || state.mySeat === undefined)) {
-            const emptySeat = state.seats.findIndex(s => s === null);
-            if (emptySeat !== -1) {
-              room.send('sit_down', { seatIndex: emptySeat, buyIn });
-              hasAutoSat = true;
+        // Check if already seated
+        if (this.findSeatBySession(client.sessionId) !== null) {
+            client.send("error", { message: "Already seated" });
+            return;
+        }
+
+        // Deduct buy-in from Supabase bankroll before seating
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('bankroll')
+                .eq('user_id', client.userData.userId)
+                .single();
+
+            if (!profile || profile.bankroll < buyIn) {
+                client.send("error", { message: `Not enough OTJ Bucks (need ${buyIn}, have ${profile?.bankroll ?? 0})` });
+                return;
             }
-          }
+
+            const { error } = await supabase
+                .from('profiles')
+                .update({ bankroll: profile.bankroll - buyIn })
+                .eq('user_id', client.userData.userId);
+
+            if (error) throw error;
+
+            try {
+                await supabase.from('bucks_ledger').insert({
+                    user_id: client.userData.userId,
+                    type: 'poker_buyin',
+                    amount: -buyIn,
+                    balance_after: profile.bankroll - buyIn,
+                    note: `Poker buy-in (${this.tier} table — ${this.tableName})`,
+                });
+            } catch (_) {}
+
+        } catch (err) {
+            console.error('Sit down Supabase error:', err);
+            client.send("error", { message: "Failed to deduct bucks. Try again." });
+            return;
+        }
+
+        this.seats[seatIndex] = {
+            sessionId: client.sessionId,
+            userId: client.userData.userId,
+            username: client.userData.username,
+            avatar: client.userData.avatar,
+            chips: buyIn,
+            holeCards: [],
+            currentBet: 0,
+            totalBetThisHand: 0,
+            status: "sitting_out",
+            lastAction: null,
+            isDealer: false,
+        };
+
+        // Remove from spectators
+        this.spectators.delete(client.sessionId);
+
+        console.log(`  🪑 ${client.userData.username} sat at seat ${seatIndex} (${buyIn} chips deducted from bankroll)`);
+
+        this.broadcast("player_joined", {
+            seat: seatIndex,
+            username: client.userData.username,
+            avatar: client.userData.avatar,
+            chips: buyIn,
         });
 
-        room.onMessage('chat_message', (msg) => { if (mounted) setChatMessages(prev => [...prev.slice(-49), msg]); });
-        room.onMessage('turn_change', ({ timeLimit }) => { if (mounted) setTurnTimeLeft(timeLimit); });
-        room.onMessage('timer_warning', ({ secondsLeft }) => { if (mounted) setTurnTimeLeft(secondsLeft); });
-
-        room.onMessage('error', ({ message }) => {
-          if (!mounted) return;
-          setError(message);
-          if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-          errorTimerRef.current = setTimeout(() => { if (mounted) setError(null); }, 3000);
-        });
-
-        room.onMessage('showdown', (data) => {
-          if (!mounted) return;
-          setShowdownResults(data.results);
-          setTimeout(() => { if (mounted) setShowdownResults(null); }, 5000);
-        });
-
-        room.onMessage('pot_awarded', (data) => {
-          if (!mounted) return;
-          setShowdownResults([{ username: data.username, chipsWon: data.amount, handName: 'Everyone folded' }]);
-          setTimeout(() => { if (mounted) setShowdownResults(null); }, 3000);
-        });
-
-        room.onMessage('player_joined', ({ username }) => {
-          if (mounted) setChatMessages(prev => [...prev.slice(-49), { username: '🃏 OTJ', message: `${username} joined the table`, type: 'system', timestamp: Date.now() }]);
-        });
-        room.onMessage('player_left', ({ username }) => {
-          if (mounted) setChatMessages(prev => [...prev.slice(-49), { username: '🃏 OTJ', message: `${username} left the table`, type: 'system', timestamp: Date.now() }]);
-        });
-        ['table_info', 'new_hand', 'hole_cards', 'player_action',
-         'community_cards', 'flop', 'turn', 'river',
-         'chips_added', 'player_busted'].forEach(type => { room.onMessage(type, () => {}); });
-
-        room.onLeave((code) => {
-          if (!mounted) return;
-          setConnected(false);
-          roomRef.current = null;
-          if (code !== 1000 && !leaveCalledRef.current) setError('Disconnected from server');
-        });
-
-      } catch (err) {
-        console.error('Colyseus connection error:', err);
-        if (mounted) setError('Failed to connect to poker server');
-      }
+        this.broadcastState();
+        this.tryStartNewHand();
     }
 
-    connect();
-    return () => {
-      mounted = false;
-      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
-      if (roomRef.current) { try { roomRef.current.leave(); } catch {} roomRef.current = null; }
-    };
-  }, []);
+    handleStandUp(client) {
+        const seat = this.findSeatBySession(client.sessionId);
+        if (seat === null) return;
+        this.playerStandUp(seat, client);
+    }
 
-  function sendAction(action, amount) {
-    if (!roomRef.current) return;
-    if (action === 'raise') roomRef.current.send('raise', { amount });
-    else roomRef.current.send(action);
-  }
+    playerStandUp(seat, client = null) {
+        const player = this.seats[seat];
+        if (!player) return;
 
-  function sendChat(message) {
-    if (!roomRef.current) return;
-    roomRef.current.send('chat', { message });
-  }
+        const chips = player.chips;
+        const username = player.username;
 
-  // FIX #1: Server-only cashout. Frontend just disconnects and navigates.
-  function handleLeaveTable() {
-    leaveCalledRef.current = true;
-    if (roomRef.current) { try { roomRef.current.leave(true); } catch {} roomRef.current = null; }
-    sessionStorage.removeItem(SESSION_KEY);
-    navigate('/poker');
-  }
-
-  if (!connected && !error) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🃏</div>
-          <div style={{ fontSize: 11, color: '#4a5568', letterSpacing: '0.15em' }}>CONNECTING TO TABLE...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error && !gameState) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>⚠️</div>
-          <div style={{ fontSize: 13, color: '#ef4444', marginBottom: 16 }}>{error}</div>
-          <button onClick={() => navigate('/poker')} style={{
-            padding: '8px 20px', borderRadius: 8, border: '1px solid #ef4444',
-            background: 'transparent', color: '#ef4444', fontSize: 11,
-            cursor: 'pointer', fontFamily: FONT,
-          }}>BACK TO LOBBY</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!gameState) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
-        <div style={{ fontSize: 11, color: '#4a5568', letterSpacing: '0.15em' }}>LOADING TABLE...</div>
-      </div>
-    );
-  }
-
-  const { seats, pot, communityCards, phase, currentTurn, mySeat, blinds, handNumber, roomCode: code } = gameState;
-
-  return (
-    <div style={{ minHeight: '100vh', fontFamily: FONT, background: '#08080f', paddingBottom: 80 }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)',
-      }}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#f1f5f9' }}>🃏 {gameState.tableName || 'OTJ Poker'}</div>
-          <div style={{ fontSize: 9, color: '#4a5568' }}>
-            {gameState.tier?.toUpperCase()} · Blinds: ${blinds?.[0]}/${blinds?.[1]} · Hand #{handNumber} · Code: {code}
-          </div>
-        </div>
-        <button onClick={handleLeaveTable} style={{
-          padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)',
-          background: 'rgba(239,68,68,0.08)', color: '#ef4444',
-          fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: FONT,
-        }}>LEAVE TABLE</button>
-      </div>
-
-      {error && gameState && (
-        <div style={{
-          position: 'fixed', top: 60, left: '50%', transform: 'translateX(-50%)', zIndex: 50,
-          padding: '8px 20px', borderRadius: 8,
-          background: 'rgba(239,68,68,0.9)', color: '#fff',
-          fontSize: 11, fontWeight: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
-        }}>{error}</div>
-      )}
-
-      <ShowdownBanner results={showdownResults} />
-
-      <div style={{
-        position: 'relative', width: '100%', maxWidth: 700, margin: '20px auto',
-        height: 420, borderRadius: '50%',
-        background: 'radial-gradient(ellipse at center, rgba(34,87,60,0.3) 0%, rgba(15,15,26,0.8) 70%)',
-        border: '3px solid rgba(255,255,255,0.06)',
-        boxShadow: 'inset 0 0 60px rgba(0,0,0,0.5), 0 0 40px rgba(0,0,0,0.3)',
-      }}>
-        <div style={{
-          position: 'absolute', top: '42%', left: '50%', transform: 'translate(-50%, -50%)',
-          textAlign: 'center', zIndex: 3,
-        }}>
-          {pot > 0 && (
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#fbbf24', textShadow: '0 0 10px rgba(251,191,36,0.3)' }}>
-              💰 ${pot.toLocaleString()}
-            </div>
-          )}
-          <div style={{ fontSize: 9, color: '#4a5568', marginTop: 2, textTransform: 'uppercase' }}>
-            {phase === 'waiting' ? 'Waiting for players...' : phase}
-          </div>
-        </div>
-
-        {communityCards && communityCards.length > 0 && (
-          <div style={{
-            position: 'absolute', top: '52%', left: '50%', transform: 'translate(-50%, -50%)',
-            display: 'flex', gap: 4, zIndex: 3,
-          }}>
-            {communityCards.map((card, i) => <Card key={i} card={card} />)}
-          </div>
-        )}
-
-        {seats.map((seat, i) => (
-          <Seat
-            key={i} seat={seat} seatIndex={i}
-            isCurrentTurn={currentTurn === i}
-            isDealer={seat?.isDealer}
-            mySeat={mySeat} phase={phase}
-            turnTimeLeft={currentTurn === i ? turnTimeLeft : null}
-            onSitDown={mySeat == null ? (idx) => { roomRef.current?.send('sit_down', { seatIndex: idx, buyIn }); } : null}
-          />
-        ))}
-      </div>
-
-      <div style={{ maxWidth: 700, margin: '0 auto', padding: '0 16px' }}>
-        <ChatPanel messages={chatMessages} onSend={sendChat} />
-      </div>
-
-      {gameState && <BettingControls gameState={gameState} onAction={sendAction} />}
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: translateX(-50%) scale(1); }
-          50% { opacity: 0.6; transform: translateX(-50%) scale(1.05); }
+        // If in a hand and not folded, fold first
+        if (this.phase !== "waiting" && player.status === "active") {
+            this.executeAction(seat, "fold");
         }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-          to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+        // Return chips to bankroll via Supabase
+        this.returnChipsToBank(player.userId, chips, player.username);
+
+        this.seats[seat] = null;
+
+        console.log(`  🚶 ${username} left seat ${seat} (${chips} chips returned)`);
+        this.systemMessage(`${username} left the table`);
+
+        this.broadcast("player_left", { seat, username, chipsReturned: chips });
+
+        // Add back as spectator if client still connected
+        if (client) {
+            this.spectators.set(client.sessionId, {
+                userId: player.userId,
+                username,
+            });
         }
-      `}</style>
-    </div>
-  );
+
+        this.broadcastTableInfo();
+    }
+
+    // ── Hand Flow ───────────────────────────────────────────────────────────
+
+    tryStartNewHand() {
+        if (this.phase !== "waiting") return;
+
+        // Count players with chips who can play
+        const activePlayers = this.seats.filter(s => s && s.chips > 0);
+        if (activePlayers.length < 2) return;
+
+        this.startNewHand();
+    }
+
+    startNewHand() {
+        this.handNumber++;
+        this.communityCards = [];
+        this.pot = 0;
+        this.sidePots = [];
+        this.minRaise = this.config.blinds[1];
+        this.lastRaise = this.config.blinds[1];
+
+        // Reset all seated players
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i]) {
+                if (this.seats[i].chips > 0) {
+                    this.seats[i].status = "active";
+                } else {
+                    this.seats[i].status = "sitting_out";
+                }
+                this.seats[i].holeCards = [];
+                this.seats[i].currentBet = 0;
+                this.seats[i].totalBetThisHand = 0;
+                this.seats[i].lastAction = null;
+                this.seats[i].isDealer = false;
+            }
+        }
+
+        // Move dealer button
+        this.dealerSeat = this.nextActiveSeat(this.dealerSeat);
+        this.seats[this.dealerSeat].isDealer = true;
+
+        // Shuffle deck
+        this.deck = shuffleDeck(createDeck());
+
+        // Post blinds
+        const sbSeat = this.nextActiveSeat(this.dealerSeat);
+        const bbSeat = this.nextActiveSeat(sbSeat);
+        const [sb, bb] = this.config.blinds;
+
+        this.postBlind(sbSeat, sb);
+        this.postBlind(bbSeat, bb);
+
+        // Deal hole cards
+        const activePlayers = this.getActivePlayers();
+        for (const seat of activePlayers) {
+            this.seats[seat].holeCards = [this.deck.pop(), this.deck.pop()];
+        }
+
+        // Send hole cards privately to each player
+        for (const seat of activePlayers) {
+            const client = this.findClientBySeat(seat);
+            if (client) {
+                client.send("hole_cards", { cards: this.seats[seat].holeCards });
+            }
+        }
+
+        this.phase = "preflop";
+
+        // Action starts left of big blind (or SB in heads-up)
+        if (activePlayers.length === 2) {
+            this.currentTurn = sbSeat; // heads-up: SB acts first preflop
+        } else {
+            this.currentTurn = this.nextActiveSeat(bbSeat);
+        }
+
+        this.broadcast("new_hand", {
+            handNumber: this.handNumber,
+            dealerSeat: this.dealerSeat,
+            sbSeat,
+            bbSeat,
+            blinds: this.config.blinds,
+        });
+
+        this.broadcastState();
+        this.startTurnTimer();
+    }
+
+    postBlind(seat, amount) {
+        const player = this.seats[seat];
+        const actual = Math.min(amount, player.chips);
+        player.chips -= actual;
+        player.currentBet = actual;
+        player.totalBetThisHand = actual;
+        this.pot += actual;
+    }
+
+    // ── Actions ─────────────────────────────────────────────────────────────
+
+    handleAction(client, action, amount = 0) {
+        const seat = this.findSeatBySession(client.sessionId);
+        if (seat === null || seat !== this.currentTurn) {
+            client.send("error", { message: "Not your turn" });
+            return;
+        }
+        if (this.phase === "waiting" || this.phase === "showdown") return;
+
+        this.executeAction(seat, action, amount);
+    }
+
+    executeAction(seat, action, amount = 0) {
+        const player = this.seats[seat];
+        if (!player || player.status !== "active") return;
+
+        this.clearTurnTimer();
+
+        const highestBet = this.getHighestBet();
+        const toCall = highestBet - player.currentBet;
+
+        switch (action) {
+            case "fold":
+                player.status = "folded";
+                player.lastAction = "fold";
+                break;
+
+            case "check":
+                if (toCall > 0) return; // can't check if there's a bet
+                player.lastAction = "check";
+                break;
+
+            case "call":
+                const callAmount = Math.min(toCall, player.chips);
+                player.chips -= callAmount;
+                player.currentBet += callAmount;
+                player.totalBetThisHand += callAmount;
+                this.pot += callAmount;
+                player.lastAction = "call";
+                if (player.chips === 0) player.status = "allin";
+                break;
+
+            case "raise":
+                if (amount < this.minRaise + highestBet && amount < player.chips + player.currentBet) {
+                    return; // raise too small
+                }
+                const raiseTotal = Math.min(amount, player.chips + player.currentBet);
+                const raiseCost = raiseTotal - player.currentBet;
+                player.chips -= raiseCost;
+                this.pot += raiseCost;
+                this.lastRaise = raiseTotal - highestBet;
+                this.minRaise = this.lastRaise;
+                player.currentBet = raiseTotal;
+                player.totalBetThisHand += raiseCost;
+                player.lastAction = "raise";
+                if (player.chips === 0) player.status = "allin";
+                break;
+
+            case "all_in":
+                const allInAmount = player.chips;
+                player.chips = 0;
+                player.currentBet += allInAmount;
+                player.totalBetThisHand += allInAmount;
+                this.pot += allInAmount;
+                player.status = "allin";
+                player.lastAction = "all_in";
+                if (player.currentBet > highestBet) {
+                    this.lastRaise = player.currentBet - highestBet;
+                    this.minRaise = Math.max(this.minRaise, this.lastRaise);
+                }
+                break;
+        }
+
+        this.broadcast("player_action", {
+            seat,
+            action: player.lastAction,
+            amount: player.currentBet,
+            chips: player.chips,
+            pot: this.pot,
+        });
+
+        // Check if hand is over (everyone folded except one)
+        const remaining = this.getActivePlayers().filter(s => 
+            this.seats[s].status === "active" || this.seats[s].status === "allin"
+        );
+        
+        if (remaining.length === 1) {
+            this.awardPot(remaining[0]);
+            return;
+        }
+
+        // Check if betting round is complete
+        if (this.isBettingRoundComplete()) {
+            this.advancePhase();
+        } else {
+            const next = this.nextActiveSeatForBetting(seat);
+            if (next === -1) {
+                this.advancePhase();
+            } else {
+                this.currentTurn = next;
+                this.broadcastState();
+                this.startTurnTimer();
+            }
+        }
+    }
+
+    isBettingRoundComplete() {
+        const highestBet = this.getHighestBet();
+        const activePlayers = this.getActivePlayers().filter(s => this.seats[s].status === "active");
+
+        // All active (non-allin) players must have matched the highest bet and acted
+        for (const seat of activePlayers) {
+            const p = this.seats[seat];
+            if (p.currentBet < highestBet && p.chips > 0) return false;
+            if (p.lastAction === null) return false;
+        }
+        return true;
+    }
+
+    advancePhase() {
+        // Reset bets for new round
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i]) {
+                this.seats[i].currentBet = 0;
+                this.seats[i].lastAction = null;
+            }
+        }
+        this.minRaise = this.config.blinds[1];
+
+        // Check if only one non-allin player left (rest are allin)
+        const canAct = this.getActivePlayers().filter(s => this.seats[s].status === "active");
+        const allIn = this.getActivePlayers().filter(s => this.seats[s].status === "allin");
+
+        if (canAct.length <= 1) {
+            // Run out remaining community cards
+            while (this.communityCards.length < 5) {
+                this.deck.pop(); // burn
+                this.communityCards.push(this.deck.pop());
+            }
+            this.broadcast("community_cards", { cards: this.communityCards, phase: "runout" });
+            this.showdown();
+            return;
+        }
+
+        switch (this.phase) {
+            case "preflop":
+                this.phase = "flop";
+                this.deck.pop(); // burn
+                this.communityCards.push(this.deck.pop(), this.deck.pop(), this.deck.pop());
+                this.broadcast("flop", { cards: this.communityCards.slice(0, 3) });
+                break;
+            case "flop":
+                this.phase = "turn";
+                this.deck.pop(); // burn
+                this.communityCards.push(this.deck.pop());
+                this.broadcast("turn", { card: this.communityCards[3] });
+                break;
+            case "turn":
+                this.phase = "river";
+                this.deck.pop(); // burn
+                this.communityCards.push(this.deck.pop());
+                this.broadcast("river", { card: this.communityCards[4] });
+                break;
+            case "river":
+                this.showdown();
+                return;
+        }
+
+        // First to act after flop = first active player left of dealer
+        const nextSeat = this.nextActiveSeatForBetting(this.dealerSeat);
+        if (nextSeat === -1) {
+            // No one can act — run to showdown
+            while (this.communityCards.length < 5) {
+                this.deck.pop();
+                const c = this.deck.pop();
+                if (c) this.communityCards.push(c);
+            }
+            this.broadcast("community_cards", { cards: this.communityCards, phase: "runout" });
+            this.showdown();
+            return;
+        }
+        this.currentTurn = nextSeat;
+        this.broadcastState();
+        this.startTurnTimer();
+    }
+
+    // ── Showdown ────────────────────────────────────────────────────────────
+
+    showdown() {
+        this.phase = "showdown";
+        this.clearTurnTimer();
+
+        const inHand = this.getActivePlayers().filter(s =>
+            this.seats[s].status === "active" || this.seats[s].status === "allin"
+        );
+
+        // Calculate side pots
+        const pots = this.calculateSidePots(inHand);
+
+        const results = [];
+
+        for (const pot of pots) {
+            const eligible = pot.eligible.map(seat => ({
+                seatIndex: seat,
+                holeCards: this.seats[seat].holeCards,
+            }));
+
+            const winners = determineWinners(eligible, this.communityCards);
+            const winnerSeats = winners.filter(w => w.isWinner);
+            const share = Math.floor(pot.amount / winnerSeats.length);
+
+            for (const w of winnerSeats) {
+                this.seats[w.seatIndex].chips += share;
+                results.push({
+                    seat: w.seatIndex,
+                    username: this.seats[w.seatIndex].username,
+                    holeCards: this.seats[w.seatIndex].holeCards,
+                    handName: w.hand.name,
+                    handCards: w.hand.cards,
+                    chipsWon: share,
+                });
+            }
+        }
+
+        // Apply rake
+        const totalPot = pots.reduce((sum, p) => sum + p.amount, 0);
+        const rake = Math.min(Math.floor(totalPot * RAKE_PCT), RAKE_CAP);
+        this.rakeCollected += rake;
+
+        // Deduct rake from winner(s)
+        if (results.length > 0 && rake > 0) {
+            const rakePerWinner = Math.floor(rake / results.length);
+            for (const r of results) {
+                this.seats[r.seat].chips -= rakePerWinner;
+                r.chipsWon -= rakePerWinner;
+            }
+        }
+
+        // Broadcast showdown results (reveal hole cards)
+        this.broadcast("showdown", {
+            results,
+            communityCards: this.communityCards,
+            pot: totalPot,
+            rake,
+        });
+
+        // Log hand + update stats/badges for all players
+        console.log(`  🃏 Hand #${this.handNumber} — pot: ${totalPot}, rake: ${rake}, winner(s): ${results.map(r => r.username).join(', ')}`);
+
+        // Winners — update stats and check badges
+        for (const r of results) {
+            const player = this.seats[r.seat];
+            if (player) {
+                this.updatePokerStats(player.userId, player.username, r.chipsWon, totalPot, false);
+            }
+        }
+        // Losers — just increment hands_played
+        const winnerSeatsSet = new Set(results.map(r => r.seat));
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i] && !winnerSeatsSet.has(i) &&
+                (this.seats[i].status === "active" || this.seats[i].status === "allin" || this.seats[i].status === "folded")) {
+                this.updateHandsPlayed(this.seats[i].userId);
+            }
+        }
+
+        // Start next hand after delay
+        setTimeout(() => {
+            this.phase = "waiting";
+
+            // Remove players with 0 chips
+            for (let i = 0; i < MAX_SEATS; i++) {
+                if (this.seats[i] && this.seats[i].chips <= 0) {
+                    this.broadcast("player_busted", {
+                        seat: i,
+                        username: this.seats[i].username,
+                    });
+                    // Keep them seated but sitting_out — they can add chips
+                    this.seats[i].status = "sitting_out";
+                }
+            }
+
+            this.tryStartNewHand();
+        }, 4000); // 4 second pause between hands
+    }
+
+    calculateSidePots(inHand) {
+        // Get all-in amounts sorted
+        const bets = inHand.map(seat => ({
+            seat,
+            totalBet: this.seats[seat].totalBetThisHand,
+        })).sort((a, b) => a.totalBet - b.totalBet);
+
+        const pots = [];
+        let previousBet = 0;
+
+        for (let i = 0; i < bets.length; i++) {
+            const currentBet = bets[i].totalBet;
+            if (currentBet <= previousBet) continue;
+
+            const increment = currentBet - previousBet;
+            // Everyone who bet at least this much contributes
+            const eligible = bets.filter(b => b.totalBet >= currentBet).map(b => b.seat);
+            // Count all players who contributed to this level (including folded)
+            let potAmount = 0;
+            for (let s = 0; s < MAX_SEATS; s++) {
+                if (this.seats[s]) {
+                    const contributed = Math.min(this.seats[s].totalBetThisHand - previousBet, increment);
+                    if (contributed > 0) potAmount += contributed;
+                }
+            }
+
+            if (potAmount > 0) {
+                pots.push({ amount: potAmount, eligible });
+            }
+            previousBet = currentBet;
+        }
+
+        // If no side pots, just use main pot
+        if (pots.length === 0) {
+            pots.push({ amount: this.pot, eligible: inHand });
+        }
+
+        return pots;
+    }
+
+    awardPot(winningSeat) {
+        const player = this.seats[winningSeat];
+        const rake = Math.min(Math.floor(this.pot * RAKE_PCT), RAKE_CAP);
+        const winnings = this.pot - rake;
+        player.chips += winnings;
+        this.rakeCollected += rake;
+
+        this.broadcast("pot_awarded", {
+            seat: winningSeat,
+            username: player.username,
+            amount: winnings,
+            rake,
+            reason: "everyone_folded",
+        });
+
+        console.log(`  🃏 Hand #${this.handNumber} — ${player.username} wins ${winnings} (all folded), rake: ${rake}`);
+        this.systemMessage(`${player.username} wins $${winnings.toLocaleString()} — everyone folded`);
+
+        // Update poker stats + badges (folded = true = bluff win)
+        this.updatePokerStats(player.userId, player.username, winnings, this.pot, true);
+
+        // Update hands_played for all other seated players
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i] && this.seats[i].userId !== player.userId) {
+                this.updateHandsPlayed(this.seats[i].userId);
+            }
+        }
+
+        setTimeout(() => {
+            this.phase = "waiting";
+            this.tryStartNewHand();
+        }, 2000);
+    }
+
+    // ── Turn Timer ──────────────────────────────────────────────────────────
+
+    startTurnTimer() {
+        this.clearTurnTimer();
+
+        // Safety — if no valid turn, advance phase
+        if (this.currentTurn === -1 || !this.seats[this.currentTurn]) {
+            console.warn('startTurnTimer called with invalid seat, advancing phase');
+            this.advancePhase();
+            return;
+        }
+
+        let timeLeft = TURN_TIME;
+
+        this.broadcast("turn_change", {
+            seat: this.currentTurn,
+            timeLimit: TURN_TIME,
+        });
+
+        this.turnTimer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft <= 5) {
+                this.broadcast("timer_warning", { seat: this.currentTurn, secondsLeft: timeLeft });
+            }
+            if (timeLeft <= 0) {
+                this.clearTurnTimer();
+                // Auto-fold on timeout
+                this.executeAction(this.currentTurn, "fold");
+            }
+        }, 1000);
+    }
+
+    clearTurnTimer() {
+        if (this.turnTimer) {
+            clearInterval(this.turnTimer);
+            this.turnTimer = null;
+        }
+    }
+
+    // ── Chat ────────────────────────────────────────────────────────────────
+
+    handleChat(client, { message, type = "text" }) {
+        if (!message || message.length > 200) return;
+        
+        const username = client.userData?.username || "Player";
+        const chatMsg = {
+            username,
+            message: type === "emote" ? message : message.substring(0, 200),
+            type,
+            timestamp: Date.now(),
+        };
+
+        this.chatLog.push(chatMsg);
+        if (this.chatLog.length > 50) this.chatLog.shift();
+
+        this.broadcast("chat_message", chatMsg);
+    }
+
+    // ── Add Chips (between hands) ───────────────────────────────────────────
+
+    async handleAddChips(client, { amount }) {
+        const seat = this.findSeatBySession(client.sessionId);
+        if (seat === null) return;
+        
+        const player = this.seats[seat];
+        if (this.phase !== "waiting" && player.status !== "sitting_out") {
+            client.send("error", { message: "Can only add chips between hands" });
+            return;
+        }
+
+        if (player.chips + amount > this.config.maxBuy) {
+            client.send("error", { message: `Max buy-in is ${this.config.maxBuy}` });
+            return;
+        }
+
+        // Deduct from Supabase bankroll
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('bankroll')
+                .eq('user_id', player.userId)
+                .single();
+
+            if (!profile || profile.bankroll < amount) {
+                client.send("error", { message: "Not enough OTJ Bucks" });
+                return;
+            }
+
+            await supabase
+                .from('profiles')
+                .update({ bankroll: profile.bankroll - amount })
+                .eq('user_id', player.userId);
+
+            try {
+                await supabase.from('bucks_ledger').insert({
+                    user_id: player.userId,
+                    type: 'poker_addon',
+                    amount: -amount,
+                    balance_after: profile.bankroll - amount,
+                    note: `Poker add-on (${this.tier} table)`,
+                });
+            } catch (_) {}
+        } catch (err) {
+            console.error('Add chips Supabase error:', err);
+            client.send("error", { message: "Failed to deduct bucks" });
+            return;
+        }
+
+        player.chips += amount;
+        
+        this.broadcast("chips_added", { seat, amount, total: player.chips });
+        
+        // If they were sitting out with 0 chips, try starting
+        if (player.status === "sitting_out" && player.chips > 0) {
+            this.tryStartNewHand();
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    findSeatBySession(sessionId) {
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i] && this.seats[i].sessionId === sessionId) return i;
+        }
+        return null;
+    }
+
+    findClientBySeat(seat) {
+        const player = this.seats[seat];
+        if (!player) return null;
+        for (const client of this.clients) {
+            if (client.sessionId === player.sessionId) return client;
+        }
+        return null;
+    }
+
+    getActivePlayers() {
+        // Returns seat indices of players who are in the current hand
+        const seats = [];
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i] && (this.seats[i].status === "active" || this.seats[i].status === "allin")) {
+                seats.push(i);
+            }
+        }
+        return seats;
+    }
+
+    nextActiveSeat(fromSeat) {
+        // Find next occupied seat with chips (clockwise)
+        for (let i = 1; i <= MAX_SEATS; i++) {
+            const seat = (fromSeat + i) % MAX_SEATS;
+            if (this.seats[seat] && this.seats[seat].chips > 0 && this.seats[seat].status !== "sitting_out") {
+                return seat;
+            }
+        }
+        return fromSeat;
+    }
+
+    nextActiveSeatForBetting(fromSeat) {
+        // Find next seat that can still act (not folded, not allin)
+        for (let i = 1; i <= MAX_SEATS; i++) {
+            const seat = (fromSeat + i) % MAX_SEATS;
+            if (this.seats[seat] && this.seats[seat].status === "active") {
+                return seat;
+            }
+        }
+        return -1;
+    }
+
+    getHighestBet() {
+        let max = 0;
+        for (const s of this.seats) {
+            if (s && s.currentBet > max) max = s.currentBet;
+        }
+        return max;
+    }
+
+    systemMessage(text) {
+        const msg = { username: "🃏 OTJ", message: text, type: "system", timestamp: Date.now() };
+        this.chatLog.push(msg);
+        if (this.chatLog.length > 50) this.chatLog.shift();
+        this.broadcast("chat_message", msg);
+    }
+
+        // ── State Broadcasting ──────────────────────────────────────────────────
+
+    getGameState(forClient) {
+        const mySeat = this.findSeatBySession(forClient.sessionId);
+
+        return {
+            tableName: this.tableName,
+            tier: this.tier,
+            blinds: this.config.blinds,
+            roomCode: this.roomCode,
+            phase: this.phase,
+            pot: this.pot,
+            communityCards: this.communityCards,
+            dealerSeat: this.dealerSeat,
+            currentTurn: this.currentTurn,
+            handNumber: this.handNumber,
+            minRaise: this.minRaise,
+            seats: this.seats.map((s, i) => {
+                if (!s) return null;
+                return {
+                    username: s.username,
+                    avatar: s.avatar,
+                    chips: s.chips,
+                    currentBet: s.currentBet,
+                    status: s.status,
+                    lastAction: s.lastAction,
+                    isDealer: s.isDealer,
+                    // Only show hole cards to the player themselves
+                    holeCards: i === mySeat ? s.holeCards : (this.phase === "showdown" && (s.status === "active" || s.status === "allin") ? s.holeCards : []),
+                };
+            }),
+            spectatorCount: this.spectators.size,
+            mySeat,
+        };
+    }
+
+    broadcastState() {
+        for (const client of this.clients) {
+            client.send("game_state", this.getGameState(client));
+        }
+    }
+
+    broadcastTableInfo() {
+        this.broadcast("table_info", {
+            tableName: this.tableName,
+            tier: this.tier,
+            playerCount: this.seats.filter(s => s !== null).length,
+            spectatorCount: this.spectators.size,
+            roomCode: this.roomCode,
+        });
+    }
+
+    // ── Bankroll Integration ────────────────────────────────────────────────
+
+    async returnChipsToBank(userId, chips, username) {
+        if (!userId || chips <= 0) return;
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('bankroll')
+                .eq('user_id', userId)
+                .single();
+
+            if (profile) {
+                const newBankroll = (profile.bankroll || 0) + chips;
+                await supabase
+                    .from('profiles')
+                    .update({ bankroll: newBankroll })
+                    .eq('user_id', userId);
+
+                try {
+                    await supabase.from('bucks_ledger').insert({
+                        user_id: userId,
+                        type: 'poker_cashout',
+                        amount: chips,
+                        balance_after: newBankroll,
+                        note: `Poker cashout from ${this.tier} table`,
+                    });
+                } catch (_) {}
+
+                console.log(`  💰 Returned ${chips} to ${username}'s bankroll (new: ${newBankroll})`);
+            }
+        } catch (err) {
+            console.error(`  ❌ Failed to return ${chips} to ${username}:`, err.message);
+        }
+    }
+
+    async updatePokerStats(userId, username, chipsWon, potSize, folded = false) {
+        if (!userId || chipsWon <= 0) return;
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('poker_stats, poker_badges')
+                .eq('user_id', userId)
+                .single();
+
+            if (!profile) return;
+
+            // Update poker stats
+            const stats = profile.poker_stats || {};
+            stats.hands_won      = (stats.hands_won      || 0) + 1;
+            stats.hands_played   = (stats.hands_played   || 0) + 1;
+            stats.total_won      = (stats.total_won      || 0) + chipsWon;
+            stats.biggest_pot    = Math.max(stats.biggest_pot || 0, potSize);
+            stats.bluffs_won     = folded ? (stats.bluffs_won || 0) + 1 : (stats.bluffs_won || 0);
+
+            // Check for new badges
+            const currentBadges = profile.poker_badges || [];
+            const badgeIds = currentBadges.map(b => b.id);
+            const newBadges = [];
+
+            for (const badge of POT_BADGES) {
+                if (!badgeIds.includes(badge.id) && potSize >= badge.minPot) {
+                    newBadges.push({ ...badge, earned_at: new Date().toISOString() });
+                    console.log(`  🏅 ${username} earned badge: ${badge.emoji} ${badge.name}`);
+                }
+            }
+
+            // Bluff master badge — win 3 hands where everyone folded
+            if (!badgeIds.includes("bluff_master") && (stats.bluffs_won || 0) >= 3) {
+                newBadges.push({ id: "bluff_master", emoji: "🎯", name: "Bluff Master", desc: "Win 3 hands where everyone folded", earned_at: new Date().toISOString() });
+            }
+
+            const updatedBadges = [...currentBadges, ...newBadges];
+
+            await supabase
+                .from('profiles')
+                .update({ poker_stats: stats, poker_badges: updatedBadges })
+                .eq('user_id', userId);
+
+            // Broadcast new badges to the table
+            if (newBadges.length > 0) {
+                this.broadcast("badge_earned", {
+                    username,
+                    badges: newBadges,
+                });
+            }
+
+        } catch (err) {
+            console.error('updatePokerStats error:', err.message);
+        }
+    }
+
+    async updateHandsPlayed(userId) {
+        // Called for losers — just increment hands_played
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('poker_stats')
+                .eq('user_id', userId)
+                .single();
+            if (!profile) return;
+            const stats = profile.poker_stats || {};
+            stats.hands_played = (stats.hands_played || 0) + 1;
+            await supabase.from('profiles').update({ poker_stats: stats }).eq('user_id', userId);
+        } catch (_) {}
+    }
+
+    onDispose() {
+        this.clearTurnTimer();
+        for (const timer of this.disconnectTimers.values()) {
+            clearTimeout(timer);
+        }
+        // Return chips to all remaining seated players
+        for (let i = 0; i < MAX_SEATS; i++) {
+            if (this.seats[i] && this.seats[i].chips > 0) {
+                this.returnChipsToBank(this.seats[i].userId, this.seats[i].chips, this.seats[i].username);
+            }
+        }
+        console.log(`🃏 PokerRoom disposed: ${this.tableName}`);
+    }
 }
+
+module.exports = { PokerRoom };

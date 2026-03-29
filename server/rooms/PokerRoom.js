@@ -666,6 +666,8 @@ class PokerRoom extends Room {
                     });
                     // Keep them seated but sitting_out — they can add chips
                     this.seats[i].status = "sitting_out";
+                    // Bankroll floor — if player has less than 1000 total, top them up
+                    this.applyBankrollFloor(this.seats[i].userId, this.seats[i].username);
                 }
             }
 

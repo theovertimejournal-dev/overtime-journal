@@ -5,7 +5,8 @@ class ArcadeRoom extends Room {
   onCreate(options) {
     this.gameType    = options.gameType || "nba_jam";
     this.maxClients  = 2;
-    this.autoDispose = true;
+    this.autoDispose = false; // Keep room alive for reconnection
+    this.setSeatReservationTime(30); // 30s reconnection window
 
     this.setState({
       gameType:  this.gameType,
@@ -179,26 +180,56 @@ class ArcadeRoom extends Room {
     }
   }
 
-  onLeave(client, consented) {
+  async onLeave(client, consented) {
     const player = this.state.players[client.sessionId];
     if (!player) return;
 
     console.log(`[${this.gameType}] ${player.username} left (consented: ${consented})`);
 
-    this.broadcast("opponent_left", { slot: player.slot, username: player.username });
-
-    if (this.state.status === "playing") {
-      const winnerSlot = player.slot === "p1" ? "p2" : "p1";
-      this.state.status = "finished";
-      this.state.winner = winnerSlot;
-      this.broadcast("game_over", {
-        winner: winnerSlot,
-        scores: this.state.scores,
-        reason: "opponent_disconnected",
+    if (consented) {
+      // Intentional leave — end game immediately
+      if (this.state.status === "playing") {
+        const winnerSlot = player.slot === "p1" ? "p2" : "p1";
+        this.state.status = "finished";
+        this.state.winner = winnerSlot;
+        this.broadcast("game_over", {
+          winner: winnerSlot,
+          scores: this.state.scores,
+          reason: "opponent_disconnected",
+        });
+      }
+      this.broadcast("opponent_left", { slot: player.slot, username: player.username });
+      delete this.state.players[client.sessionId];
+    } else {
+      // Accidental disconnect — pause game and allow 30s reconnection
+      this.broadcast("opponent_disconnected", {
+        slot: player.slot,
+        username: player.username,
+        reconnectWindow: 30,
       });
-    }
 
-    delete this.state.players[client.sessionId];
+      try {
+        await this.allowReconnection(client, 30);
+        // Reconnected successfully
+        console.log(`[${this.gameType}] ${player.username} reconnected`);
+        this.broadcast("opponent_reconnected", { slot: player.slot, username: player.username });
+      } catch (e) {
+        // Reconnection window expired
+        console.log(`[${this.gameType}] ${player.username} failed to reconnect`);
+        if (this.state.status === "playing") {
+          const winnerSlot = player.slot === "p1" ? "p2" : "p1";
+          this.state.status = "finished";
+          this.state.winner = winnerSlot;
+          this.broadcast("game_over", {
+            winner: winnerSlot,
+            scores: this.state.scores,
+            reason: "opponent_disconnected",
+          });
+        }
+        this.broadcast("opponent_left", { slot: player.slot, username: player.username });
+        delete this.state.players[client.sessionId];
+      }
+    }
   }
 
   onDispose() {

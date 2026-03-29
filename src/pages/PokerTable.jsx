@@ -249,6 +249,75 @@ function BettingControls({ gameState, onAction }) {
     flex: 1, textTransform: 'uppercase',
   });
 
+  const isMobile = typeof window !== 'undefined' &&
+    (window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 768);
+
+  if (isMobile) {
+    // ── Mobile: left side = raise slider, right side = action buttons ──
+    return (
+      <>
+        {/* Left side — raise slider (vertical) */}
+        {canRaise && (
+          <div style={{
+            position: 'fixed', left: 0, top: '30%', bottom: '30%',
+            width: 52, zIndex: 20,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: 6,
+            background: 'rgba(8,8,15,0.92)', backdropFilter: 'blur(8px)',
+            borderRight: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '0 8px 8px 0', padding: '8px 4px',
+          }}>
+            <span style={{ fontSize: 9, color: '#fbbf24', fontWeight: 700, fontFamily: FONT }}>RAISE</span>
+            <input
+              type="range"
+              min={minRaiseTotal}
+              max={maxRaise}
+              step={gameState.blinds?.[1] || 10}
+              value={raiseAmount}
+              onChange={e => setRaiseAmount(Number(e.target.value))}
+              style={{
+                writingMode: 'vertical-lr', direction: 'rtl',
+                accentColor: '#fbbf24', height: 100, width: 28,
+              }}
+            />
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#fbbf24', fontFamily: FONT }}>
+              ${raiseAmount.toLocaleString()}
+            </span>
+          </div>
+        )}
+
+        {/* Right side — action buttons stacked vertically */}
+        <div style={{
+          position: 'fixed', right: 0, top: '25%', bottom: '25%',
+          width: 68, zIndex: 20,
+          display: 'flex', flexDirection: 'column', gap: 6,
+          justifyContent: 'center', alignItems: 'stretch',
+          background: 'rgba(8,8,15,0.92)', backdropFilter: 'blur(8px)',
+          borderLeft: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '8px 0 0 8px', padding: '8px 6px',
+        }}>
+          <button onClick={() => onAction('fold')} style={{ ...btnStyle('#6b7280'), flex: 'none', fontSize: 11, padding: '10px 4px' }}>FOLD</button>
+          {canCheck ? (
+            <button onClick={() => onAction('check')} style={{ ...btnStyle('#22c55e'), flex: 'none', fontSize: 11, padding: '10px 4px' }}>CHECK</button>
+          ) : (
+            <button onClick={() => onAction('call')} style={{ ...btnStyle('#3b82f6'), flex: 'none', fontSize: 10, padding: '8px 4px' }}>
+              CALL{'
+'}${Math.min(toCall, myChips).toLocaleString()}
+            </button>
+          )}
+          {canRaise && (
+            <button onClick={() => onAction('raise', raiseAmount)} style={{ ...btnStyle('#fbbf24'), flex: 'none', fontSize: 10, padding: '8px 4px' }}>
+              RAISE{'
+'}${raiseAmount.toLocaleString()}
+            </button>
+          )}
+          <button onClick={() => onAction('all_in')} style={{ ...btnStyle('#ef4444'), flex: 'none', fontSize: 11, padding: '10px 4px' }}>ALL IN</button>
+        </div>
+      </>
+    );
+  }
+
+  // ── Desktop: bottom bar ──────────────────────────────────────────────────
   return (
     <div style={{
       position: 'fixed', bottom: 0, left: 0, right: 0,

@@ -1361,6 +1361,85 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             "strength": "MODERATE",
             "impact": 0,  # informational — doesn't affect spread score
         })
+    # ── CHEAT SHEET SIGNALS (from 1,043 game analysis) ──────────────────────
+
+    # 1. SAC 0-7 on road vs tanks — specific fade rule
+    if away.get("team") == "SAC" and h_tier == "TANK":
+        impact = 2.0
+        score += impact  # boost home (fade SAC road)
+        signals.append({
+            "type": "CHEAT_SHEET",
+            "detail": (
+                f"SAC is 0-7 on road vs tank teams this season — "
+                f"data-driven fade. Road Sacramento vs any bad team = avoid."
+            ),
+            "favors": home["team"],
+            "strength": "MODERATE",
+            "impact": impact,
+        })
+        print(f"  📋 CHEAT SHEET: SAC 0-7 road vs tanks — fading SAC +{impact}", file=sys.stderr)
+
+    # 2. AVERAGE teams IMPROVE on road B2B (51.7% → 64.2%)
+    # Counter-intuitive but data-backed — average teams play with more urgency when fatigued
+    if away.get("b2b") and a_tier in ("GOOD", "MID") and not home.get("b2b"):
+        impact = 2.0
+        score -= impact  # boost away (the B2B average team)
+        signals.append({
+            "type": "CHEAT_SHEET",
+            "detail": (
+                f"{away['team']} is AVERAGE tier on road B2B — data shows average teams "
+                f"actually improve on B2Bs (51.7% → 64.2% road win rate). "
+                f"These teams play with more urgency when fatigued."
+            ),
+            "favors": away["team"],
+            "strength": "MODERATE",
+            "impact": impact,
+        })
+        print(f"  📋 CHEAT SHEET: {away['team']} AVERAGE road B2B boost -{impact}", file=sys.stderr)
+
+    elif home.get("b2b") and h_tier in ("GOOD", "MID") and not away.get("b2b"):
+        impact = 1.5  # smaller boost for home B2B (no travel tax)
+        score += impact
+        signals.append({
+            "type": "CHEAT_SHEET",
+            "detail": (
+                f"{home['team']} is AVERAGE tier on home B2B — average teams "
+                f"show improved urgency on B2Bs. Home court offsets travel tax."
+            ),
+            "favors": home["team"],
+            "strength": "MODERATE",
+            "impact": impact,
+        })
+        print(f"  📋 CHEAT SHEET: {home['team']} AVERAGE home B2B boost +{impact}", file=sys.stderr)
+
+    # 3. TANK BOWL MOMENTUM — in tank vs tank, better L10 form wins 62-78%
+    if h_tier == "TANK" and a_tier == "TANK":
+        h_l5 = home.get("last5", "")
+        a_l5 = away.get("last5", "")
+        # Count wins in last 5 from string like "W-L-W-W-L"
+        h_wins = h_l5.count("W") if h_l5 else 0
+        a_wins = a_l5.count("W") if a_l5 else 0
+        win_diff = h_wins - a_wins
+
+        if abs(win_diff) >= 2:  # meaningful L5 gap
+            momentum_team = home["team"] if win_diff > 0 else away["team"]
+            impact = min(abs(win_diff) * 1.0, 3.0)
+            score += impact if win_diff > 0 else -impact
+            signals.append({
+                "type": "CHEAT_SHEET",
+                "detail": (
+                    f"TANK BOWL: {home['team']} {h_wins}/5 vs {away['team']} {a_wins}/5 L5 — "
+                    f"momentum favors {momentum_team}. In tank vs tank, "
+                    f"better L10 form wins 62-78% of the time."
+                ),
+                "favors": momentum_team,
+                "strength": "MODERATE",
+                "impact": round(impact, 1),
+            })
+            print(f"  📋 TANK BOWL: {momentum_team} momentum edge +{impact}", file=sys.stderr)
+
+    # ── End Cheat Sheet Signals ───────────────────────────────────────────────
+
     # ── End Tier Matchup Signals ─────────────────────────────────────────────
 
     # ── Form Momentum Signals ─────────────────────────────────────────────

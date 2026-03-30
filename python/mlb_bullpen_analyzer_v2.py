@@ -42,6 +42,7 @@ warnings.filterwarnings("ignore")
 LOOKBACK_DAYS = 7
 FATIGUE_DAYS_THRESHOLD = 3
 HIGH_LEVERAGE_IP_THRESHOLD = 2.0
+MIN_RELIABLE_IP = 5.0   # Minimum IP before current ERA is trusted — below this, use 2025 fallback
 MLB_STATS_API = "https://statsapi.mlb.com/api/v1"
 
 PARK_FACTORS = {
@@ -280,6 +281,16 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
             "prior_whip":  prior.get("prior_whip"),
             "prior_k9":    prior.get("prior_k9"),
             "prior_ip":    prior.get("prior_ip"),
+            # Display ERA — use prior season if current IP is below threshold
+            "display_era": (
+                prior.get("prior_era") if tip2 < MIN_RELIABLE_IP and prior.get("prior_era")
+                else round(ter/tip2*9,2) if tip2 > 0 else None
+            ),
+            "display_era_source": (
+                "2025" if tip2 < MIN_RELIABLE_IP and prior.get("prior_era")
+                else "2026" if tip2 > 0 else None
+            ),
+            "small_sample": tip2 < MIN_RELIABLE_IP,
         })
 
     fo = {"HIGH":0,"MODERATE":1,"FRESH":2}
@@ -293,9 +304,14 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
     if tip < 5:  # Less than 5 IP this season — get last year's data
         prior = get_prior_season_bullpen_era(team_id)
 
+    # Team-level display ERA — use prior season if current IP is too small
+    display_bera  = bera  if tip >= MIN_RELIABLE_IP * 3 else (prior.get("prior_era")  or bera)
+    display_bwhip = bwhip if tip >= MIN_RELIABLE_IP * 3 else (prior.get("prior_whip") or bwhip)
+    team_era_source = "2026" if tip >= MIN_RELIABLE_IP * 3 else ("2025" if prior.get("prior_era") else "2026")
+
     return {
         "team":team_abbrev,"status":"OK","games_analyzed":len(recent),
-        "bullpen_era":bera,"bullpen_whip":bwhip,"bullpen_k_per_9":bk9,
+        "bullpen_era":display_bera,"bullpen_whip":display_bwhip,"bullpen_k_per_9":bk9,
         "bullpen_bb_per_9":bbb9,"bullpen_hr_per_9":bhr9,
         "bullpen_pitches_7d":bt["pitches"],"bullpen_ip_7d":round(bt["ip"],1),
         "fatigue_score":fs,"reliever_count":len(reports),"high_fatigue_count":hc,
@@ -526,8 +542,9 @@ def calculate_full_edge(game, abp, hbp, apyth, hpyth, park, atto, htto, alr, hlr
     # O/U
     if ae and he:
         adj = ((ae+he)/2)*(pf/100)
-        if adj>=4.5: sig("OVER_LEAN",f"Park-adj combined pen ERA {adj:.2f}","OVER","STRONG" if adj>=5.5 else "MODERATE")
-        elif adj<=2.5: sig("UNDER_LEAN",f"Park-adj combined pen ERA {adj:.2f}","UNDER","STRONG" if adj<=1.8 else "MODERATE")
+        era_note = " (2025 ERA — early season fallback)" if abp.get("small_sample") or hbp.get("small_sample") else ""
+        if adj>=4.5: sig("OVER_LEAN",f"Park-adj combined pen ERA {adj:.2f}{era_note}","OVER","STRONG" if adj>=5.5 else "MODERATE")
+        elif adj<=2.5: sig("UNDER_LEAN",f"Park-adj combined pen ERA {adj:.2f}{era_note}","UNDER","STRONG" if adj<=1.8 else "MODERATE")
 
     lean=None; conf="LOW"
     if scores:
@@ -599,7 +616,7 @@ def print_game(game,abp,hbp,apyth,hpyth,park,atto,htto,alr,hlr,edge):
             rr = []
             for r in bp["relievers"][:6]:
                 ic = {"HIGH":"🔴","MODERATE":"🟡","FRESH":"🟢"}.get(r["fatigue"],"⚪")
-                rr.append([f"{ic} {r['name']}({r['hand']})",r["appearances_7d"],r["days_pitched_last_5"],r["pitches_last_3d"],f"{r['ip_last_2d']:.1f}",r["days_rest"],r["era_7d"],r["k9_7d"]])
+                rr.append([f"{ic} {r['name']}({r['hand']})",r["appearances_7d"],r["days_pitched_last_5"],r["pitches_last_3d"],f"{r['ip_last_2d']:.1f}",r["days_rest"],r.get("display_era", r["era_7d"]),r["k9_7d"]])
             print(tabulate(rr,headers=["Name","Apps","D(5)","P(3d)","IP(2d)","Rest","ERA","K/9"],tablefmt="rounded_grid"))
 
     if edge["signals"]:

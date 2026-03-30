@@ -1605,11 +1605,14 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
                 # ACTIVE — ML prediction affects edge score
                 score += ml_impact if ml_favors_home else -ml_impact
                 
+                # Fix: show win prob from the favored team's perspective, not always "home"
+                favored_win_prob = home_win_prob if ml_favors_home else (1 - home_win_prob)
+                venue_label = "home" if ml_favors_home else "road"
                 signals.append({
                     "type": "ML_PREDICTION",
                     "detail": (
                         f"Gradient boost model: {ml_team} "
-                        f"({home_win_prob:.0%} home win prob, "
+                        f"({favored_win_prob:.0%} {venue_label} win prob, "
                         f"predicted margin {ml_margin_pred:+.1f})"
                     ),
                     "favors": ml_team,

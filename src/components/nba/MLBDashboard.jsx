@@ -90,10 +90,13 @@ function RelieverTable({ relievers, team }) {
           <span style={{ color: "#e2e8f0", flex: 1 }}>{r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span></span>
           <span style={{ color: "#6b7280" }}>{r.pitches_last_3d}p/3d</span>
           <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rst</span>
-          {/* ERA: current if enough IP, else prior_era from DB, else static table */}
-          {(r.ip_last_3d || 0) >= 1 ? (
-            <span style={{ color: r.era_7d > 4.5 ? "#ef4444" : "#94a3b8" }}>
-              {fmt(r.era_7d)} ERA
+          {/* ERA: use display_era from backend (already handles fallback logic) */}
+          {r.display_era != null ? (
+            <span style={{ color: r.display_era > 4.5 ? "#ef4444" : r.display_era < 3.0 ? "#22c55e" : "#94a3b8" }}>
+              {fmt(r.display_era)} ERA
+              {r.display_era_source === "2025" && (
+                <span style={{ fontSize: 9, color: "#4a5568", marginLeft: 2 }}>'25</span>
+              )}
             </span>
           ) : (r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era) != null ? (
             <span style={{ color: "#4a5568" }} title="2025 season ERA">

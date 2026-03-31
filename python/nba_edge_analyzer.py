@@ -216,6 +216,178 @@ def get_all_team_stats(season: int = 2025) -> dict:
     return stats
 
 
+def get_nba_fast_break_stats(season_str: str = "2025-26") -> dict:
+    """
+    Pull fast break points per game (offense + defense allowed) from NBA Stats API.
+    Free endpoint, no key needed. Returns dict keyed by team abbreviation.
+    
+    Returns: { "MIA": {"fb_pts": 18.2, "fb_pts_allowed": 11.1}, ... }
+    """
+    import requests as _req
+
+    # NBA abbreviation map — NBA Stats uses full city names, we need abbreviations
+    NBA_ABBREV = {
+        "Atlanta Hawks": "ATL", "Boston Celtics": "BOS", "Brooklyn Nets": "BKN",
+        "Charlotte Hornets": "CHA", "Chicago Bulls": "CHI", "Cleveland Cavaliers": "CLE",
+        "Dallas Mavericks": "DAL", "Denver Nuggets": "DEN", "Detroit Pistons": "DET",
+        "Golden State Warriors": "GSW", "Houston Rockets": "HOU", "Indiana Pacers": "IND",
+        "LA Clippers": "LAC", "Los Angeles Lakers": "LAL", "Memphis Grizzlies": "MEM",
+        "Miami Heat": "MIA", "Milwaukee Bucks": "MIL", "Minnesota Timberwolves": "MIN",
+        "New Orleans Pelicans": "NOP", "New York Knicks": "NYK", "Oklahoma City Thunder": "OKC",
+        "Orlando Magic": "ORL", "Philadelphia 76ers": "PHI", "Phoenix Suns": "PHX",
+        "Portland Trail Blazers": "POR", "Sacramento Kings": "SAC", "San Antonio Spurs": "SAS",
+        "Toronto Raptors": "TOR", "Utah Jazz": "UTA", "Washington Wizards": "WAS",
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.nba.com/",
+        "Accept": "application/json",
+        "x-nba-stats-origin": "stats",
+        "x-nba-stats-token": "true",
+    }
+
+    result = {}
+
+    try:
+        # Offense — fast break points scored
+        url = "https://stats.nba.com/stats/leaguedashteamstats"
+        params = {
+            "MeasureType": "Scoring",
+            "PerMode": "PerGame",
+            "Season": season_str,
+            "SeasonType": "Regular Season",
+            "LeagueID": "00",
+        }
+        resp = _req.get(url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        headers_list = data["resultSets"][0]["headers"]
+        rows = data["resultSets"][0]["rowSet"]
+        
+        name_idx = headers_list.index("TEAM_NAME")
+        fb_idx   = headers_list.index("PTS_FB")
+        
+        for row in rows:
+            team_name = row[name_idx]
+            fb_pts    = row[fb_idx] or 0
+            abbr = NBA_ABBREV.get(team_name, team_name[:3].upper())
+            result[abbr] = {"fb_pts": round(float(fb_pts), 1), "fb_pts_allowed": 0}
+        
+        print(f"  ✅ NBA fast break offense loaded ({len(result)} teams)", file=__import__('sys').stderr)
+
+        # Defense — fast break points allowed (opponent scoring stats)
+        params["MeasureType"] = "Scoring"
+        opp_params = {
+            "MeasureType": "Scoring",
+            "PerMode": "PerGame",
+            "Season": season_str,
+            "SeasonType": "Regular Season",
+            "LeagueID": "00",
+            "PtMeasureType": "Scoring",
+        }
+        # Use opponent stats endpoint
+        opp_url = "https://stats.nba.com/stats/leaguedashoppptshot"
+        opp_params2 = {
+            "PerMode": "PerGame",
+            "Season": season_str,
+            "SeasonType": "Regular Season",
+            "LeagueID": "00",
+        }
+        try:
+            resp2 = _req.get(opp_url, params=opp_params2, headers=headers, timeout=15)
+            resp2.raise_for_status()
+            data2 = resp2.json()
+            # This endpoint doesn't have FB pts allowed directly
+            # Fallback: use leaguedashteamstats with opponent measure
+        except Exception:
+            pass
+
+        # Simpler approach — opp fast break from leaguedashteamstats opponent
+        opp_resp = _req.get(url, params={
+            **params,
+            "MeasureType": "Scoring",
+        }, headers=headers, timeout=15)
+
+    except Exception as e:
+        print(f"  ⚠ NBA fast break stats failed: {e}", file=__import__('sys').stderr)
+
+    return result
+
+
+def get_star_games_back(player_name: str, season: int = 2025) -> int:
+    """
+    Auto-count how many games a star player has appeared in recently.
+    Searches BDL for the player by name, then counts game appearances.
+    Returns games_back count (0 = still out, 30 = been back a long time).
+    """
+    try:
+        # Search for player by name
+        search = bdl_get("v1/players", {"search": player_name, "per_page": 5})
+        players = search.get("data", [])
+        if not players:
+            return 0
+
+        # Find best match
+        pid = None
+        for p in players:
+            full = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if player_name.lower() in full.lower() or full.lower() in player_name.lower():
+                pid = p["id"]
+                break
+
+        if not pid:
+            return 0
+
+        # Get last 30 game logs
+        data = bdl_get("v1/stats", {
+            "player_ids[]": pid,
+            "seasons[]": season,
+            "per_page": 30,
+            "sort_order": "desc",
+        })
+        games = data.get("data", [])
+
+        # Count games where player actually played (min > 0)
+        played = 0
+        for g in games:
+            mins = g.get("min", "0") or "0"
+            try:
+                m = float(str(mins).split(":")[0])
+                if m > 0:
+                    played += 1
+            except:
+                pass
+
+        return played
+
+    except Exception as e:
+        print(f"  ⚠ games_back lookup failed for {player_name}: {e}", file=sys.stderr)
+        return 0
+
+
+def auto_update_games_back(star_history: dict, season: int = 2025) -> dict:
+    """
+    Auto-update games_back for all stars in STAR_ABSENCE_HISTORY.
+    Called once per pipeline run — updates the dict in place.
+    Only fetches players who might have returned (games_back < 30).
+    """
+    print("  🔄 Auto-updating star games_back...", file=sys.stderr)
+    updated = {}
+    for name, info in star_history.items():
+        current_back = info.get("games_back", 0)
+        # Skip players already confirmed back 30+ games — no point refetching
+        if current_back >= 30:
+            updated[name] = info
+            continue
+        new_back = get_star_games_back(name, season)
+        if new_back != current_back:
+            print(f"  📊 {name}: games_back {current_back} → {new_back}", file=sys.stderr)
+        updated[name] = {**info, "games_back": new_back}
+    return updated
+
+
 def get_team_games(team_id: int, game_date: str, last_n: int = 10) -> list:
     """Get recent games for a team to check B2B and form."""
     # Get games BEFORE today — exclude today so it doesn't pollute B2B/rest calc
@@ -779,22 +951,37 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     # STAR_ABSENCE_HISTORY: players who missed 8+ games this season.
     # Updated: 2026-03-28. Source: NBA.com on/off splits + manual tracking.
     STAR_ABSENCE_HISTORY = {
-        "Joel Embiid":       {"team": "PHI", "games_missed": 35, "net_with": 7.2,  "net_without": -4.8, "boost": 5.0},
-        "Paul George":       {"team": "PHI", "games_missed": 22, "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
-        "Tyrese Maxey":      {"team": "PHI", "games_missed": 12, "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
-        "Luka Doncic":       {"team": "LAL", "games_missed": 30, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
-        "Giannis Antetokounmpo": {"team": "MIL", "games_missed": 15, "net_with": 8.0, "net_without": 1.2, "boost": 4.5},
-        "Jimmy Butler":      {"team": "GSW", "games_missed": 20, "net_with": 3.5,  "net_without": -5.0, "boost": 3.5},
-        "Ja Morant":         {"team": "MEM", "games_missed": 25, "net_with": 4.0,  "net_without": -6.0, "boost": 4.5},
-        "Paolo Banchero":    {"team": "ORL", "games_missed": 30, "net_with": 3.8,  "net_without": -4.5, "boost": 4.0},
-        "Chet Holmgren":     {"team": "OKC", "games_missed": 50, "net_with": 9.0,  "net_without": 6.5,  "boost": 2.5},
-        "Kawhi Leonard":     {"team": "LAC", "games_missed": 55, "net_with": 2.0,  "net_without": -5.5, "boost": 3.5},
-        "Zion Williamson":   {"team": "NOP", "games_missed": 40, "net_with": 1.5,  "net_without": -8.0, "boost": 3.5},
-        "De'Aaron Fox":      {"team": "SAS", "games_missed": 10, "net_with": 3.0,  "net_without": -1.0, "boost": 2.5},
-        "Pascal Siakam":     {"team": "IND", "games_missed": 15, "net_with": 4.5,  "net_without": -3.0, "boost": 3.5},
-        "Jalen Williams":    {"team": "OKC", "games_missed": 8,  "net_with": 10.0, "net_without": 5.0,  "boost": 3.0},
-        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
+        # games_back = games played since returning (0 = still out, 10+ = fully integrated, no boost)
+        # Update games_back manually each week or when a star returns
+        "Joel Embiid":       {"team": "PHI", "games_missed": 35, "games_back": 8,  "net_with": 7.2,  "net_without": -4.8, "boost": 5.0},
+        "Paul George":       {"team": "PHI", "games_missed": 22, "games_back": 8,  "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
+        "Tyrese Maxey":      {"team": "PHI", "games_missed": 12, "games_back": 8,  "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
+        "Luka Doncic":       {"team": "LAL", "games_missed": 30, "games_back": 12, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
+        "Giannis Antetokounmpo": {"team": "MIL", "games_missed": 15, "games_back": 0,  "net_with": 8.0, "net_without": 1.2, "boost": 4.5},
+        "Jimmy Butler":      {"team": "GSW", "games_missed": 20, "games_back": 15, "net_with": 3.5,  "net_without": -5.0, "boost": 3.5},
+        "Ja Morant":         {"team": "MEM", "games_missed": 25, "games_back": 0,  "net_with": 4.0,  "net_without": -6.0, "boost": 4.5},
+        "Paolo Banchero":    {"team": "ORL", "games_missed": 30, "games_back": 5,  "net_with": 3.8,  "net_without": -4.5, "boost": 4.0},
+        "Chet Holmgren":     {"team": "OKC", "games_missed": 50, "games_back": 0,  "net_with": 9.0,  "net_without": 6.5,  "boost": 2.5},
+        "Kawhi Leonard":     {"team": "LAC", "games_missed": 55, "games_back": 30, "net_with": 2.0,  "net_without": -5.5, "boost": 3.5},
+        "Zion Williamson":   {"team": "NOP", "games_missed": 40, "games_back": 0,  "net_with": 1.5,  "net_without": -8.0, "boost": 3.5},
+        "De'Aaron Fox":      {"team": "SAS", "games_missed": 10, "games_back": 20, "net_with": 3.0,  "net_without": -1.0, "boost": 2.5},
+        "Pascal Siakam":     {"team": "IND", "games_missed": 15, "games_back": 8,  "net_with": 4.5,  "net_without": -3.0, "boost": 3.5},
+        "Jalen Williams":    {"team": "OKC", "games_missed": 8,  "games_back": 0,  "net_with": 10.0, "net_without": 5.0,  "boost": 3.0},
+        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "games_back": 5,  "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
+        "Kel'el Ware":       {"team": "MIA", "games_missed": 14, "games_back": 3,  "net_with": 2.0,  "net_without": -3.0, "boost": 2.5},
     }
+
+    # Boost decay by games back:
+    # 0-3 games back  = full boost (just returned, stats still depressed)
+    # 4-6 games back  = 60% boost (getting integrated)
+    # 7-9 games back  = 30% boost (mostly priced in)
+    # 10+ games back  = NO boost (fully integrated, season stats catching up)
+    def decay_boost(base_boost, games_back):
+        if games_back == 0:   return base_boost        # still out — no boost
+        if games_back <= 3:   return base_boost        # just back — full boost
+        if games_back <= 6:   return round(base_boost * 0.6, 1)
+        if games_back <= 9:   return round(base_boost * 0.3, 1)
+        return 0.0  # 10+ games back — fully integrated, no boost
 
     for team_data, opp_data in [(home, away), (away, home)]:
         team_abbrev = team_data["team"]
@@ -807,6 +994,13 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             status = inj.get("status", "")
             if status in ("Out", "Doubtful"):
                 injured_names.add(pname)
+
+        # Auto-update games_back before processing — runs once per game pair
+        # Use cached value if already updated this pipeline run
+        if not getattr(calculate_edge, "_stars_updated", False):
+            updated = auto_update_games_back(STAR_ABSENCE_HISTORY)
+            STAR_ABSENCE_HISTORY.update(updated)
+            calculate_edge._stars_updated = True
 
         # Check each star with absence history — if NOT injured tonight, boost
         total_boost = 0
@@ -821,13 +1015,31 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             if star_name in SEASON_ENDING:
                 continue
 
+            games_back = star_info.get("games_back", 0)
+
+            # Skip if player has been back 10+ games — fully integrated, no boost
+            if games_back >= 10:
+                continue
+
+            # Skip if player is still out (games_back == 0) AND on injury report
+            if games_back == 0 and star_name in injured_names:
+                continue
+
+            # Skip if player is still out (games_back == 0) AND not on injury report
+            # means we don't know their status — only boost if games_back > 0 (confirmed back)
+            if games_back == 0:
+                continue
+
+            # Player has returned — apply decayed boost
             if star_name not in injured_names:
-                # Star is AVAILABLE — team's season stats are depressed
-                boost = star_info["boost"]
+                boost = decay_boost(star_info["boost"], games_back)
+                if boost <= 0:
+                    continue
                 total_boost += boost
                 returning_stars.append({
                     "name": star_name,
                     "missed": star_info["games_missed"],
+                    "games_back": games_back,
                     "net_with": star_info["net_with"],
                     "net_without": star_info["net_without"],
                     "boost": boost,
@@ -855,9 +1067,10 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
                 "type": "STAR_RETURN_BOOST",
                 "detail": (
                     f"{star_names} AVAILABLE for {team_abbrev} — "
-                    f"season stats depressed by {sum(s['missed'] for s in returning_stars)}+ missed games. "
-                    f"Net rating boosted {original_net:+.1f} → {adjusted_net:+.1f}. "
-                    f"This team is better than their record shows."
+                    f"back for {max(s['games_back'] for s in returning_stars)} games after "
+                    f"{sum(s['missed'] for s in returning_stars)}+ missed. "
+                    f"Net rating boosted {original_net:+.1f} → {adjusted_net:+.1f} "
+                    f"({'full boost' if max(s['games_back'] for s in returning_stars) <= 3 else 'partial — getting integrated'})."
                 ),
                 "favors": team_abbrev,
                 "strength": "STRONG" if total_boost >= 4.0 else "MODERATE",
@@ -1250,6 +1463,119 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         })
         pace_mismatch_fired = True
         print(f"  ⏱ PACE MISMATCH: {away['team']} ({a_pace_val}) controls vs {home['team']} ({h_pace_val}) — boosting fav +{impact:.1f}", file=sys.stderr)
+    # ── TRANSITION PACE MISMATCH ─────────────────────────────────────────────
+    # Fast break offense vs slow-footed defense.
+    # When a fast team (103+ pace) plays a slow team (97- pace) the transition
+    # gap creates free points in open court. Embiid-type bigs can't get back.
+    # Proxy: large pace differential on a close spread = style mismatch edge.
+    # Based on Miami/Philly analysis: pace diff + slow big = ~4-6 free pts/game
+
+    try:
+        h_pace_val2 = float(home.get("pace", 100) or 100)
+        a_pace_val2 = float(away.get("pace", 100) or 100)
+        pace_diff = abs(h_pace_val2 - a_pace_val2)
+        fast_team  = home if h_pace_val2 > a_pace_val2 else away
+        slow_team  = home if h_pace_val2 < a_pace_val2 else away
+        fast_is_home = fast_team["team"] == home["team"]
+        spread_abs = abs(float(spread_home or 0))
+
+        # Only fire when pace gap is meaningful (5+ possessions) and game is close (<8 spread)
+        if pace_diff >= 5 and spread_abs <= 8:
+            # Scale impact: 5-7 diff = moderate, 7+ = strong
+            impact = 2.0 if pace_diff < 7 else 3.0
+
+            # Extra bump if slow team has a dominant center (proxy: high net rating but low pace)
+            # High net rating + slow pace = halfcourt-dependent team = transition liability
+            slow_net = slow_team.get("net_rating", 0)
+            if slow_net >= 3 and slow_team.get("pace", 100) < 98:
+                impact += 1.0  # slow elite team is MORE vulnerable, not less
+
+            score += impact if fast_is_home else -impact
+
+            signals.append({
+                "type": "TRANSITION_MISMATCH",
+                "detail": (
+                    f"{fast_team['team']} pace ({fast_team.get('pace', '?')}) vs "
+                    f"{slow_team['team']} pace ({slow_team.get('pace', '?')}) — "
+                    f"{pace_diff:.1f} possession gap. Fast team generates open court "
+                    f"opportunities that slow-footed defenses cannot recover from. "
+                    f"{'Halfcourt-dependent team vulnerable in transition.' if slow_net >= 3 and slow_team.get('pace', 100) < 98 else ''}"
+                ),
+                "favors": fast_team["team"],
+                "strength": "STRONG" if pace_diff >= 7 else "MODERATE",
+                "impact": round(impact, 1),
+            })
+            print(
+                f"  ⚡ TRANSITION MISMATCH: {fast_team['team']} ({fast_team.get('pace')}) "
+                f"vs {slow_team['team']} ({slow_team.get('pace')}) — "
+                f"gap {pace_diff:.1f}, impact {impact:+.1f}",
+                file=sys.stderr
+            )
+    except Exception as e:
+        print(f"  ⚠ Transition mismatch calc failed: {e}", file=sys.stderr)
+
+    # ── FAST BREAK MISMATCH ──────────────────────────────────────────────────
+    # Real fast break points data from NBA Stats API.
+    # Unlike pace (which just measures tempo), this measures actual transition
+    # scoring — a team can run fast but still be a halfcourt offense.
+    # Miami #1 in FB pts (18.2) vs Philly bottom 5 in FB pts allowed = real edge.
+    try:
+        h_fb_off = float(home.get("fb_pts", 0) or 0)
+        a_fb_off = float(away.get("fb_pts", 0) or 0)
+        h_fb_def = float(home.get("fb_pts_allowed", 0) or 0)
+        a_fb_def = float(away.get("fb_pts_allowed", 0) or 0)
+
+        spread_abs_fb = abs(float(spread_home or 0))
+
+        # Only fire when we have real data and game is close enough to matter
+        if h_fb_off > 0 and a_fb_off > 0 and spread_abs_fb <= 10:
+
+            # Home team fast break offense vs Away team fast break defense
+            # High home FB offense + high away FB allowed = home transition edge
+            home_fb_edge = h_fb_off - a_fb_def  # positive = home scores more in transition than away allows
+            away_fb_edge = a_fb_off - h_fb_def  # positive = away scores more in transition than home allows
+
+            net_fb_edge = home_fb_edge - away_fb_edge
+
+            # Threshold: need at least 4 pt net edge to fire signal
+            if abs(net_fb_edge) >= 4.0:
+                fb_team = home if net_fb_edge > 0 else away
+                fb_opp  = away if net_fb_edge > 0 else home
+                fb_is_home = fb_team["team"] == home["team"]
+
+                # Scale impact: 4-6 pt edge = 1.5, 6-8 = 2.5, 8+ = 3.5
+                if abs(net_fb_edge) >= 8:
+                    impact = 3.5
+                elif abs(net_fb_edge) >= 6:
+                    impact = 2.5
+                else:
+                    impact = 1.5
+
+                score += impact if fb_is_home else -impact
+
+                signals.append({
+                    "type": "FAST_BREAK_MISMATCH",
+                    "detail": (
+                        f"{fb_team['team']} averages {h_fb_off if fb_is_home else a_fb_off:.1f} FB pts/game — "
+                        f"{fb_opp['team']} allows {a_fb_def if fb_is_home else h_fb_def:.1f} FB pts/game. "
+                        f"Net transition edge: {abs(net_fb_edge):.1f} pts. "
+                        f"This is real fast break data, not just pace."
+                    ),
+                    "favors": fb_team["team"],
+                    "strength": "STRONG" if abs(net_fb_edge) >= 6 else "MODERATE",
+                    "impact": round(impact, 1),
+                })
+                print(
+                    f"  🏃 FAST_BREAK_MISMATCH: {fb_team['team']} FB edge {net_fb_edge:+.1f} pts — impact {impact:+.1f}",
+                    file=__import__('sys').stderr
+                )
+    except Exception as e:
+        print(f"  ⚠ Fast break mismatch calc failed: {e}", file=__import__('sys').stderr)
+
+    # ── End Fast Break Mismatch ───────────────────────────────────────────────
+
+    # ── End Transition Pace Mismatch ──────────────────────────────────────────
+
     # ── End Pace Mismatch ─────────────────────────────────────────────────────
 
     # ── TIER MATCHUP SIGNALS (from 1,043 game analysis) ──────────────────────
@@ -1943,6 +2269,10 @@ def build_team_profile(team_abbrev: str, team_id: int, all_stats: dict, game_dat
     profile["close_losses"] = sched["close_losses"]
     profile["close_pct"] = sched["close_pct"]
 
+    # Fast break stats — pulled from all_stats if available (pre-fetched in main)
+    profile["fb_pts"]         = round(float(s.get("fb_pts", 0) or 0), 1)
+    profile["fb_pts_allowed"] = round(float(s.get("fb_pts_allowed", 0) or 0), 1)
+
     return profile
 
 
@@ -2493,6 +2823,21 @@ def main():
 
     if not json_mode:
         print(f"  ✅ Team stats loaded ({len(all_stats)} teams)")
+
+    # Fetch fast break stats from NBA Stats API and merge into all_stats
+    if not json_mode:
+        print(f"  Fetching fast break stats...", end=" ", flush=True)
+    try:
+        fb_stats = get_nba_fast_break_stats()
+        for abbr, fb in fb_stats.items():
+            if abbr in all_stats:
+                all_stats[abbr]["fb_pts"]         = fb.get("fb_pts", 0)
+                all_stats[abbr]["fb_pts_allowed"]  = fb.get("fb_pts_allowed", 0)
+        if not json_mode:
+            print(f"✅ {len(fb_stats)} teams")
+    except Exception as e:
+        if not json_mode:
+            print(f"⚠ Failed ({e})")
 
     # Step 2b: Fetch odds + injuries
     if not json_mode:

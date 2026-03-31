@@ -1,0 +1,31 @@
+name: Test NBA Analyzer
+
+on:
+  workflow_dispatch:  # Manual trigger button on GitHub
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests python-dotenv supabase tabulate pandas pybaseball joblib
+
+      - name: Run analyzer test
+        env:
+          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+        run: |
+          cd python
+          python nba_edge_analyzer.py --json --date=2026-03-31 2>&1 | head -100

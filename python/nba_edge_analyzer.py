@@ -989,23 +989,39 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     # STAR_ABSENCE_HISTORY: players who missed 8+ games this season.
     # Updated: 2026-03-28. Source: NBA.com on/off splits + manual tracking.
     STAR_ABSENCE_HISTORY = {
-        # games_back = games played since returning (0 = still out, 10+ = fully integrated, no boost)
-        # Update games_back manually each week or when a star returns
+        # games_back = games played since returning (0 = still out, 30 = fully integrated no boost)
+        # Last updated: March 31, 2026
+        # Embiid: out since Feb 28 (oblique), back last 10 games avg 31.5 pts
         "Joel Embiid":       {"team": "PHI", "games_missed": 35, "games_back": 8,  "net_with": 7.2,  "net_without": -4.8, "boost": 5.0},
-        "Paul George":       {"team": "PHI", "games_missed": 22, "games_back": 8,  "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
-        "Tyrese Maxey":      {"team": "PHI", "games_missed": 12, "games_back": 8,  "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
-        "Luka Doncic":       {"team": "LAL", "games_missed": 30, "games_back": 12, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
-        "Giannis Antetokounmpo": {"team": "MIL", "games_missed": 15, "games_back": 0,  "net_with": 8.0, "net_without": 1.2, "boost": 4.5},
-        "Jimmy Butler":      {"team": "GSW", "games_missed": 20, "games_back": 15, "net_with": 3.5,  "net_without": -5.0, "boost": 3.5},
-        "Ja Morant":         {"team": "MEM", "games_missed": 25, "games_back": 0,  "net_with": 4.0,  "net_without": -6.0, "boost": 4.5},
-        "Paolo Banchero":    {"team": "ORL", "games_missed": 30, "games_back": 5,  "net_with": 3.8,  "net_without": -4.5, "boost": 4.0},
+        # Paul George: back after 25-game suspension, 2 games played
+        "Paul George":       {"team": "PHI", "games_missed": 25, "games_back": 2,  "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
+        # Maxey: out 10 games (finger), just returned March 29
+        "Tyrese Maxey":      {"team": "PHI", "games_missed": 10, "games_back": 2,  "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
+        # Luka: day-to-day hamstring, has been playing but banged up
+        "Luka Doncic":       {"team": "LAL", "games_missed": 20, "games_back": 15, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
+        # Giannis: still out as of March 26
+        "Giannis Antetokounmpo": {"team": "MIL", "games_missed": 20, "games_back": 0,  "net_with": 8.0, "net_without": 1.2, "boost": 4.5},
+        # Jimmy Butler: OUT all season at GSW — multiple injuries
+        "Jimmy Butler":      {"team": "GSW", "games_missed": 50, "games_back": 0,  "net_with": 3.5,  "net_without": -5.0, "boost": 3.5},
+        # Ja Morant: only 20 games played (UCL sprain), still out
+        "Ja Morant":         {"team": "MEM", "games_missed": 50, "games_back": 0,  "net_with": 4.0,  "net_without": -6.0, "boost": 4.5},
+        # Banchero: only missed 10 games, been back all season essentially
+        "Paolo Banchero":    {"team": "ORL", "games_missed": 10, "games_back": 30, "net_with": 3.8,  "net_without": -2.1, "boost": 2.0},
+        # Chet Holmgren: out for season
         "Chet Holmgren":     {"team": "OKC", "games_missed": 50, "games_back": 0,  "net_with": 9.0,  "net_without": 6.5,  "boost": 2.5},
-        "Kawhi Leonard":     {"team": "LAC", "games_missed": 55, "games_back": 30, "net_with": 2.0,  "net_without": -5.5, "boost": 3.5},
-        "Zion Williamson":   {"team": "NOP", "games_missed": 40, "games_back": 0,  "net_with": 1.5,  "net_without": -8.0, "boost": 3.5},
-        "De'Aaron Fox":      {"team": "SAS", "games_missed": 10, "games_back": 20, "net_with": 3.0,  "net_without": -1.0, "boost": 2.5},
-        "Pascal Siakam":     {"team": "IND", "games_missed": 15, "games_back": 8,  "net_with": 4.5,  "net_without": -3.0, "boost": 3.5},
-        "Jalen Williams":    {"team": "OKC", "games_missed": 8,  "games_back": 0,  "net_with": 10.0, "net_without": 5.0,  "boost": 3.0},
-        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "games_back": 5,  "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
+        # Kawhi: ankle sprain March 14, missed 1 game, back and playing
+        "Kawhi Leonard":     {"team": "LAC", "games_missed": 40, "games_back": 30, "net_with": 2.0,  "net_without": -5.5, "boost": 3.5},
+        # Zion: has been playing all season — remove boost entirely
+        "Zion Williamson":   {"team": "NOP", "games_missed": 5,  "games_back": 30, "net_with": 1.5,  "net_without": -4.0, "boost": 2.0},
+        # De'Aaron Fox: day-to-day back tightness, mostly playing
+        "De'Aaron Fox":      {"team": "SAS", "games_missed": 8,  "games_back": 20, "net_with": 3.0,  "net_without": -1.0, "boost": 2.5},
+        # Siakam: only 2 of last 8 games — load management, questionable nightly
+        "Pascal Siakam":     {"team": "IND", "games_missed": 15, "games_back": 3,  "net_with": 4.5,  "net_without": -3.0, "boost": 3.5},
+        # Jalen Williams: still out OKC
+        "Jalen Williams":    {"team": "OKC", "games_missed": 15, "games_back": 0,  "net_with": 10.0, "net_without": 5.0,  "boost": 3.0},
+        # Ant Edwards: OUT as of March 25
+        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "games_back": 0,  "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
+        # Kel'el Ware: back 3 games after 14 missed
         "Kel'el Ware":       {"team": "MIA", "games_missed": 14, "games_back": 3,  "net_with": 2.0,  "net_without": -3.0, "boost": 2.5},
     }
 

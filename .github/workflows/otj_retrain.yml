@@ -1,0 +1,52 @@
+name: OTJ Model Retrain v3
+
+on:
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install lightgbm xgboost scikit-learn pandas numpy \
+                      supabase python-dotenv requests joblib pybaseball
+
+      - name: Fetch training data from Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          cd python
+          python otj_fetch_training_data.py --output training_data.csv
+          echo "Training data rows: $(wc -l < training_data.csv)"
+
+      - name: Retrain ensemble models
+        run: |
+          cd python
+          python otj_retrain_v3.py --input training_data.csv
+
+      - name: Upload model files as artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: otj-models-v3
+          path: |
+            python/otj_lgb_classifier.pkl
+            python/otj_xgb_classifier.pkl
+            python/otj_xgb_regressor.pkl
+            python/otj_rf_classifier.pkl
+            python/otj_lr_classifier.pkl
+            python/otj_ensemble_weights.json
+            python/otj_model_features.json
+            python/otj_model_report.json
+            python/training_data.csv
+          retention-days: 7

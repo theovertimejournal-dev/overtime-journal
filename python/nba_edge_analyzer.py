@@ -993,10 +993,10 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         # Last updated: March 31, 2026
         # Embiid: out since Feb 28 (oblique), back last 10 games avg 31.5 pts
         "Joel Embiid":       {"team": "PHI", "games_missed": 35, "games_back": 8,  "net_with": 7.2,  "net_without": -4.8, "boost": 5.0},
-        # Paul George: back after 25-game suspension, 2 games played
-        "Paul George":       {"team": "PHI", "games_missed": 25, "games_back": 2,  "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
-        # Maxey: out 10 games (finger), just returned March 29
-        "Tyrese Maxey":      {"team": "PHI", "games_missed": 10, "games_back": 2,  "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
+        # Paul George: back after 25-game suspension, ~5 games played now
+        "Paul George":       {"team": "PHI", "games_missed": 25, "games_back": 5,  "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
+        # Maxey: out 10 games (finger), ~5 games back now
+        "Tyrese Maxey":      {"team": "PHI", "games_missed": 10, "games_back": 5,  "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
         # Luka: day-to-day hamstring, has been playing but banged up
         "Luka Doncic":       {"team": "LAL", "games_missed": 20, "games_back": 15, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
         # Giannis: still out as of March 26
@@ -1117,14 +1117,18 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
 
             star_names = ", ".join(s["name"] for s in returning_stars)
 
+            # Per-player detail so "35+ missed" doesn't appear when it's 2 players combined
+            _player_details = " · ".join(
+                f"{s['name']} ({s['missed']}gm out, {s['games_back']} back)"
+                for s in returning_stars
+            )
+            _boost_label = "full boost" if max(s["games_back"] for s in returning_stars) <= 3 else "partial — getting integrated"
             signals.append({
                 "type": "STAR_RETURN_BOOST",
                 "detail": (
                     f"{star_names} AVAILABLE for {team_abbrev} — "
-                    f"back for {max(s['games_back'] for s in returning_stars)} games after "
-                    f"{sum(s['missed'] for s in returning_stars)}+ missed. "
-                    f"Net rating boosted {original_net:+.1f} → {adjusted_net:+.1f} "
-                    f"({'full boost' if max(s['games_back'] for s in returning_stars) <= 3 else 'partial — getting integrated'})."
+                    f"{_player_details}. "
+                    f"Net rating boosted {original_net:+.1f} → {adjusted_net:+.1f} ({_boost_label})."
                 ),
                 "favors": team_abbrev,
                 "strength": "STRONG" if total_boost >= 4.0 else "MODERATE",

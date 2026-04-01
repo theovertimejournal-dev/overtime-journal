@@ -1,0 +1,86 @@
+name: Test NBA Ensemble Models
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install lightgbm xgboost scikit-learn pandas numpy \
+                      requests python-dotenv joblib pybaseball tabulate
+
+      - name: Test ensemble model loading
+        run: |
+          cd python
+          python - << 'PYEOF'
+          import os, json, joblib
+
+          model_dir = os.path.dirname(os.path.abspath("nba_edge_analyzer.py"))
+          print(f"Looking in: {model_dir}")
+
+          files = {
+              "LightGBM":    "otj_lgb_classifier.pkl",
+              "XGBoost Clf": "otj_xgb_classifier.pkl",
+              "XGBoost Reg": "otj_xgb_regressor.pkl",
+              "RandomForest":"otj_rf_classifier.pkl",
+              "LogReg":      "otj_lr_classifier.pkl",
+              "Weights":     "otj_ensemble_weights.json",
+              "Features":    "otj_model_features.json",
+          }
+
+          all_good = True
+          for name, fname in files.items():
+              path = os.path.join(model_dir, fname)
+              exists = os.path.exists(path)
+              size = os.path.getsize(path) if exists else 0
+              status = "✅" if exists else "❌"
+              print(f"  {status} {name}: {fname} ({size:,} bytes)")
+              if not exists:
+                  all_good = False
+
+          if all_good:
+              print("\n✅ All model files present — testing load...")
+              try:
+                  lgb = joblib.load("otj_lgb_classifier.pkl")
+                  xgb = joblib.load("otj_xgb_classifier.pkl")
+                  rf  = joblib.load("otj_rf_classifier.pkl")
+                  lr  = joblib.load("otj_lr_classifier.pkl")
+                  print(f"  ✅ LGB loaded: {lgb.n_features_in_} features")
+                  print(f"  ✅ XGB loaded: {xgb.n_features_in_} features")
+                  print(f"  ✅ RF  loaded: {rf.n_features_in_} features")
+                  if isinstance(lr, dict):
+                      print(f"  ✅ LR  loaded: {lr['model'].n_features_in_} features (with scaler)")
+                  with open("otj_ensemble_weights.json") as f:
+                      w = json.load(f)
+                  print(f"  ✅ Weights: {w}")
+                  with open("otj_model_features.json") as f:
+                      feats = json.load(f)
+                  print(f"  ✅ Features: {len(feats)} features")
+                  print("\n🎯 ENSEMBLE READY — 4/4 models loaded")
+              except Exception as e:
+                  print(f"  ❌ Load error: {e}")
+          else:
+              print("\n❌ Missing model files — need to upload pkl files to python/ folder")
+          PYEOF
+
+      - name: Run analyzer with debug output
+        env:
+          BALLDONTLIE_API_KEY: ${{ secrets.BALLDONTLIE_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          TANK01_API_KEY: ${{ secrets.TANK01_API_KEY }}
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+        run: |
+          cd python
+          python nba_edge_analyzer.py --json --date=2026-04-01 2>&1 | grep -E "ML|ensemble|model|lgb|pkl|loaded|STAR|CLUTCH|REMATCH|REST|FAST|4/4|3/4|2/4|consensus|boost|RETURN" | head -60

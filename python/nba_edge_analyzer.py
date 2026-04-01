@@ -1879,29 +1879,42 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             import pickle as _loader
         model_dir = os.path.dirname(os.path.abspath(__file__))
         
-        # Load models (cached after first load)
+        # Load models (cached after first load) — v3 full ensemble
         if not hasattr(calculate_edge, '_ml_clf'):
-            clf_path = os.path.join(model_dir, 'otj_lgb_classifier.pkl')
-            reg_path = os.path.join(model_dir, 'otj_xgb_regressor.pkl')
+            import json as _json
+
+            def _load_model(name):
+                path = os.path.join(model_dir, name)
+                if os.path.exists(path):
+                    return _loader.load(path)
+                return None
+
+            calculate_edge._ml_clf  = _load_model('otj_lgb_classifier.pkl')  # LightGBM
+            calculate_edge._ml_reg  = _load_model('otj_xgb_regressor.pkl')   # XGB margin
+            calculate_edge._ml_xgb  = _load_model('otj_xgb_classifier.pkl')  # XGB classifier
+            calculate_edge._ml_rf   = _load_model('otj_rf_classifier.pkl')    # Random Forest
+            calculate_edge._ml_lr   = _load_model('otj_lr_classifier.pkl')    # LR dict {model, scaler}
+
             feat_path = os.path.join(model_dir, 'otj_model_features.json')
-            
-            print(f"  🤖 Looking for ML models in: {model_dir}", file=sys.stderr)
-            print(f"  🤖 clf exists: {os.path.exists(clf_path)}", file=sys.stderr)
-            print(f"  🤖 reg exists: {os.path.exists(reg_path)}", file=sys.stderr)
-            print(f"  🤖 feat exists: {os.path.exists(feat_path)}", file=sys.stderr)
-            
-            if os.path.exists(clf_path) and os.path.exists(feat_path):
-                import json as _json
-                calculate_edge._ml_clf = _loader.load(clf_path)
-                calculate_edge._ml_reg = _loader.load(reg_path)
+            wt_path   = os.path.join(model_dir, 'otj_ensemble_weights.json')
+
+            if os.path.exists(feat_path):
                 with open(feat_path) as f:
                     calculate_edge._ml_features = _json.load(f)
-                print(f"  🤖 ML models loaded ({len(calculate_edge._ml_features)} features)", file=sys.stderr)
             else:
-                calculate_edge._ml_clf = None
-                calculate_edge._ml_reg = None
                 calculate_edge._ml_features = None
-                print(f"  🤖 ML models NOT FOUND — running without ML", file=sys.stderr)
+
+            if os.path.exists(wt_path):
+                with open(wt_path) as f:
+                    calculate_edge._ml_weights = _json.load(f)
+            else:
+                calculate_edge._ml_weights = {'lgb': 0.35, 'xgb': 0.30, 'rf': 0.20, 'lr': 0.15}
+
+            models_loaded = sum(1 for m in [
+                calculate_edge._ml_clf, calculate_edge._ml_xgb,
+                calculate_edge._ml_rf, calculate_edge._ml_lr
+            ] if m is not None)
+            print(f"  🤖 ML ensemble: {models_loaded}/4 models loaded", file=sys.stderr)
         
         if calculate_edge._ml_clf is not None:
             features = calculate_edge._ml_features
@@ -2047,46 +2060,89 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             X_pred = pd.DataFrame([{f: feat_row.get(f, 0) for f in features}])
             
             # Predict
-            ml_prob = calculate_edge._ml_clf.predict_proba(X_pred)[0]
-            home_win_prob = ml_prob[1]
+            # ── Get probabilities from all available models ─────────────────
+            weights = calculate_edge._ml_weights or {'lgb':0.35,'xgb':0.30,'rf':0.20,'lr':0.15}
+            probs = []
+            votes = []
+
+            # LightGBM (primary)
+            lgb_p = calculate_edge._ml_clf.predict_proba(X_pred)[0][1]
+            probs.append(('lgb', lgb_p, weights['lgb']))
+            votes.append(1 if lgb_p >= 0.5 else 0)
+
+            # XGBoost classifier
+            if calculate_edge._ml_xgb is not None:
+                xgb_p = calculate_edge._ml_xgb.predict_proba(X_pred)[0][1]
+                probs.append(('xgb', xgb_p, weights['xgb']))
+                votes.append(1 if xgb_p >= 0.5 else 0)
+
+            # Random Forest
+            if calculate_edge._ml_rf is not None:
+                rf_p = calculate_edge._ml_rf.predict_proba(X_pred)[0][1]
+                probs.append(('rf', rf_p, weights['rf']))
+                votes.append(1 if rf_p >= 0.5 else 0)
+
+            # Logistic Regression
+            if calculate_edge._ml_lr is not None:
+                lr_data = calculate_edge._ml_lr
+                if isinstance(lr_data, dict):
+                    scaler = lr_data['scaler']
+                    lr_model = lr_data['model']
+                    X_scaled = scaler.transform(X_pred)
+                    lr_p = lr_model.predict_proba(X_scaled)[0][1]
+                else:
+                    lr_p = lr_data.predict_proba(X_pred)[0][1]
+                probs.append(('lr', lr_p, weights.get('lr', 0.15)))
+                votes.append(1 if lr_p >= 0.5 else 0)
+
+            # Weighted ensemble probability
+            total_weight = sum(w for _, _, w in probs)
+            home_win_prob = sum(p * w for _, p, w in probs) / total_weight
+
+            # Consensus: how many models agree?
+            votes_home = sum(votes)
+            votes_away = len(votes) - votes_home
+            consensus = votes_home >= 3 or votes_away >= 3  # 3+ of 4 agree
+            consensus_str = f"{votes_home}/{len(votes)} models" if home_win_prob >= 0.5 else f"{votes_away}/{len(votes)} models"
+
             ml_prediction = home_win_prob
-            
             ml_margin_pred = calculate_edge._ml_reg.predict(X_pred)[0]
-            
-            # Convert to edge signal
             ml_confidence = abs(home_win_prob - 0.5)
-            
-            if ml_confidence >= 0.10:  # Only fire when model has real conviction
+
+            # Consensus gating: reduce impact when models disagree
+            consensus_multiplier = 1.0 if consensus else 0.5
+
+            if ml_confidence >= 0.10:
                 ml_favors_home = home_win_prob > 0.5
                 ml_team = home["team"] if ml_favors_home else away["team"]
-                ml_impact = min(ml_confidence * 15, 4.0)  # cap at 4 pts
-                
-                # ACTIVE — ML prediction affects edge score
+                ml_impact = min(ml_confidence * 15 * consensus_multiplier, 4.0)
+
                 score += ml_impact if ml_favors_home else -ml_impact
-                
-                # Fix: show win prob from the favored team's perspective, not always "home"
+
                 favored_win_prob = home_win_prob if ml_favors_home else (1 - home_win_prob)
                 venue_label = "home" if ml_favors_home else "road"
+                consensus_note = f" ✅ {consensus_str} agree" if consensus else f" ⚠ split ({consensus_str})"
+
                 signals.append({
                     "type": "ML_PREDICTION",
                     "detail": (
-                        f"Gradient boost model: {ml_team} "
+                        f"Ensemble model ({len(probs)}/4): {ml_team} "
                         f"({favored_win_prob:.0%} {venue_label} win prob, "
-                        f"predicted margin {ml_margin_pred:+.1f})"
+                        f"margin {ml_margin_pred:+.1f}){consensus_note}"
                     ),
                     "favors": ml_team,
-                    "strength": "STRONG" if ml_confidence >= 0.15 else "MODERATE",
+                    "strength": "STRONG" if (ml_confidence >= 0.15 and consensus) else "MODERATE",
                     "impact": round(ml_impact, 1),
                 })
-                
+
                 print(
-                    f"  🤖 ML: {ml_team} favored "
-                    f"({home_win_prob:.0%} home, margin {ml_margin_pred:+.1f}, "
-                    f"impact {ml_impact:+.1f})",
+                    f"  🤖 ML Ensemble: {ml_team} favored "
+                    f"({home_win_prob:.0%}, margin {ml_margin_pred:+.1f}, "
+                    f"consensus={'YES' if consensus else 'SPLIT'}, impact {ml_impact:+.1f})",
                     file=sys.stderr
                 )
             else:
-                print(f"  🤖 ML: No strong conviction ({home_win_prob:.0%} home)", file=sys.stderr)
+                print(f"  🤖 ML: No strong conviction ({home_win_prob:.0%} home, {consensus_str})", file=sys.stderr)
     
     except Exception as e:
         print(f"  ⚠ ML prediction failed: {e}", file=sys.stderr)
@@ -2205,19 +2261,48 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         if h_close_total >= 5 and a_close_total >= 5:
             h_cpct = h_cw / h_close_total
             a_cpct = a_cw / a_close_total
-            
-            # Only show if there's a meaningful gap or extreme record
-            if abs(h_cpct - a_cpct) >= 0.15 or h_cpct >= 0.70 or a_cpct >= 0.70 or h_cpct <= 0.30 or a_cpct <= 0.30:
-                signals.append({
-                    "type": "CLUTCH_INTEL",
-                    "detail": (
+            clutch_gap = abs(h_cpct - a_cpct)
+
+            # CLUTCH_EDGE: scored signal in coin flip games (spread <= 3.5)
+            # When the game is basically even on paper, clutch record is the tiebreaker
+            spread_abs_clutch = abs(float(spread_home or 0))
+            is_coin_flip = spread_abs_clutch <= 3.5
+
+            if clutch_gap >= 0.15 or h_cpct >= 0.70 or a_cpct >= 0.70 or h_cpct <= 0.30 or a_cpct <= 0.30:
+                clutch_team  = home["team"] if h_cpct > a_cpct else away["team"]
+                clutch_is_home = h_cpct > a_cpct
+                better_pct   = max(h_cpct, a_cpct)
+                worse_pct    = min(h_cpct, a_cpct)
+
+                if is_coin_flip and clutch_gap >= 0.15:
+                    # Real scored impact — clutch record decides coin flip games
+                    impact = 1.5 if clutch_gap >= 0.25 else 1.0
+                    score += impact if clutch_is_home else -impact
+                    signal_type = "CLUTCH_EDGE"
+                    strength = "STRONG" if clutch_gap >= 0.25 else "MODERATE"
+                    detail = (
+                        f"⚡ CLUTCH EDGE: {clutch_team} closes {better_pct:.0%} vs "
+                        f"{away['team'] if clutch_is_home else home['team']} {worse_pct:.0%} in tight games "
+                        f"— coin flip spread ({spread_abs_clutch:.1f}pts), clutch record is the tiebreaker"
+                    )
+                    print(f"  ⚡ CLUTCH_EDGE: {clutch_team} {better_pct:.0%} vs {worse_pct:.0%} — coin flip game, impact {impact:+.1f}", file=sys.stderr)
+                else:
+                    # Informational only when spread is large or gap is small
+                    impact = 0
+                    signal_type = "CLUTCH_INTEL"
+                    strength = "MODERATE"
+                    detail = (
                         f"Close games (≤5pts): {home['team']} {h_cw}-{h_cl} ({h_cpct:.0%}) vs "
                         f"{away['team']} {a_cw}-{a_cl} ({a_cpct:.0%}) — "
                         f"{'tight game favors ' + home['team'] if h_cpct > a_cpct else 'tight game favors ' + away['team']}"
-                    ),
-                    "favors": home["team"] if h_cpct > a_cpct else away["team"],
-                    "strength": "MODERATE",
-                    "impact": 0,
+                    )
+
+                signals.append({
+                    "type": signal_type,
+                    "detail": detail,
+                    "favors": clutch_team,
+                    "strength": strength,
+                    "impact": impact,
                 })
 
     # ML profitability intel — show if the ML odds are in the profitable range

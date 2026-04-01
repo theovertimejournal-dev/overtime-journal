@@ -32,7 +32,12 @@ export function NBATeamColumn({ t }) {
       </div>
       <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         {t.b2b && <Pill text="B2B ⚠" color="#ef4444" />}
-        {!t.b2b && t.rest_days >= 2 && <Pill text={t.rest_days >= 3 ? "3d+ rest" : `${t.rest_days}d rest`} color="#22c55e" />}
+        {!t.b2b && t.rest_days >= 2 && (
+          <Pill
+            text={t.rest_days >= 4 ? `${t.rest_days}d rest ⚠` : `${t.rest_days}d rest`}
+            color={t.rest_days >= 4 ? "#f59e0b" : "#22c55e"}
+          />
+        )}
         <span style={{ fontSize: 11, color: "#4a5568" }}>{t.last5} ({t.streak})</span>
       </div>
       {(t.injuries?.filter(p => p.status === "Out" || p.status === "Doubtful")?.length > 0) && (

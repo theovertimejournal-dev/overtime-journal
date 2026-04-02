@@ -948,26 +948,61 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         for inj in team_injuries:
             player_name = inj.get("name", "")
             if player_name in FRANCHISE_STARS:
-                star_team, penalty = FRANCHISE_STARS[player_name]
+                star_team, base_penalty = FRANCHISE_STARS[player_name]
                 if star_team == team_abbrev and inj.get("status") in ("Out", "Doubtful"):
                     original_net = team_data.get("net_rating", 0)
-                    adjusted_net = round(original_net - penalty, 1)
+                    team_wpct = team_data.get("win_pct", 0.5)
+
+                    # ── Tier-scaled penalty ────────────────────────────────
+                    # ELITE teams have depth/system — star loss hurts less
+                    # TANK teams are already bad — star loss changes little
+                    # MID/BELOW_AVG teams hurt most — star was carrying them
+                    if team_wpct >= 0.65:       # ELITE
+                        tier_mult = 0.6
+                        tier_label = "ELITE (depth absorbs loss)"
+                    elif team_wpct >= 0.55:     # GOOD
+                        tier_mult = 0.8
+                        tier_label = "GOOD (solid supporting cast)"
+                    elif team_wpct >= 0.40:     # MID
+                        tier_mult = 1.0
+                        tier_label = "MID (star was carrying them)"
+                    elif team_wpct >= 0.32:     # BELOW AVG
+                        tier_mult = 1.2
+                        tier_label = "BELOW AVG (star dependency high)"
+                    else:                        # TANK
+                        tier_mult = 0.9
+                        tier_label = "TANK (already losing, floor is floor)"
+
+                    # Also scale by spread size — big spreads need less adjustment
+                    # since the line already accounts for known injuries
+                    spread_abs = abs(float(spread_home or 0))
+                    if spread_abs >= 15:
+                        spread_mult = 0.7   # line already baked it in
+                    elif spread_abs >= 10:
+                        spread_mult = 0.85
+                    else:
+                        spread_mult = 1.0
+
+                    scaled_penalty = round(base_penalty * tier_mult * spread_mult, 1)
+                    adjusted_net = round(original_net - scaled_penalty, 1)
                     team_data["net_rating"] = adjusted_net
                     team_data["net_rating_adjusted"] = True
+
                     signals.append({
                         "type": "STAR_OUT_NET_PENALTY",
                         "detail": (
                             f"{player_name} ({team_abbrev}) OUT — net rating adjusted "
                             f"from {original_net:+.1f} to {adjusted_net:+.1f} "
-                            f"(season rating built with star on floor)"
+                            f"(season rating built with star on floor · {tier_label})"
                         ),
                         "favors": "FADE" if label == "Home" else home["team"],
                         "strength": "CAUTION",
-                        "impact": round(-penalty, 1),
+                        "impact": round(-scaled_penalty, 1),
                     })
                     print(
                         f"  ⚠ STAR PENALTY: {player_name} OUT — {team_abbrev} net rating "
-                        f"{original_net:+.1f} → {adjusted_net:+.1f}",
+                        f"{original_net:+.1f} → {adjusted_net:+.1f} "
+                        f"(base={base_penalty} × tier={tier_mult} × spread={spread_mult} = {scaled_penalty})",
                         file=__import__("sys").stderr,
                     )
     # ── End Franchise Star Penalty ────────────────────────────────────────────
@@ -1980,6 +2015,88 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             })
     except Exception as e:
         pass
+
+    # ── SGO LINE MOVEMENT SIGNAL ─────────────────────────────────────────────
+    # Pulls opening vs current spread from SGO using includeOpenCloseOdds=true
+    # When line moves 3+ pts toward one team = sharp money signal
+    # Pinnacle movement = sharpest signal in the world
+    try:
+        import os as _os
+        _sgo_key = _os.environ.get("SPORTSGAMEODDS_API_KEY", "")
+        if _sgo_key:
+            _sgo_url = "https://api.sportsgameodds.com/v2/events/"
+            _sgo_params = {
+                "leagueID": "NBA",
+                "includeOpenCloseOdds": "true",
+                "bookmakerID": "pinnacle",
+                "oddsPresent": "true",
+            }
+            _sgo_headers = {"X-Api-Key": _sgo_key}
+            _sgo_resp = __import__("requests").get(
+                _sgo_url, params=_sgo_params, headers=_sgo_headers, timeout=10
+            )
+            if _sgo_resp.status_code == 200:
+                _sgo_data = _sgo_resp.json().get("data", [])
+
+                # Match this game to SGO events by team names
+                h_team = home["team"].upper()
+                a_team = away["team"].upper()
+
+                for _event in _sgo_data:
+                    _teams = _event.get("teams", {})
+                    _h = _teams.get("home", {}).get("teamID", "").upper()
+                    _a = _teams.get("away", {}).get("teamID", "").upper()
+
+                    # Match by team abbreviation substring
+                    if h_team in _h and a_team in _a:
+                        _odds = _event.get("odds", {})
+                        _sp = _odds.get("points-home-game-sp-home") or _odds.get("points-home-reg-sp-home")
+                        if _sp:
+                            _open_sp = _sp.get("openBookSpread") or _sp.get("openFairSpread")
+                            _curr_sp = _sp.get("bookSpread") or _sp.get("fairSpread")
+                            if _open_sp and _curr_sp:
+                                try:
+                                    _open_f = float(str(_open_sp).replace("+",""))
+                                    _curr_f = float(str(_curr_sp).replace("+",""))
+                                    _movement = round(_curr_f - _open_f, 1)
+
+                                    if abs(_movement) >= 2.0:
+                                        _moved_toward = home["team"] if _movement < 0 else away["team"]
+                                        _faded = away["team"] if _movement < 0 else home["team"]
+                                        _cover_pct = 64 if abs(_movement) >= 3 else 58
+
+                                        # Apply score impact
+                                        _impact = 1.5 if abs(_movement) >= 3 else 0.8
+                                        if _movement < 0:
+                                            score += _impact
+                                        else:
+                                            score -= _impact
+
+                                        signals.append({
+                                            "type": "LINE_MOVEMENT_SHARP",
+                                            "detail": (
+                                                f"📈 Sharp money signal: line moved {_movement:+.1f} pts "
+                                                f"toward {_moved_toward} "
+                                                f"(opened {_open_sp:+} → now {_curr_sp:+}). "
+                                                f"Pinnacle confirmed. "
+                                                f"Data: lines moving {abs(_movement):.0f}+ pts = "
+                                                f"{_cover_pct}% cover rate for {_moved_toward}."
+                                            ),
+                                            "favors": _moved_toward,
+                                            "strength": "STRONG" if abs(_movement) >= 3 else "MODERATE",
+                                            "impact": _impact if _movement < 0 else -_impact,
+                                        })
+                                        print(
+                                            f"  📈 LINE MOVEMENT: {home['team']}@{away['team']} "
+                                            f"opened {_open_sp} → {_curr_sp} "
+                                            f"({_movement:+.1f} toward {_moved_toward})",
+                                            file=sys.stderr
+                                        )
+                                except (ValueError, TypeError):
+                                    pass
+                        break
+    except Exception as _e:
+        pass  # Line movement is bonus — never crash the pipeline
 
     # ── End Cheat Sheet Signals ───────────────────────────────────────────────
 

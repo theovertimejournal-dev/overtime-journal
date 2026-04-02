@@ -3072,7 +3072,7 @@ ODDS VENDOR: {result.get('odds_vendor', 'N/A')}
 HOME ({home['team']}):
 - Record: {home.get('record')} | Net Rating: {home.get('net_rating'):+.1f}
 - Off/Def Rating: {home.get('off_rating')}/{home.get('def_rating')}
-- B2B: {home.get('b2b')} | Rest Days: {home.get('rest_days')}
+- B2B: {home.get('b2b')} | Rest Days: {min(int(home.get('rest_days') or 1), 7)}
 - Last 5: {home.get('last5')} | Streak: {home.get('streak')}
 - Close Games: {home.get('close_wins')}-{home.get('close_losses')} ({home.get('close_pct', 0.5):.0%})
 - 3PT%: {home.get('three_pct')}%
@@ -3081,7 +3081,7 @@ HOME ({home['team']}):
 AWAY ({away['team']}):
 - Record: {away.get('record')} | Net Rating: {away.get('net_rating'):+.1f}
 - Off/Def Rating: {away.get('off_rating')}/{away.get('def_rating')}
-- B2B: {away.get('b2b')} | Rest Days: {away.get('rest_days')}
+- B2B: {away.get('b2b')} | Rest Days: {min(int(away.get('rest_days') or 1), 7)}
 - Last 5: {away.get('last5')} | Streak: {away.get('streak')}
 - Close Games: {away.get('close_wins')}-{away.get('close_losses')} ({away.get('close_pct', 0.5):.0%})
 - 3PT%: {away.get('three_pct')}%
@@ -3097,6 +3097,7 @@ IMPORTANT RULES:
 - The model SCORE is a composite of multiple signals. Do not imply one stat equals the score.
 - O/U lean: Only call OVER or UNDER if our combined avg meaningfully diverges from the posted total AND there is a specific reason (injuries, pace, B2B) that the market may have mispriced. If the total looks fairly priced, return null. Do NOT call UNDER just because both teams have good defenses — Vegas already knows that.
 - Sound like a beat reporter, not a robot. Be specific and direct.
+- Rest days: 0=B2B, 1=normal, 2=well rested, 3+=extended rest. NEVER say a team has been resting for "X weeks" — rest days are since their last game only. Max meaningful rest advantage is 2-3 days.
 
 Respond ONLY with this JSON structure:
 {{

@@ -1,0 +1,69 @@
+import { Pill } from '../common/Pill';
+
+export function NBATeamColumn({ t }) {
+  const nc = t.net_rating >= 5 ? "#22c55e" : t.net_rating >= 0 ? "#f59e0b" : "#ef4444";
+  const bc = t.bench_net >= 3 ? "#22c55e" : t.bench_net >= 0 ? "#f59e0b" : "#ef4444";
+  const cc = t.close_pct >= .55 ? "#22c55e" : t.close_pct < .4 ? "#ef4444" : "#f59e0b";
+
+  const hasBenchData = t.bench_net !== 0 || t.bench_ppg !== 0;
+
+  const stats = [
+    ["NET RTG", t.net_rating, nc, `O:${t.off_rating} D:${t.def_rating}`],
+    ...(hasBenchData ? [["BENCH NET", t.bench_net, bc, `${t.bench_ppg} PPG`]] : []),
+    ["CLOSE", t.close_record, cc, `${(t.close_pct * 100).toFixed(0)}%`],
+    ["3PT%", `${t.three_pct}%`, "#e2e8f0", `L10: ${t.last10_three}%`],
+  ];
+
+  return (
+    <div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>
+        {t.team} <span style={{ fontSize: 11, fontWeight: 400, color: "#6b7280" }}>{t.record}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        {stats.map(([label, val, color, sub], i) => (
+          <div key={i} style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)", borderRadius: 8, padding: "8px 10px" }}>
+            <div style={{ fontSize: 10, color: "#6b7280", textTransform: "uppercase" }}>{label}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color }}>
+              {typeof val === "number" ? (val > 0 ? "+" : "") + val : val}
+            </div>
+            <div style={{ fontSize: 10, color: "#4a5568" }}>{sub}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        {t.b2b && <Pill text="B2B ⚠" color="#ef4444" />}
+        {!t.b2b && t.rest_days >= 2 && (
+          <Pill
+            text={t.rest_days >= 4 ? `${t.rest_days}d rest ⚠` : `${t.rest_days}d rest`}
+            color={t.rest_days >= 4 ? "#f59e0b" : "#22c55e"}
+          />
+        )}
+        <span style={{ fontSize: 11, color: "#4a5568" }}>{t.last5} ({t.streak})</span>
+      </div>
+      {(t.injuries?.filter(p => p.status === "Out" || p.status === "Doubtful")?.length > 0) && (
+        <div style={{ marginTop: 6 }}>
+          {t.injuries.filter(p => p.status === "Out" || p.status === "Doubtful").map((p, i) => {
+            const isLongTerm = p.priced_in === true && p.tenure !== "fresh";
+            const isFresh = p.priced_in === false || p.tenure === "fresh";
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
+                <span style={{ fontSize: 10 }}>🚑</span>
+                <span style={{ fontSize: 10, color: isFresh ? "#ef4444" : "#6b7280" }}>{p.name}</span>
+                {isFresh && (
+                  <span style={{ fontSize: 9, padding: "1px 5px", borderRadius: 3, background: "rgba(239,68,68,0.12)", color: "#ef4444", fontWeight: 700 }}>
+                    FRESH
+                  </span>
+                )}
+                {isLongTerm && (
+                  <span style={{ fontSize: 9, color: "#4a5568", fontStyle: "italic" }}>
+                    already priced in
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

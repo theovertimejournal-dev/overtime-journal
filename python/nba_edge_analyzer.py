@@ -1054,8 +1054,8 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Pascal Siakam":     {"team": "IND", "games_missed": 15, "games_back": 3,  "net_with": 4.5,  "net_without": -3.0, "boost": 3.5},
         # Jalen Williams: still out OKC
         "Jalen Williams":    {"team": "OKC", "games_missed": 15, "games_back": 0,  "net_with": 10.0, "net_without": 5.0,  "boost": 3.0},
-        # Ant Edwards: OUT as of March 25
-        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "games_back": 0,  "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
+        # Ant Edwards: back — returned early April, ~2 games back
+        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "games_back": 2,  "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
         # Kel'el Ware: back 3 games after 14 missed
         "Kel'el Ware":       {"team": "MIA", "games_missed": 14, "games_back": 3,  "net_with": 2.0,  "net_without": -3.0, "boost": 2.5},
     }

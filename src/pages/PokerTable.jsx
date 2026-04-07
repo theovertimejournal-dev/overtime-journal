@@ -268,9 +268,10 @@ function BettingControls({ gameState, mySeat, onAction }) {
   );
 }
 
-// ─── Chat panel ───────────────────────────────────────────────────────────────
-function ChatPanel({ messages, onSend, currentUsername }) {
-  const [input, setInput] = useState('');
+// ─── Chat panel — desktop: right sidebar, mobile: bottom drawer ───────────────
+function ChatPanel({ messages, onSend, currentUsername, isMobile }) {
+  const [input, setInput]       = useState('');
+  const [expanded, setExpanded] = useState(false); // mobile only
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -284,9 +285,100 @@ function ChatPanel({ messages, onSend, currentUsername }) {
     setInput('');
   }
 
+  const lastMsg = messages[messages.length - 1];
+
+  // ── Mobile: collapsed tab + expandable drawer ──
+  if (isMobile) {
+    return (
+      <>
+        {/* Collapsed tab — always visible, shows last message */}
+        {!expanded && (
+          <div
+            onClick={() => setExpanded(true)}
+            style={{
+              position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 28,
+              background: 'rgba(8,8,15,0.95)', borderTop: '1px solid rgba(255,255,255,0.08)',
+              padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 10,
+              cursor: 'pointer',
+            }}
+          >
+            <span style={{ fontSize: 9, color: '#374151', fontFamily: FONT, letterSpacing: '0.1em', flexShrink: 0 }}>💬 CHAT</span>
+            <span style={{ flex: 1, fontSize: 10, color: '#6b7280', fontFamily: FONT, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+              {lastMsg
+                ? lastMsg.type === 'system'
+                  ? `— ${lastMsg.message}`
+                  : `${lastMsg.username}: ${lastMsg.message}`
+                : 'No messages yet'}
+            </span>
+            <span style={{ fontSize: 10, color: '#374151' }}>▲</span>
+          </div>
+        )}
+
+        {/* Expanded drawer */}
+        {expanded && (
+          <div style={{
+            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
+            height: '45vh', background: 'rgba(8,8,15,0.98)',
+            borderTop: '1px solid rgba(255,255,255,0.1)',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            {/* Drawer header */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)',
+            }}>
+              <span style={{ fontSize: 9, color: '#374151', fontFamily: FONT, letterSpacing: '0.12em' }}>TABLE CHAT</span>
+              <button onClick={() => setExpanded(false)} style={{
+                background: 'none', border: 'none', color: '#6b7280', fontSize: 14, cursor: 'pointer', padding: 0,
+              }}>▼</button>
+            </div>
+
+            {/* Messages */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {messages.map((m, i) => (
+                <div key={i} style={{ fontSize: 11, lineHeight: 1.5 }}>
+                  {m.type === 'system' ? (
+                    <span style={{ color: '#fbbf24', fontStyle: 'italic', fontFamily: FONT }}>— {m.message}</span>
+                  ) : (
+                    <>
+                      <span style={{ color: m.username === currentUsername ? '#ef4444' : '#6366f1', fontWeight: 700, fontFamily: FONT }}>{m.username}: </span>
+                      <span style={{ color: '#94a3b8' }}>{m.message}</span>
+                    </>
+                  )}
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+
+            {/* Input */}
+            <div style={{ padding: '8px 14px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: 8 }}>
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submit()}
+                placeholder="Say something..."
+                style={{
+                  flex: 1, padding: '8px 12px', borderRadius: 8,
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#f1f5f9', fontSize: 12, fontFamily: FONT, outline: 'none',
+                }}
+              />
+              <button onClick={submit} style={{
+                padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                color: '#ef4444', fontSize: 12, fontFamily: FONT,
+              }}>▶</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ── Desktop: right sidebar ──
   return (
     <div style={{
-      position: 'fixed', right: 0, top: 60, bottom: 100,
+      position: 'fixed', right: 0, top: 52, bottom: 0,
       width: 220, background: 'rgba(8,8,15,0.92)',
       borderLeft: '1px solid rgba(255,255,255,0.07)',
       display: 'flex', flexDirection: 'column', zIndex: 20,
@@ -332,13 +424,13 @@ function ChatPanel({ messages, onSend, currentUsername }) {
 }
 
 // ─── Main PokerTable component ────────────────────────────────────────────────
-export default function PokerTable() {
+export default function PokerTable({ user: userProp, profile: profileProp }) {
   const { roomId } = useParams();
   const location   = useLocation();
   const navigate   = useNavigate();
 
-  const [user, setUser]           = useState(null);
-  const [profile, setProfile]     = useState(null);
+  const [user, setUser]           = useState(userProp || null);
+  const [profile, setProfile]     = useState(profileProp || null);
   const [room, setRoom]           = useState(null);
   const [gameState, setGameState] = useState(null);
   const [myHoleCards, setMyHoleCards] = useState([]);
@@ -350,12 +442,20 @@ export default function PokerTable() {
   const [buyInSeat, setBuyInSeat]  = useState(null);
   const [buyInAmount, setBuyInAmount] = useState(500);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   const roomRef = useRef(null);
   const tableState = location.state?.tableState || {};
 
-  // ── Auth + profile ──
   useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+
+  // ── Auth + profile (only if not passed as props) ──
+  useEffect(() => {
+    if (userProp && profileProp) return; // already have them from App
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { navigate('/'); return; }
       setUser(session.user);
@@ -363,6 +463,10 @@ export default function PokerTable() {
         .then(({ data }) => setProfile(data));
     });
   }, []);
+
+  // ── Sync props if parent updates them ──
+  useEffect(() => { if (userProp) setUser(userProp); }, [userProp]);
+  useEffect(() => { if (profileProp) setProfile(profileProp); }, [profileProp]);
 
   // ── Connect to Colyseus ──
   useEffect(() => {
@@ -390,8 +494,9 @@ export default function PokerTable() {
           if (!mounted) return;
           setGameState(state);
 
-          // Find my seat index
-          const idx = state.seats?.findIndex(s => s?.userId === profile.user_id);
+          // Find my seat — server may use userId or user_id
+          const myId = profile.user_id || profile.id;
+          const idx = state.seats?.findIndex(s => s && (s.userId === myId || s.user_id === myId));
           if (idx !== undefined && idx !== -1) setMySeatIndex(idx);
 
           // Hide status after game starts
@@ -431,7 +536,11 @@ export default function PokerTable() {
 
         // ── Table info (tier, blinds) ──
         r.onMessage('table_info', (info) => {
-          if (mounted) setStatus({ type: 'info', msg: `${info.tier?.toUpperCase() || 'TABLE'} — Blinds $${info.blinds?.[0]}/$${info.blinds?.[1]}` });
+          if (!mounted) return;
+          // blinds can come as array [sb, bb] or object {sb, bb} depending on server version
+          const sb = Array.isArray(info.blinds) ? info.blinds[0] : info.blinds?.sb ?? info.smallBlind ?? '?';
+          const bb = Array.isArray(info.blinds) ? info.blinds[1] : info.blinds?.bb ?? info.bigBlind ?? '?';
+          setStatus({ type: 'info', msg: `${info.tier?.toUpperCase() || 'TABLE'} — Blinds $${sb}/$${bb}` });
         });
 
         // ── Silence unhandled messages ──
@@ -512,9 +621,16 @@ export default function PokerTable() {
   const communityCards = gameState?.communityCards || [];
   const pot = gameState?.pot || 0;
   const phase = gameState?.phase || 'waiting';
-  const currentTurnUserId = gameState?.currentTurnUserId;
+  // Server may send currentTurnSeat (index) or currentTurnUserId — handle both
+  const currentTurnSeat = gameState?.currentTurnSeat ?? gameState?.currentSeat ?? gameState?.activePlayer ?? gameState?.currentPlayer;
+  const currentTurnUserId = gameState?.currentTurnUserId
+    ?? (currentTurnSeat != null ? seats[currentTurnSeat]?.userId : null);
   const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
-  const isMyTurn = currentTurnUserId === profile?.user_id;
+  const isMyTurn = profile != null && (
+    currentTurnUserId === profile.user_id ||
+    currentTurnUserId === profile.id ||
+    (currentTurnSeat != null && currentTurnSeat === mySeatIndex)
+  );
 
   // Inject hole cards into my seat for display
   const displaySeats = seats.map((s, i) => {
@@ -579,9 +695,10 @@ export default function PokerTable() {
       {/* ── Poker table felt ── */}
       <div style={{
         position: 'relative',
-        margin: '70px auto 120px',
-        width: '100%', maxWidth: 820,
-        height: 'calc(100vh - 190px)',
+        margin: '70px auto 0',
+        width: isMobile ? '100%' : 'calc(100% - 220px)',
+        maxWidth: isMobile ? '100%' : 820,
+        height: isMobile ? 'calc(100vh - 140px)' : 'calc(100vh - 190px)',
         minHeight: 400,
       }}>
         {/* Felt oval */}
@@ -635,13 +752,33 @@ export default function PokerTable() {
             key={i}
             seatIndex={i}
             seat={seat}
-            isYou={seat?.userId === profile?.user_id}
+            isYou={profile != null && (seat?.userId === profile.user_id || seat?.userId === profile.id || seat?.user_id === profile.user_id)}
             myTurn={isMyTurn && seat?.userId === profile?.user_id}
             gamePhase={phase}
             onSit={handleSeatClick}
           />
         ))}
       </div>
+
+      {/* ── DEBUG overlay (remove after confirmed working) ── */}
+      {gameState && (
+        <div style={{
+          position: 'fixed', top: 60, left: 8, zIndex: 99,
+          background: 'rgba(0,0,0,0.85)', border: '1px solid #333',
+          borderRadius: 6, padding: '6px 10px', fontSize: 9,
+          fontFamily: FONT, color: '#6b7280', maxWidth: 220,
+          pointerEvents: 'none',
+        }}>
+          <div style={{ color: '#fbbf24', marginBottom: 2 }}>DEBUG (remove when working)</div>
+          <div>phase: <span style={{ color: '#f1f5f9' }}>{gameState.phase}</span></div>
+          <div>mySeatIdx: <span style={{ color: '#f1f5f9' }}>{mySeatIndex ?? 'null'}</span></div>
+          <div>currentTurnSeat: <span style={{ color: '#f1f5f9' }}>{String(currentTurnSeat)}</span></div>
+          <div>currentTurnUserId: <span style={{ color: '#f1f5f9' }}>{String(currentTurnUserId)?.slice(0,12)}</span></div>
+          <div>myId: <span style={{ color: '#f1f5f9' }}>{String(profile?.user_id || profile?.id)?.slice(0,12)}</span></div>
+          <div>isMyTurn: <span style={{ color: isMyTurn ? '#22c55e' : '#ef4444' }}>{String(isMyTurn)}</span></div>
+          <div>gameState keys: <span style={{ color: '#818cf8' }}>{Object.keys(gameState).join(', ')}</span></div>
+        </div>
+      )}
 
       {/* ── My turn glow pulse ── */}
       {isMyTurn && (
@@ -658,7 +795,7 @@ export default function PokerTable() {
       )}
 
       {/* ── Chat ── */}
-      <ChatPanel messages={chatMessages} onSend={handleChat} currentUsername={profile?.username} />
+      <ChatPanel messages={chatMessages} onSend={handleChat} currentUsername={profile?.username} isMobile={isMobile} />
 
       {/* ── Buy-in modal ── */}
       {showBuyIn && (

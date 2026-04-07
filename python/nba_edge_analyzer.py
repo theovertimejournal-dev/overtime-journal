@@ -922,6 +922,7 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Jalen Johnson":             ("ATL", 3.5),
         "Brandon Miller":            ("CHA", 3.0),
         "Josh Giddey":               ("CHI", 2.5),
+        "Stephen Curry":             ("GSW", 5.0),
         "Jimmy Butler":              ("GSW", 3.5),
         "Ja Morant":                 ("MEM", 4.5),
         "Anthony Edwards":           ("MIN", 3.5),
@@ -1036,6 +1037,8 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Luka Doncic":       {"team": "LAL", "games_missed": 20, "games_back": 15, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
         # Giannis: still out as of March 26
         "Giannis Antetokounmpo": {"team": "MIL", "games_missed": 20, "games_back": 0,  "net_with": 8.0, "net_without": 1.2, "boost": 4.5},
+        # Stephen Curry: out with injury (season-ending)
+        "Stephen Curry":     {"team": "GSW", "games_missed": 25, "games_back": 0,  "net_with": 8.5,  "net_without": 0.0,  "boost": 6.0},
         # Jimmy Butler: OUT all season at GSW — multiple injuries
         "Jimmy Butler":      {"team": "GSW", "games_missed": 50, "games_back": 0,  "net_with": 3.5,  "net_without": -5.0, "boost": 3.5},
         # Ja Morant: only 20 games played (UCL sprain), still out

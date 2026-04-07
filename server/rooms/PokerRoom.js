@@ -75,6 +75,24 @@ class PokerRoom extends Room {
         this.onMessage("all_in", (client) => this.handleAction(client, "all_in"));
         this.onMessage("chat", (client, data) => this.handleChat(client, data));
         this.onMessage("add_chips", (client, data) => this.handleAddChips(client, data));
+        this.onMessage("emoji_reaction", (client, data) => {
+            const fromSeat = this.findSeatBySession(client.sessionId);
+            if (fromSeat === null) return;
+            const { toSeat, emoji } = data;
+            // Validate: target seat must exist and be occupied
+            if (toSeat === undefined || toSeat === fromSeat || !this.seats[toSeat]) return;
+            // Whitelist safe emojis only
+            const allowed = ['🥧','💸','😡','😂','👏','💀','🔥','🥶'];
+            if (!allowed.includes(emoji)) return;
+            const fromUsername = this.seats[fromSeat]?.username || 'Someone';
+            // Broadcast to all clients so everyone sees the animation
+            this.broadcast("emoji_reaction", {
+                fromSeat,
+                toSeat,
+                emoji,
+                fromUsername,
+            });
+        });
 
         console.log(`🃏 PokerRoom created: ${this.tableName} (${this.tier}) — code: ${this.roomCode}`);
     }

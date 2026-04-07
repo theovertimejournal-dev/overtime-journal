@@ -1300,9 +1300,8 @@ export default function LandingPage({ user, profile, sessionValidated }) {
           .limit(50),
         supabase.from('blog_posts')
           .select('*')
-          
           .order('date', { ascending: false })
-          .limit(10),
+          .limit(2),
       ]);
 
       setLiveFeed(newsRes.data || []);
@@ -1576,7 +1575,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
             </div>
 
             {/* Journal posts from blog_posts table */}
-            {(feedFilter === 'all' || feedFilter === 'journal') && blogPosts.map((post, i) => (
+            {(feedFilter === 'all' || feedFilter === 'journal') && blogPosts.slice(0, 2).map((post, i) => (
               <PostCard key={`blog-${i}`} post={{
                 ...post,
                 date: post.display_date || post.date,

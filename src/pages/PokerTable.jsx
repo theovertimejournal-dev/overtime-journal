@@ -92,31 +92,48 @@ const EMOJIS = [
   { id: 'cold',    emoji: '🥶', label: 'Cold'    },
 ];
 
-// EmojiProjectile: animates from fromPos to toPos then disappears
-function EmojiProjectile({ id, emoji, fromPos, toPos, onDone }) {
+// EmojiProjectile: animates from one seat to another using tableRef for positioning
+function EmojiProjectile({ id, emoji, fromSeat, toSeat, tableRef, onDone }) {
   const ref = useRef(null);
 
   useEffect(() => {
-    if (!ref.current) return;
-    // Use Web Animations API for smooth arc
-    const dx = toPos.x - fromPos.x;
-    const dy = toPos.y - fromPos.y;
-    const midX = fromPos.x + dx * 0.5;
-    const midY = fromPos.y + dy * 0.5 - 120; // arc up
+    if (!ref.current || !tableRef.current) return;
+
+    // Resolve pixel coords from SEAT_POSITIONS percentages + live table rect
+    const tableRect = tableRef.current.getBoundingClientRect();
+    const TABLE_W = tableRect.width;
+    const TABLE_H = tableRect.height;
+
+    function seatCenter(seatIdx) {
+      const pos = SEAT_POSITIONS[seatIdx];
+      const pctX = parseFloat(pos.left) / 100;
+      const pctY = parseFloat(pos.top)  / 100;
+      return {
+        x: tableRect.left + TABLE_W * pctX,
+        y: tableRect.top  + TABLE_H * pctY,
+      };
+    }
+
+    const from = seatCenter(fromSeat);
+    const to   = seatCenter(toSeat);
+
+    // Arc midpoint — curve up and toward target
+    const midX = (from.x + to.x) / 2;
+    const midY = Math.min(from.y, to.y) - 100;
 
     ref.current.animate([
-      { left: fromPos.x + 'px', top: fromPos.y + 'px', fontSize: '28px', opacity: 1, transform: 'rotate(0deg) scale(1)' },
-      { left: midX + 'px',      top: midY + 'px',      fontSize: '36px', opacity: 1, transform: 'rotate(180deg) scale(1.3)' },
-      { left: toPos.x + 'px',   top: toPos.y + 'px',   fontSize: '48px', opacity: 0, transform: 'rotate(360deg) scale(0.5)' },
-    ], { duration: 900, easing: 'ease-in-out', fill: 'forwards' }).onfinish = onDone;
+      { left: from.x + 'px', top: from.y + 'px', fontSize: '26px', opacity: 1,   transform: 'rotate(0deg)   scale(1)'   },
+      { left: midX   + 'px', top: midY   + 'px', fontSize: '34px', opacity: 1,   transform: 'rotate(180deg) scale(1.3)' },
+      { left: to.x   + 'px', top: to.y   + 'px', fontSize: '44px', opacity: 0,   transform: 'rotate(360deg) scale(0.4)' },
+    ], { duration: 850, easing: 'cubic-bezier(0.25,0.46,0.45,0.94)', fill: 'forwards' }).onfinish = onDone;
   }, []);
 
   return (
     <div ref={ref} style={{
       position: 'fixed', pointerEvents: 'none', zIndex: 200,
-      left: fromPos.x, top: fromPos.y,
-      fontSize: 28, userSelect: 'none',
-      filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.6))',
+      left: 0, top: 0,
+      fontSize: 26, userSelect: 'none',
+      filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.7))',
     }}>
       {emoji}
     </div>
@@ -175,8 +192,6 @@ function Seat({ seat, seatIndex, isCurrentTurn, isDealer, mySeat, phase, onSitDo
       <div
         onClick={() => onSitDown && onSitDown(seatIndex)}
         style={{
-          position: 'absolute', top: pos.top, left: pos.left,
-          transform: 'translate(-50%, -50%)',
           width: 70, height: 70, borderRadius: '50%',
           background: 'rgba(255,255,255,0.02)', border: '2px dashed rgba(255,255,255,0.08)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -198,9 +213,7 @@ function Seat({ seat, seatIndex, isCurrentTurn, isDealer, mySeat, phase, onSitDo
 
   return (
     <div style={{
-      position: 'absolute', top: pos.top, left: pos.left,
-      transform: 'translate(-50%, -50%)',
-      textAlign: 'center', zIndex: isCurrentTurn ? 5 : 2,
+      textAlign: 'center',
     }}>
       {isCurrentTurn && (
         <>
@@ -592,18 +605,9 @@ export default function PokerTable() {
 
         room.onMessage('emoji_reaction', ({ fromSeat, toSeat, emoji, fromUsername }) => {
           if (!mounted) return;
-          // Calculate positions from seat refs
-          const fromEl = seatRefs.current[fromSeat];
-          const toEl   = seatRefs.current[toSeat];
-          if (!fromEl || !toEl) return;
-          const fromRect = fromEl.getBoundingClientRect();
-          const toRect   = toEl.getBoundingClientRect();
           const pid = ++projectileId.current;
-          setProjectiles(prev => [...prev, {
-            id: pid, emoji,
-            fromPos: { x: fromRect.left + fromRect.width / 2, y: fromRect.top + fromRect.height / 2 },
-            toPos:   { x: toRect.left  + toRect.width  / 2, y: toRect.top  + toRect.height  / 2 },
-          }]);
+          // Use tableRef to calculate absolute screen positions from SEAT_POSITIONS percentages
+          setProjectiles(prev => [...prev, { id: pid, emoji, fromSeat, toSeat }]);
         });
 
         room.onMessage('player_joined', ({ username }) => {
@@ -773,9 +777,15 @@ export default function PokerTable() {
         )}
 
         {seats.map((seat, i) => (
-          <div key={i} ref={el => seatRefs.current[i] = el}
+          <div key={i}
             onClick={() => seat && handleSeatClickForEmoji(i)}
-            style={{ cursor: seat && i !== mySeat ? 'pointer' : 'default' }}
+            style={{
+              position: 'absolute',
+              top: SEAT_POSITIONS[i].top, left: SEAT_POSITIONS[i].left,
+              transform: 'translate(-50%,-50%)',
+              cursor: seat && i !== mySeat ? 'pointer' : 'default',
+              zIndex: currentTurn === i ? 5 : 2,
+            }}
           >
             <Seat
               seat={seat} seatIndex={i}
@@ -808,8 +818,9 @@ export default function PokerTable() {
           key={p.id}
           id={p.id}
           emoji={p.emoji}
-          fromPos={p.fromPos}
-          toPos={p.toPos}
+          fromSeat={p.fromSeat}
+          toSeat={p.toSeat}
+          tableRef={tableRef}
           onDone={() => setProjectiles(prev => prev.filter(x => x.id !== p.id))}
         />
       ))}

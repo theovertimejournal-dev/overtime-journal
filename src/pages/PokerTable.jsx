@@ -1,323 +1,719 @@
-import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { Client } from 'colyseus.js';
 import { supabase } from '../lib/supabase';
 import { AvatarMini } from '../components/common/AvatarSystem';
 
+const COLYSEUS_URL = import.meta.env.VITE_COLYSEUS_URL || 'wss://overtime-journal-server.up.railway.app';
 const FONT = "'JetBrains Mono','SF Mono',monospace";
 
-const RANK_STYLES = {
-  0: { emoji: "👑", color: "#fbbf24", bg: "rgba(251,191,36,0.08)", border: "rgba(251,191,36,0.2)" },
-  1: { emoji: "🥈", color: "#94a3b8", bg: "rgba(148,163,184,0.06)", border: "rgba(148,163,184,0.15)" },
-  2: { emoji: "🥉", color: "#d97706", bg: "rgba(217,119,6,0.06)", border: "rgba(217,119,6,0.15)" },
-};
+// ─── Card rendering ───────────────────────────────────────────────────────────
+const SUIT_SYMBOLS = { s: '♠', h: '♥', d: '♦', c: '♣' };
+const SUIT_COLORS  = { s: '#1e1b4b', h: '#dc2626', d: '#dc2626', c: '#1e1b4b' };
+const SUIT_BG      = { s: '#e0e7ff', h: '#fff0f0', d: '#fff0f0', c: '#e0e7ff' };
 
-function formatBucks(n) {
-  if (n == null) return "$0";
-  return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString();
+function parseCard(card) {
+  if (!card || card === '??' || card === 'XX') return null;
+  const val  = card.slice(0, -1);
+  const suit = card.slice(-1).toLowerCase();
+  return { val, suit };
 }
 
-function LeaderRow({ rank, user, stat, statLabel, statColor, currentUserId }) {
-  const navigate = useNavigate();
-  const rs = RANK_STYLES[rank] || { emoji: null, color: "#6b7280", bg: "transparent", border: "rgba(255,255,255,0.04)" };
-  const isYou = currentUserId && user.user_id === currentUserId;
+function PlayingCard({ card, hidden = false, small = false }) {
+  const size = small ? { w: 32, h: 46, font: 11, suitFont: 16 }
+                     : { w: 48, h: 68, font: 13, suitFont: 24 };
+
+  if (hidden || !card) {
+    return (
+      <div style={{
+        width: size.w, height: size.h, borderRadius: 6,
+        background: 'linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)',
+        border: '1px solid rgba(99,102,241,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        flexShrink: 0,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+      }}>
+        <span style={{ fontSize: size.suitFont - 4, opacity: 0.4 }}>🂠</span>
+      </div>
+    );
+  }
+
+  const parsed = parseCard(card);
+  if (!parsed) return null;
+  const { val, suit } = parsed;
+  const color = SUIT_COLORS[suit] || '#111';
+  const bg    = SUIT_BG[suit]    || '#fff';
 
   return (
-    <div
-      onClick={() => navigate(`/profile/${user.username}`)}
-      style={{
-        display: "flex", alignItems: "center", gap: 12,
-        padding: "12px 14px", borderRadius: 10, cursor: "pointer",
-        background: isYou ? "rgba(239,68,68,0.06)" : rs.bg,
-        border: `1px solid ${isYou ? "rgba(239,68,68,0.2)" : rs.border}`,
-        transition: "all 0.12s ease",
-      }}
-      onMouseEnter={e => e.currentTarget.style.background = isYou ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.04)"}
-      onMouseLeave={e => e.currentTarget.style.background = isYou ? "rgba(239,68,68,0.06)" : rs.bg}
-    >
-      {/* Rank */}
-      <div style={{ width: 28, textAlign: "center", flexShrink: 0 }}>
-        {rs.emoji ? (
-          <span style={{ fontSize: 18 }}>{rs.emoji}</span>
-        ) : (
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#374151" }}>#{rank + 1}</span>
-        )}
+    <div style={{
+      width: size.w, height: size.h, borderRadius: 6,
+      background: bg,
+      border: '1px solid rgba(0,0,0,0.15)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      position: 'relative', flexShrink: 0,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+      userSelect: 'none',
+    }}>
+      {/* Top-left pip */}
+      <div style={{ position: 'absolute', top: 3, left: 5, fontSize: size.font - 1, fontWeight: 800, color, lineHeight: 1, fontFamily: FONT }}>
+        {val}<br />
+        <span style={{ fontSize: size.font - 2 }}>{SUIT_SYMBOLS[suit]}</span>
       </div>
-
-      {/* Avatar */}
-      <AvatarMini config={user.avatar_config} size={36} style={{
-        flexShrink: 0,
-        border: "2px solid rgba(255,255,255,0.08)",
-      }} />
-
-      {/* Name */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: isYou ? "#ef4444" : "#f1f5f9" }}>
-          @{user.username} {isYou && <span style={{ fontSize: 9, color: "#ef4444", fontWeight: 400 }}>(you)</span>}
-        </div>
-      </div>
-
-      {/* Poker badges if on poker tab */}
-      {user.poker_badges?.length > 0 && (
-        <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
-          {user.poker_badges.slice(-3).map((b, i) => (
-            <span key={i} title={b.name} style={{ fontSize: 14 }}>{b.emoji}</span>
-          ))}
-        </div>
-      )}
-
-      {/* Stat */}
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: statColor || rs.color }}>
-          {stat}
-        </div>
-        <div style={{ fontSize: 9, color: "#4a5568" }}>{statLabel}</div>
+      {/* Center suit */}
+      <span style={{ fontSize: size.suitFont, color }}>{SUIT_SYMBOLS[suit]}</span>
+      {/* Bottom-right pip (rotated) */}
+      <div style={{ position: 'absolute', bottom: 3, right: 5, fontSize: size.font - 1, fontWeight: 800, color, lineHeight: 1, fontFamily: FONT, transform: 'rotate(180deg)', textAlign: 'left' }}>
+        {val}<br />
+        <span style={{ fontSize: size.font - 2 }}>{SUIT_SYMBOLS[suit]}</span>
       </div>
     </div>
   );
 }
 
-export default function LeaderboardPage({ currentUser }) {
-  const [tab, setTab] = useState('winrate');
-  const [leaders, setLeaders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const navigate = useNavigate();
+// ─── Chip stack visual ────────────────────────────────────────────────────────
+function ChipStack({ amount }) {
+  if (!amount || amount <= 0) return null;
+  const count = Math.min(Math.ceil(amount / 100), 6);
+  const chipColors = ['#ef4444','#fbbf24','#22c55e','#3b82f6','#a855f7','#f97316'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} style={{
+          width: 28, height: 7, borderRadius: 3,
+          background: chipColors[i % chipColors.length],
+          border: '1px solid rgba(0,0,0,0.3)',
+          marginBottom: -3,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+        }} />
+      ))}
+      <div style={{ fontSize: 9, fontWeight: 700, color: '#fbbf24', marginTop: 6, fontFamily: FONT }}>
+        ${amount.toLocaleString()}
+      </div>
+    </div>
+  );
+}
 
-  useEffect(() => { loadLeaderboard(); }, [tab]);
+// ─── Seat positions (oval table layout) ──────────────────────────────────────
+const SEAT_POSITIONS = [
+  { top: '72%', left: '18%' },  // 0 — bottom-left
+  { top: '85%', left: '40%' },  // 1 — bottom-center-left
+  { top: '85%', left: '60%' },  // 2 — bottom-center-right
+  { top: '72%', left: '82%' },  // 3 — bottom-right
+  { top: '28%', left: '82%' },  // 4 — top-right
+  { top: '15%', left: '60%' },  // 5 — top-center-right
+  { top: '15%', left: '40%' },  // 6 — top-center-left
+  { top: '28%', left: '18%' },  // 7 — top-left
+];
 
-  async function loadLeaderboard() {
-    setLoading(true);
+function SeatSpot({ seatIndex, seat, isYou, myTurn, gamePhase, onSit }) {
+  const pos = SEAT_POSITIONS[seatIndex];
+  const isEmpty = !seat || !seat.username;
 
-    // Fetch all profiles with picks
-    const { data: profiles, error: profilesErr } = await supabase
-      .from('profiles')
-      .select('*')
-      .not('username', 'is', null)
-      .order('created_at', { ascending: true });
+  const statusColor = seat?.status === 'folded' ? '#374151'
+    : myTurn ? '#fbbf24'
+    : seat?.status === 'all_in' ? '#a855f7'
+    : '#6b7280';
 
-    if (profilesErr) {
-      console.error('[Leaderboard] profiles query error:', profilesErr.message);
-    }
-    if (!profiles) { setLoading(false); return; }
+  return (
+    <div style={{
+      position: 'absolute',
+      top: pos.top, left: pos.left,
+      transform: 'translate(-50%, -50%)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+      zIndex: 5,
+    }}>
+      {/* Bet chip overlay */}
+      {seat?.currentBet > 0 && (
+        <div style={{ position: 'absolute', top: '-36px', left: '50%', transform: 'translateX(-50%)', zIndex: 6 }}>
+          <ChipStack amount={seat.currentBet} />
+        </div>
+      )}
 
-    // Fetch pick stats for each user (aggregate)
-    const { data: allPicks } = await supabase
-      .from('game_picks')
-      .select('user_id, result, net, wager')
-      .not('result', 'is', null);
+      {/* Dealer button */}
+      {seat?.isDealer && (
+        <div style={{
+          position: 'absolute', top: -10, right: -10, zIndex: 7,
+          width: 18, height: 18, borderRadius: '50%',
+          background: '#fbbf24', color: '#000',
+          fontSize: 8, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: '2px solid #000', fontFamily: FONT,
+        }}>D</div>
+      )}
 
-    // Build stats per user
-    const statsMap = {};
-    for (const p of (allPicks || [])) {
-      if (!statsMap[p.user_id]) statsMap[p.user_id] = { wins: 0, losses: 0, totalNet: 0, totalWagered: 0, picks: 0 };
-      const s = statsMap[p.user_id];
-      s.picks++;
-      if (p.result === 'win' || p.result === 'W') s.wins++;
-      if (p.result === 'loss' || p.result === 'L') s.losses++;
-      s.totalNet += parseFloat(p.net || 0);
-      s.totalWagered += parseFloat(p.wager || 0);
-    }
+      {isEmpty ? (
+        <div
+          onClick={() => onSit(seatIndex)}
+          style={{
+            width: 56, height: 56, borderRadius: '50%',
+            background: 'rgba(255,255,255,0.03)',
+            border: '2px dashed rgba(255,255,255,0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', transition: 'all 0.2s',
+            fontSize: 10, color: '#374151', fontFamily: FONT,
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(239,68,68,0.5)'; e.currentTarget.style.background = 'rgba(239,68,68,0.05)'; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+        >
+          SIT
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+          {/* Avatar */}
+          <div style={{
+            position: 'relative',
+            border: `2px solid ${myTurn ? '#fbbf24' : isYou ? '#ef4444' : 'rgba(255,255,255,0.1)'}`,
+            borderRadius: '50%',
+            boxShadow: myTurn ? '0 0 12px rgba(251,191,36,0.5)' : 'none',
+            transition: 'all 0.3s',
+          }}>
+            <AvatarMini config={seat.avatar?.config || seat.avatarConfig} size={44} />
+          </div>
 
-    // Merge profiles with stats
-    let merged = profiles.map(p => ({
-      ...p,
-      stats: statsMap[p.user_id] || { wins: 0, losses: 0, totalNet: 0, totalWagered: 0, picks: 0 },
-    }));
+          {/* Name + stack */}
+          <div style={{
+            background: 'rgba(8,8,15,0.85)', backdropFilter: 'blur(8px)',
+            borderRadius: 6, padding: '3px 7px',
+            border: `1px solid ${statusColor}33`,
+            textAlign: 'center', minWidth: 70,
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: isYou ? '#ef4444' : '#f1f5f9', fontFamily: FONT }}>
+              {seat.username?.length > 10 ? seat.username.slice(0, 9) + '…' : seat.username}
+            </div>
+            <div style={{ fontSize: 9, color: statusColor, fontFamily: FONT }}>
+              {seat.status === 'folded' ? 'FOLDED'
+               : seat.status === 'all_in' ? 'ALL IN'
+               : `$${(seat.chips || 0).toLocaleString()}`}
+            </div>
+          </div>
 
-    // Sort based on tab
-    if (tab === 'winrate') {
-      // Min 3 picks to qualify
-      merged = merged
-        .filter(u => (u.stats.wins + u.stats.losses) >= 3)
-        .sort((a, b) => {
-          const aRate = a.stats.wins / (a.stats.wins + a.stats.losses);
-          const bRate = b.stats.wins / (b.stats.wins + b.stats.losses);
-          return bRate - aRate || b.stats.wins - a.stats.wins;
-        });
-    } else if (tab === 'profit') {
-      merged = merged
-        .filter(u => u.stats.picks >= 1)
-        .sort((a, b) => b.stats.totalNet - a.stats.totalNet);
-    } else if (tab === 'bankroll') {
-      merged.sort((a, b) => (b.bankroll || 0) - (a.bankroll || 0));
-    } else if (tab === 'poker') {
-      merged = merged
-        .filter(u => u.poker_stats?.hands_won > 0)
-        .sort((a, b) => (b.poker_stats?.total_won || 0) - (a.poker_stats?.total_won || 0));
-    }
+          {/* Hole cards (face-down for others, face-up for you) */}
+          {seat.holeCards?.length > 0 && gamePhase !== 'waiting' && (
+            <div style={{ display: 'flex', gap: 3 }}>
+              {seat.holeCards.map((c, i) => (
+                <PlayingCard key={i} card={c} hidden={!isYou && c === '??' || (!isYou)} small />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-    setLeaders(merged.slice(0, 10));
-    setLoading(false);
-  }
+// ─── Betting controls ─────────────────────────────────────────────────────────
+function BettingControls({ gameState, mySeat, onAction }) {
+  const [raiseAmount, setRaiseAmount] = useState(0);
+  const bigBlind    = gameState?.blinds?.[1] || 10;
+  const callAmount  = (gameState?.currentBet || 0) - (mySeat?.currentBet || 0);
+  const canCheck    = callAmount <= 0;
+  const canRaise    = (mySeat?.chips || 0) > callAmount;
+  const minRaise    = (gameState?.currentBet || 0) + bigBlind;
+  const maxRaise    = mySeat?.chips || 0;
 
-  async function handleSearch(q) {
-    setSearch(q);
-    if (q.length < 2) { setSearchResults([]); return; }
-    setSearching(true);
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .ilike('username', `%${q}%`)
-      .not('username', 'is', null)
-      .limit(8);
-    setSearchResults(data || []);
-    setSearching(false);
-  }
+  useEffect(() => {
+    setRaiseAmount(Math.min(minRaise, maxRaise));
+  }, [minRaise, maxRaise]);
 
-  function getStatDisplay(user) {
-    const s = user.stats;
-    if (tab === 'winrate') {
-      const total = s.wins + s.losses;
-      const rate = total > 0 ? ((s.wins / total) * 100).toFixed(1) : "0";
-      return {
-        stat: `${rate}%`,
-        label: `${s.wins}-${s.losses}`,
-        color: parseFloat(rate) >= 55 ? "#22c55e" : parseFloat(rate) >= 50 ? "#f59e0b" : "#ef4444",
-      };
-    }
-    if (tab === 'profit') {
-      return {
-        stat: formatBucks(s.totalNet),
-        label: `${s.picks} picks`,
-        color: s.totalNet >= 0 ? "#22c55e" : "#ef4444",
-      };
-    }
-    if (tab === 'poker') {
-      const ps = user.poker_stats || {};
-      const won = ps.total_won || 0;
-      const handsWon = ps.hands_won || 0;
-      const handsPlayed = ps.hands_played || 0;
-      return {
-        stat: formatBucks(won),
-        label: `${handsWon}W / ${handsPlayed} hands`,
-        color: won >= 0 ? "#22c55e" : "#ef4444",
-      };
-    }
-    // bankroll
-    return {
-      stat: formatBucks(user.bankroll),
-      label: "bankroll",
-      color: "#fbbf24",
-    };
+  const btnStyle = (color, bg = 'rgba(255,255,255,0.04)') => ({
+    flex: 1, padding: '12px 8px', borderRadius: 8, cursor: 'pointer',
+    background: bg, border: `1px solid ${color}44`,
+    color, fontSize: 11, fontWeight: 700, fontFamily: FONT,
+    letterSpacing: '0.08em', transition: 'all 0.15s',
+  });
+
+  return (
+    <div style={{
+      position: 'fixed', bottom: 0, left: 0, right: 0,
+      background: 'rgba(8,8,15,0.97)', backdropFilter: 'blur(16px)',
+      borderTop: '1px solid rgba(255,255,255,0.08)',
+      padding: '12px 16px 24px', zIndex: 30,
+    }}>
+      {canRaise && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0, fontFamily: FONT }}>RAISE</span>
+          <input
+            type="range" min={minRaise} max={maxRaise} step={bigBlind}
+            value={raiseAmount}
+            onChange={e => setRaiseAmount(Number(e.target.value))}
+            style={{ flex: 1, accentColor: '#fbbf24', height: 4 }}
+          />
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', minWidth: 65, textAlign: 'right', fontFamily: FONT }}>
+            ${raiseAmount.toLocaleString()}
+          </span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onAction('fold')} style={btnStyle('#6b7280')}>FOLD</button>
+        {canCheck
+          ? <button onClick={() => onAction('check')} style={btnStyle('#22c55e', 'rgba(34,197,94,0.08)')}>CHECK</button>
+          : <button onClick={() => onAction('call', callAmount)} style={btnStyle('#3b82f6', 'rgba(59,130,246,0.08)')}>
+              CALL ${callAmount.toLocaleString()}
+            </button>
+        }
+        {canRaise && (
+          <button onClick={() => onAction('raise', raiseAmount)} style={btnStyle('#fbbf24', 'rgba(251,191,36,0.08)')}>
+            RAISE
+          </button>
+        )}
+        <button
+          onClick={() => onAction('allin', mySeat?.chips)}
+          style={btnStyle('#a855f7', 'rgba(168,85,247,0.08)')}
+        >
+          ALL IN
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Chat panel ───────────────────────────────────────────────────────────────
+function ChatPanel({ messages, onSend, currentUsername }) {
+  const [input, setInput] = useState('');
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  function submit() {
+    const msg = input.trim();
+    if (!msg) return;
+    onSend(msg);
+    setInput('');
   }
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: FONT, padding: "24px 16px 60px", maxWidth: 640, margin: "0 auto" }}>
-
-      {/* Header */}
-      <div style={{ textAlign: "center", marginBottom: 24 }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>🏆</div>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#f1f5f9", margin: "0 0 4px" }}>LEADERBOARD</h1>
-        <div style={{ fontSize: 11, color: "#4a5568" }}>Top 10 OTJ bettors</div>
+    <div style={{
+      position: 'fixed', right: 0, top: 60, bottom: 100,
+      width: 220, background: 'rgba(8,8,15,0.92)',
+      borderLeft: '1px solid rgba(255,255,255,0.07)',
+      display: 'flex', flexDirection: 'column', zIndex: 20,
+    }}>
+      <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.05)', fontSize: 9, color: '#374151', fontFamily: FONT, letterSpacing: '0.12em' }}>
+        TABLE CHAT
       </div>
-
-      {/* Search */}
-      <div style={{ marginBottom: 20, position: "relative" }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ fontSize: 10, lineHeight: 1.5 }}>
+            {m.type === 'system' ? (
+              <span style={{ color: '#fbbf24', fontStyle: 'italic', fontFamily: FONT }}>— {m.message}</span>
+            ) : (
+              <>
+                <span style={{ color: m.username === currentUsername ? '#ef4444' : '#6366f1', fontWeight: 700, fontFamily: FONT }}>{m.username}: </span>
+                <span style={{ color: '#94a3b8' }}>{m.message}</span>
+              </>
+            )}
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+      <div style={{ padding: '8px 10px', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: 6 }}>
         <input
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          placeholder="🔍 Search users..."
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()}
+          placeholder="Say something..."
           style={{
-            width: "100%", padding: "10px 14px", borderRadius: 8,
-            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
-            color: "#f1f5f9", fontSize: 12, fontFamily: FONT, outline: "none", boxSizing: "border-box",
+            flex: 1, padding: '6px 8px', borderRadius: 6,
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+            color: '#f1f5f9', fontSize: 10, fontFamily: FONT, outline: 'none',
           }}
         />
-        {searchResults.length > 0 && (
+        <button onClick={submit} style={{
+          padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+          background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+          color: '#ef4444', fontSize: 10, fontFamily: FONT,
+        }}>▶</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main PokerTable component ────────────────────────────────────────────────
+export default function PokerTable() {
+  const { roomId } = useParams();
+  const location   = useLocation();
+  const navigate   = useNavigate();
+
+  const [user, setUser]           = useState(null);
+  const [profile, setProfile]     = useState(null);
+  const [room, setRoom]           = useState(null);
+  const [gameState, setGameState] = useState(null);
+  const [myHoleCards, setMyHoleCards] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [connected, setConnected]  = useState(false);
+  const [status, setStatus]        = useState({ type: 'info', msg: 'Connecting...' });
+  const [mySeatIndex, setMySeatIndex] = useState(null);
+  const [showBuyIn, setShowBuyIn]  = useState(false);
+  const [buyInSeat, setBuyInSeat]  = useState(null);
+  const [buyInAmount, setBuyInAmount] = useState(500);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  const roomRef = useRef(null);
+  const tableState = location.state?.tableState || {};
+
+  // ── Auth + profile ──
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) { navigate('/'); return; }
+      setUser(session.user);
+      supabase.from('profiles').select('*').eq('user_id', session.user.id).single()
+        .then(({ data }) => setProfile(data));
+    });
+  }, []);
+
+  // ── Connect to Colyseus ──
+  useEffect(() => {
+    if (!roomId || !profile) return;
+    let mounted = true;
+
+    async function connect() {
+      try {
+        const client = new Client(COLYSEUS_URL);
+        const r = await client.joinById(roomId, {
+          userId: profile.user_id,
+          username: profile.username,
+          avatar: { config: profile.avatar_config },
+        });
+
+        if (!mounted) { r.leave(); return; }
+
+        roomRef.current = r;
+        setRoom(r);
+        setConnected(true);
+        setStatus({ type: 'success', msg: 'Connected to table' });
+
+        // ── Game state ──
+        r.onMessage('game_state', (state) => {
+          if (!mounted) return;
+          setGameState(state);
+
+          // Find my seat index
+          const idx = state.seats?.findIndex(s => s?.userId === profile.user_id);
+          if (idx !== undefined && idx !== -1) setMySeatIndex(idx);
+
+          // Hide status after game starts
+          if (state.phase !== 'waiting') setStatus(null);
+        });
+
+        // ── Hole cards (private to this player) ──
+        r.onMessage('hole_cards', ({ cards }) => {
+          if (mounted) setMyHoleCards(cards || []);
+        });
+
+        // ── System chat messages ──
+        r.onMessage('player_joined', ({ username }) => {
+          if (mounted) pushSystemMsg(`${username} joined the table`);
+        });
+        r.onMessage('player_left', ({ username }) => {
+          if (mounted) pushSystemMsg(`${username} left the table`);
+        });
+        r.onMessage('new_hand', ({ handNumber }) => {
+          if (mounted) {
+            setMyHoleCards([]);
+            pushSystemMsg(`Hand #${handNumber} starting`);
+          }
+        });
+        r.onMessage('winner', ({ username, amount, handName }) => {
+          if (mounted) pushSystemMsg(`${username} wins $${amount?.toLocaleString()}${handName ? ` — ${handName}` : ''} 🏆`);
+        });
+        r.onMessage('player_busted', ({ username }) => {
+          if (mounted) pushSystemMsg(`${username} is out of chips`);
+        });
+
+        // ── Chat ──
+        r.onMessage('chat', ({ username, message }) => {
+          if (!mounted) return;
+          setChatMessages(prev => [...prev.slice(-99), { username, message, type: 'chat', timestamp: Date.now() }]);
+        });
+
+        // ── Table info (tier, blinds) ──
+        r.onMessage('table_info', (info) => {
+          if (mounted) setStatus({ type: 'info', msg: `${info.tier?.toUpperCase() || 'TABLE'} — Blinds $${info.blinds?.[0]}/$${info.blinds?.[1]}` });
+        });
+
+        // ── Silence unhandled messages ──
+        ['player_action', 'community_cards', 'flop', 'turn', 'river', 'chips_added'].forEach(t => r.onMessage(t, () => {}));
+
+        // ── Disconnect handling ──
+        r.onLeave((code) => {
+          if (!mounted) return;
+          setConnected(false);
+          if (code === 1000) {
+            navigate('/poker');
+          } else {
+            setIsReconnecting(true);
+            setStatus({ type: 'error', msg: 'Disconnected — reconnecting...' });
+            setTimeout(() => mounted && connect(), 3000);
+          }
+        });
+
+      } catch (err) {
+        if (!mounted) return;
+        console.error('[PokerTable] connect error:', err);
+        setStatus({ type: 'error', msg: `Failed to join table: ${err.message}` });
+        setTimeout(() => navigate('/poker'), 3000);
+      }
+    }
+
+    connect();
+    return () => {
+      mounted = false;
+      roomRef.current?.leave();
+    };
+  }, [roomId, profile]);
+
+  function pushSystemMsg(message) {
+    setChatMessages(prev => [...prev.slice(-99), {
+      username: 'OTJ', message, type: 'system', timestamp: Date.now(),
+    }]);
+  }
+
+  // ── Sit down flow ──
+  function handleSeatClick(seatIndex) {
+    if (!connected || mySeatIndex !== null) return;
+    const tierConfig = tableState.tier;
+    const defaultBuyIn = tableState.buyIn || 500;
+    setBuyInSeat(seatIndex);
+    setBuyInAmount(defaultBuyIn);
+    setShowBuyIn(true);
+  }
+
+  function confirmSitDown() {
+    if (!roomRef.current) return;
+    roomRef.current.send('sit_down', { seatIndex: buyInSeat, buyIn: buyInAmount });
+    setShowBuyIn(false);
+    setMySeatIndex(buyInSeat); // optimistic
+  }
+
+  // ── Actions ──
+  function handleAction(action, amount) {
+    if (!roomRef.current) return;
+    roomRef.current.send('player_action', { action, amount: amount || 0 });
+  }
+
+  function handleChat(message) {
+    if (!roomRef.current) return;
+    roomRef.current.send('chat', { message });
+    setChatMessages(prev => [...prev.slice(-99), {
+      username: profile?.username || 'You', message, type: 'chat', timestamp: Date.now(),
+    }]);
+  }
+
+  function leaveTable() {
+    roomRef.current?.leave(true);
+    navigate('/poker');
+  }
+
+  // ── Derived state ──
+  const seats = gameState?.seats || Array(8).fill(null);
+  const communityCards = gameState?.communityCards || [];
+  const pot = gameState?.pot || 0;
+  const phase = gameState?.phase || 'waiting';
+  const currentTurnUserId = gameState?.currentTurnUserId;
+  const mySeat = mySeatIndex !== null ? seats[mySeatIndex] : null;
+  const isMyTurn = currentTurnUserId === profile?.user_id;
+
+  // Inject hole cards into my seat for display
+  const displaySeats = seats.map((s, i) => {
+    if (i === mySeatIndex && myHoleCards.length > 0) {
+      return { ...s, holeCards: myHoleCards };
+    }
+    return s;
+  });
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#08080f', fontFamily: FONT, overflow: 'hidden' }}>
+
+      {/* ── Header bar ── */}
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, height: 52, zIndex: 25,
+        background: 'rgba(8,8,15,0.95)', backdropFilter: 'blur(12px)',
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12,
+      }}>
+        <button onClick={leaveTable} style={{
+          padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)',
+          color: '#ef4444', fontSize: 10, fontFamily: FONT,
+        }}>← LEAVE</button>
+
+        <div style={{ flex: 1, textAlign: 'center' }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.1em' }}>
+            🃏 OVERTIME JOURNAL POKER
+          </span>
+        </div>
+
+        {pot > 0 && (
+          <div style={{ fontSize: 10, color: '#fbbf24', fontWeight: 700 }}>
+            POT: ${pot.toLocaleString()}
+          </div>
+        )}
+        {phase !== 'waiting' && (
           <div style={{
-            position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
-            background: "#0f0f1a", border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8, marginTop: 4, overflow: "hidden",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            padding: '3px 8px', borderRadius: 4,
+            background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+            fontSize: 9, color: '#818cf8', letterSpacing: '0.1em',
           }}>
-            {searchResults.map(u => (
-              <div
-                key={u.user_id}
-                onClick={() => { setSearch(''); setSearchResults([]); navigate(`/profile/${u.username}`); }}
-                style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 14px", cursor: "pointer",
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"}
-                onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-              >
-                <AvatarMini config={u.avatar_config} size={28} style={{ flexShrink: 0 }} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: "#f1f5f9" }}>@{u.username}</span>
-              </div>
-            ))}
+            {phase.toUpperCase()}
           </div>
         )}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-        {[
-          { id: 'winrate', label: '🎯 WIN RATE', sub: 'min 3 picks' },
-          { id: 'profit', label: '💰 PROFIT' },
-          { id: 'bankroll', label: '🏦 BANKROLL' },
-          { id: 'poker', label: '🃏 POKER' },
-        ].map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              flex: 1, padding: "8px 6px", borderRadius: 8, cursor: "pointer",
-              background: tab === t.id ? "rgba(239,68,68,0.10)" : "rgba(255,255,255,0.02)",
-              border: `1px solid ${tab === t.id ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.06)"}`,
-              color: tab === t.id ? "#ef4444" : "#6b7280",
-              fontSize: 10, fontWeight: 700, fontFamily: FONT,
-              letterSpacing: "0.06em", textAlign: "center",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Leaderboard list */}
-      {loading ? (
-        <div style={{ textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 11, color: "#1e293b", letterSpacing: "0.15em" }}>LOADING...</div>
-        </div>
-      ) : leaders.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "40px 16px" }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>📊</div>
-          <div style={{ fontSize: 12, color: "#4a5568" }}>
-            {tab === 'winrate' ? "No users with 3+ graded picks yet" : "No data yet — start betting!"}
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {leaders.map((u, i) => {
-            const { stat, label, color } = getStatDisplay(u);
-            return (
-              <LeaderRow
-                key={u.user_id}
-                rank={i}
-                user={u}
-                stat={stat}
-                statLabel={label}
-                statColor={color}
-                currentUserId={currentUser?.id}
-              />
-            );
-          })}
+      {/* ── Status banner ── */}
+      {status && (
+        <div style={{
+          position: 'fixed', top: 58, left: '50%', transform: 'translateX(-50%)', zIndex: 24,
+          background: status.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(99,102,241,0.15)',
+          border: `1px solid ${status.type === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(99,102,241,0.3)'}`,
+          padding: '6px 16px', borderRadius: 8, fontSize: 10,
+          color: status.type === 'error' ? '#ef4444' : '#818cf8', fontFamily: FONT,
+          whiteSpace: 'nowrap',
+        }}>
+          {isReconnecting && '⟳ '}{status.msg}
         </div>
       )}
 
-      {/* Footer note */}
-      <div style={{ textAlign: "center", marginTop: 24, fontSize: 10, color: "#374151", lineHeight: 1.8 }}>
-        {tab === 'winrate' && "Minimum 3 graded picks to qualify · Ties broken by total wins"}
-        {tab === 'profit' && "Total P/L from all graded bets · Updated after each night's resolve"}
-        {tab === 'bankroll' && "Current OTJ Bucks balance · $10K start + $1K monthly reload"}
-        {tab === 'poker' && "Total chips won at poker tables · Badges earned from biggest pots"}
+      {/* ── Poker table felt ── */}
+      <div style={{
+        position: 'relative',
+        margin: '70px auto 120px',
+        width: '100%', maxWidth: 820,
+        height: 'calc(100vh - 190px)',
+        minHeight: 400,
+      }}>
+        {/* Felt oval */}
+        <div style={{
+          position: 'absolute',
+          top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: '70%', height: '55%',
+          background: 'radial-gradient(ellipse at center, #064e3b 0%, #022c22 60%, #011a15 100%)',
+          borderRadius: '50%',
+          border: '6px solid #78350f',
+          boxShadow: 'inset 0 0 40px rgba(0,0,0,0.5), 0 0 60px rgba(0,0,0,0.8)',
+        }}>
+          {/* Rail */}
+          <div style={{
+            position: 'absolute', inset: -14,
+            borderRadius: '50%',
+            border: '8px solid #92400e',
+            boxShadow: 'inset 0 0 10px rgba(0,0,0,0.5)',
+            pointerEvents: 'none',
+          }} />
+
+          {/* Community cards */}
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%',
+            transform: 'translate(-50%, -50%)',
+            display: 'flex', gap: 6, alignItems: 'center',
+          }}>
+            {communityCards.length > 0
+              ? communityCards.map((c, i) => <PlayingCard key={i} card={c} />)
+              : phase === 'waiting'
+                ? <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.15)', letterSpacing: '0.12em' }}>WAITING FOR PLAYERS</div>
+                : null
+            }
+          </div>
+
+          {/* Pot display on felt */}
+          {pot > 0 && (
+            <div style={{
+              position: 'absolute', top: '28%', left: '50%', transform: 'translateX(-50%)',
+              fontSize: 11, fontWeight: 700, color: '#fbbf24', fontFamily: FONT,
+            }}>
+              POT ${pot.toLocaleString()}
+            </div>
+          )}
+        </div>
+
+        {/* Seat spots */}
+        {displaySeats.map((seat, i) => (
+          <SeatSpot
+            key={i}
+            seatIndex={i}
+            seat={seat}
+            isYou={seat?.userId === profile?.user_id}
+            myTurn={isMyTurn && seat?.userId === profile?.user_id}
+            gamePhase={phase}
+            onSit={handleSeatClick}
+          />
+        ))}
       </div>
 
-      <div style={{ textAlign: "center", marginTop: 32, fontSize: 10, color: "#1e1040", letterSpacing: "0.12em" }}>
-        ★ OVERTIME JOURNAL ★
-      </div>
+      {/* ── My turn glow pulse ── */}
+      {isMyTurn && (
+        <div style={{
+          position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 1,
+          boxShadow: 'inset 0 0 60px rgba(251,191,36,0.12)',
+          animation: 'pulse 1.5s ease-in-out infinite',
+        }} />
+      )}
+
+      {/* ── Betting controls (only on my turn) ── */}
+      {isMyTurn && mySeat && phase !== 'waiting' && (
+        <BettingControls gameState={gameState} mySeat={mySeat} onAction={handleAction} />
+      )}
+
+      {/* ── Chat ── */}
+      <ChatPanel messages={chatMessages} onSend={handleChat} currentUsername={profile?.username} />
+
+      {/* ── Buy-in modal ── */}
+      {showBuyIn && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 50,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            background: '#0f0f1a', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 12, padding: 24, width: 280, fontFamily: FONT,
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>Sit Down — Seat {buyInSeat + 1}</div>
+            <div style={{ fontSize: 10, color: '#4a5568', marginBottom: 16 }}>Choose your buy-in amount</div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <input
+                type="range"
+                min={tableState.minBuy || 100}
+                max={Math.min(tableState.maxBuy || 2000, profile?.bankroll || 10000)}
+                step={50}
+                value={buyInAmount}
+                onChange={e => setBuyInAmount(Number(e.target.value))}
+                style={{ flex: 1, accentColor: '#ef4444' }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#fbbf24', minWidth: 65, textAlign: 'right' }}>
+                ${buyInAmount.toLocaleString()}
+              </span>
+            </div>
+
+            <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
+              Your bankroll: ${(profile?.bankroll || 0).toLocaleString()}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setShowBuyIn(false)} style={{
+                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#6b7280', fontSize: 11, fontFamily: FONT,
+              }}>CANCEL</button>
+              <button onClick={confirmSitDown} style={{
+                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
+                background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+                color: '#ef4444', fontSize: 11, fontWeight: 700, fontFamily: FONT,
+              }}>SIT DOWN</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
     </div>
   );
 }

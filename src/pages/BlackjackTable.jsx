@@ -325,7 +325,7 @@ function PayoutBanner({ results, myUsername }) {
 function HouseBankPill() {
   const [balance, setBalance] = useState(null);
   useEffect(() => {
-    supabase.from('house_bank').select('balance').eq('id', 1).single()
+    supabase.from('house_bank').select('balance').eq('id', 1).maybeSingle()
       .then(({ data }) => data && setBalance(data.balance));
   }, []);
   if (balance == null) return null;

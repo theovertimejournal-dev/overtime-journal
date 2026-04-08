@@ -408,6 +408,9 @@ export default function BlackjackTable() {
     const client = new Client(COLYSEUS_URL);
     let mounted = true;
 
+    let retries = 0;
+    const MAX_RETRIES = 3;
+
     async function connect() {
       try {
         const joinOpts = { userId, username, avatar: { config: avatarConfig }, buyIn };
@@ -456,14 +459,29 @@ export default function BlackjackTable() {
 
         room.onLeave(code => {
           if (!mounted) return;
-          if (code !== 1000) { setError('Disconnected — reconnecting...'); setTimeout(() => mounted && connect(), 3000); }
+          if (code !== 1000) {
+            retries++;
+            if (retries <= MAX_RETRIES) {
+              setError(`Disconnected — reconnecting (${retries}/${MAX_RETRIES})...`);
+              setTimeout(() => mounted && connect(), 3000);
+            } else {
+              setError('Could not connect to table. Please try again.');
+              setTimeout(() => navigate('/blackjack'), 3000);
+            }
+          }
           else navigate('/blackjack');
         });
 
       } catch (err) {
         if (!mounted) return;
-        setError(`Failed to join: ${err.message}`);
-        setTimeout(() => navigate('/blackjack'), 3000);
+        retries++;
+        if (retries <= MAX_RETRIES) {
+          setError(`Failed to connect — retrying (${retries}/${MAX_RETRIES})...`);
+          setTimeout(() => mounted && connect(), 3000);
+        } else {
+          setError(`Could not reach table: ${err.message}`);
+          setTimeout(() => navigate('/blackjack'), 3000);
+        }
       }
     }
 

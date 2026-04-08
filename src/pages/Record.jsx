@@ -601,8 +601,19 @@ export default function Record() {
           borderRadius: 12, padding: "20px",
           display: "flex", flexDirection: "column", gap: 28,
         }}>
-          <CalendarMonth year={2026} month={2} data={filteredData} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
-          <CalendarMonth year={2026} month={1} data={filteredData} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
+          {(() => {
+            const now = new Date();
+            const curYear  = now.getFullYear();
+            const curMonth = now.getMonth(); // 0-indexed
+            const prevMonth = curMonth === 0 ? 11 : curMonth - 1;
+            const prevYear  = curMonth === 0 ? curYear - 1 : curYear;
+            return (
+              <>
+                <CalendarMonth year={curYear}  month={curMonth}  data={filteredData} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
+                <CalendarMonth year={prevYear} month={prevMonth} data={filteredData} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
+              </>
+            );
+          })()}
         </div>
 
         <div style={{ marginTop: 28, fontSize: 10, color: "#1f2937", textAlign: "center", lineHeight: 2 }}>

@@ -22,6 +22,8 @@ import LeaderboardPage from './pages/LeaderboardPage';
 import DailyNewspaper from './pages/DailyNewspaper';
 import PokerLobby from './pages/PokerLobby';
 import PokerTable from './pages/PokerTable';
+import BlackjackLobby from './pages/BlackjackLobby';
+import BlackjackTable from './pages/BlackjackTable';
 
 // ─── Protected route — redirects to / if not logged in ───────────────────────
 function ProtectedRoute({ user, authChecked, children }) {
@@ -367,7 +369,7 @@ function MobileBottomBar({ user, profile, onSignIn }) {
 
   // Determine which tab is active
   const isSport = ["/nba", "/props", "/mlb", "/mlb-props", "/nhl", "/nfl"].some(p => path.startsWith(p));
-  const isArcade = path.startsWith("/arcade") || path.startsWith("/poker");
+  const isArcade = path.startsWith("/arcade") || path.startsWith("/poker") || path.startsWith("/blackjack");
   const isMore = ["/record", "/leaderboard", "/faq", "/daily"].some(p => path.startsWith(p)) || isArcade;
   const isHome = path === "/";
   const isJournal = path === "/daily";
@@ -422,8 +424,9 @@ function MobileBottomBar({ user, profile, onSignIn }) {
           <SheetItem to="/record" emoji="📊" label="Record" sub="Full pick history" onNavigate={() => setActiveSheet(null)} />
           <SheetItem to="/leaderboard" emoji="🏆" label="Leaderboard" sub="Top 10 bettors" onNavigate={() => setActiveSheet(null)} />
           <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "4px 0" }} />
-          <SheetItem to="/arcade" emoji="🕹️" label="Arcade" sub="OTJ Jam · PvP" onNavigate={() => setActiveSheet(null)} />
-          <SheetItem to="/poker" emoji="♠️" label="Poker" sub="Texas Hold'em" onNavigate={() => setActiveSheet(null)} />
+          <SheetItem to="/arcade"    emoji="🕹️" label="Arcade"    sub="OTJ Jam · PvP"   onNavigate={() => setActiveSheet(null)} />
+          <SheetItem to="/poker"     emoji="♠️"  label="Poker"     sub="Texas Hold'em"   onNavigate={() => setActiveSheet(null)} />
+          <SheetItem to="/blackjack" emoji="🎰"  label="Blackjack" sub="Beat the dealer" onNavigate={() => setActiveSheet(null)} />
           <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "4px 0" }} />
           <SheetItem to="/faq" emoji="❓" label="FAQ" sub="How OTJ works" onNavigate={() => setActiveSheet(null)} />
           {!user && (
@@ -604,11 +607,12 @@ function DesktopNav({ user, profile, onSignIn, slates }) {
           <DropItem to="/nfl" emoji="📊" label="Game Analysis" sub="Coming soon" />
         </NavDropdown>
 
-        <NavDropdown emoji="☰" label="More" activePaths={["/arcade", "/poker", "/record", "/leaderboard"]}>
+        <NavDropdown emoji="☰" label="More" activePaths={["/arcade", "/poker", "/blackjack", "/record", "/leaderboard"]}>
           <DropItem to="/record"      emoji="📊" label="Record"        sub="Full pick history" />
           <DropDivider />
           <DropItem to="/arcade"      emoji="🕹" label="Arcade"        sub="OTJ Jam · PvP" />
           <DropItem to="/poker"       emoji="♠️" label="Poker"         sub="Texas Hold'em" />
+          <DropItem to="/blackjack"   emoji="🎰" label="Blackjack"     sub="Beat the dealer" />
           <DropDivider />
           <DropItem to="/leaderboard" emoji="🏆" label="Top 10"        sub="Leaderboard" />
         </NavDropdown>
@@ -649,6 +653,20 @@ function PokerLobbyWithNav({ user, profile }) {
       onEnterTable={(room, tableState) => navigate(
         `/poker/table/${room.id || room.roomId}`,
         { state: tableState }
+      )}
+    />
+  );
+}
+
+function BlackjackLobbyWithNav({ user, profile }) {
+  const navigate = useNavigate();
+  return (
+    <BlackjackLobby
+      user={user}
+      profile={profile}
+      onEnterTable={(room, state) => navigate(
+        `/blackjack/table/${room.id || room.roomId}`,
+        { state }
       )}
     />
   );
@@ -853,6 +871,16 @@ export default function App() {
             <Route path="/poker/table/:roomId" element={
               <ProtectedRoute user={user} authChecked={authChecked}>
                 <PokerTable />
+              </ProtectedRoute>
+            } />
+            <Route path="/blackjack" element={
+              <ProtectedRoute user={user} authChecked={authChecked}>
+                <BlackjackLobbyWithNav user={user} profile={profile} />
+              </ProtectedRoute>
+            } />
+            <Route path="/blackjack/table/:roomId" element={
+              <ProtectedRoute user={user} authChecked={authChecked}>
+                <BlackjackTable />
               </ProtectedRoute>
             } />
             <Route path="/profile/:username" element={<ProfilePage currentUser={user} currentProfile={profile} />} />

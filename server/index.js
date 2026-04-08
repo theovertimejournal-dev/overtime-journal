@@ -4,7 +4,8 @@ const cors    = require("cors");
 const { Server } = require("colyseus");
 const { ArcadeRoom } = require("./rooms/ArcadeRoom");
 const { PokerRoom }  = require("./rooms/PokerRoom");
-
+const { BlackjackRoom } = require('./rooms/BlackjackRoom');
+gameServer.define('blackjack', BlackjackRoom).filterBy(['tier']);
 const app  = express();
 const port = process.env.PORT || 2567;
 

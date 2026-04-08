@@ -510,6 +510,12 @@ export default function BlackjackTable() {
         <div style={{ fontSize: 36, marginBottom: 12 }}>🎰</div>
         <div style={{ fontSize: 12, letterSpacing: '0.2em' }}>CONNECTING...</div>
         {error && <div style={{ fontSize: 10, color: '#ef4444', marginTop: 8 }}>{error}</div>}
+        <div style={{ marginTop: 16, fontSize: 9, color: '#374151', fontFamily: FONT, lineHeight: 1.8 }}>
+          <div>tier: <span style={{ color: tier ? '#22c55e' : '#ef4444' }}>{tier || 'MISSING'}</span></div>
+          <div>buyIn: <span style={{ color: buyIn ? '#22c55e' : '#ef4444' }}>{buyIn || 'MISSING'}</span></div>
+          <div>userId: <span style={{ color: userId ? '#22c55e' : '#ef4444' }}>{userId ? userId.slice(0,8)+'...' : 'MISSING'}</span></div>
+          <div>roomId: <span style={{ color: '#94a3b8' }}>{roomId || 'none'}</span></div>
+        </div>
       </div>
     </div>
   );

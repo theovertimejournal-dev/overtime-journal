@@ -23,7 +23,7 @@ app.use(cors({
 app.use(express.json());
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", server: "OTJ Arcade + Poker + Blackjack v3", colyseus: "0.16", ts: Date.now() });
+  res.json({ status: "ok", server: "OTJ Casino v4", colyseus: "0.16", ts: Date.now() });
 });
 
 const httpServer = http.createServer(app);
@@ -36,6 +36,20 @@ gameServer.define("football",        ArcadeRoom).filterBy(["gameType"]);
 gameServer.define("poker",           PokerRoom).filterBy(["tier"]);
 gameServer.define("blackjack",       BlackjackRoom).filterBy(["tier"]);
 
-httpServer.listen(port, () => {
-  console.log(`🎮 OTJ Arcade + Poker + Blackjack (Colyseus 0.16) running on port ${port}`);
+httpServer.listen(port, async () => {
+  console.log(`🎮 OTJ Casino (Colyseus 0.16) running on port ${port}`);
+
+  // ── Seed persistent rooms so there's always a live table ──
+  // One BJ room per tier + one poker room per tier — always open, never close
+  try {
+    await gameServer.createRoom("blackjack", { tier: "low",  persistent: true });
+    await gameServer.createRoom("blackjack", { tier: "mid",  persistent: true });
+    await gameServer.createRoom("blackjack", { tier: "high", persistent: true });
+    await gameServer.createRoom("poker",     { tier: "rookie",      persistent: true });
+    await gameServer.createRoom("poker",     { tier: "regular",     persistent: true });
+    await gameServer.createRoom("poker",     { tier: "high_roller", persistent: true });
+    console.log("✅ Persistent rooms seeded");
+  } catch (err) {
+    console.error("⚠️  Room seeding error:", err.message);
+  }
 });

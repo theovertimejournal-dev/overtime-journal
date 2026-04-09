@@ -1564,7 +1564,11 @@ export default function BlackjackTable() {
   );
 
   return (
-    <div data-page="bj-table" style={{ height: '100dvh', minHeight: '-webkit-fill-available', background: '#03060a', fontFamily: FONT, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div data-page="bj-table" style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: '#03060a', fontFamily: FONT,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
 
       {/* Header */}
       <div style={{

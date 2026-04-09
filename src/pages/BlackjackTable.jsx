@@ -375,59 +375,196 @@ function EmojiProjectile({ emoji, fromSeat, toSeat, tableRef, onDone }) {
 
 // ── Dealer Character ─────────────────────────────────────────────────────────
 
+// ── SVG Caricature Dealer ─────────────────────────────────────────────────────
+
 const DEALER_MOODS = {
-  idle:      { face: '🎩', label: 'Place your bets...' },
-  dealing:   { face: '🤵', label: 'Dealing...' },
-  waiting:   { face: '🧐', label: 'Your move.' },
-  bust:      { face: '😏', label: 'Bust! Better luck next time.' },
-  blackjack: { face: '😤', label: 'Blackjack! Lucky hand.' },
-  win:       { face: '😬', label: 'You got me this time.' },
-  lose:      { face: '😈', label: 'House wins again!' },
-  push:      { face: '😐', label: "We'll call it a tie." },
-  dealer_bust: { face: '😤', label: 'Dealer busts! Pay the table.' },
+  idle:        { label: 'Place your bets...',        eyebrowL: 0,   eyebrowR: 0,   mouthCurve: 0,    eyeSquint: 0,   sweat: false, pupils: 'center' },
+  dealing:     { label: 'Good luck...',              eyebrowL: -4,  eyebrowR: -4,  mouthCurve: 2,    eyeSquint: 1,   sweat: false, pupils: 'down'   },
+  waiting:     { label: 'Your move.',                eyebrowL: 2,   eyebrowR: -5,  mouthCurve: -2,   eyeSquint: 2,   sweat: false, pupils: 'side'   },
+  bust:        { label: 'Bust! Too bad.',            eyebrowL: -6,  eyebrowR: -6,  mouthCurve: 18,   eyeSquint: 0,   sweat: false, pupils: 'up'     },
+  blackjack:   { label: 'Blackjack?! Unreal.',       eyebrowL: 10,  eyebrowR: 10,  mouthCurve: -14,  eyeSquint: 3,   sweat: true,  pupils: 'wide'   },
+  win:         { label: 'You got lucky.',            eyebrowL: 4,   eyebrowR: 4,   mouthCurve: -8,   eyeSquint: 1,   sweat: true,  pupils: 'down'   },
+  lose:        { label: 'House wins. Always.',       eyebrowL: -8,  eyebrowR: -8,  mouthCurve: 20,   eyeSquint: 0,   sweat: false, pupils: 'center' },
+  push:        { label: "We'll call it even.",       eyebrowL: 0,   eyebrowR: 2,   mouthCurve: 0,    eyeSquint: 1,   sweat: false, pupils: 'side'   },
+  dealer_bust: { label: 'Dealer busts! Pay up.',     eyebrowL: 12,  eyebrowR: 12,  mouthCurve: -18,  eyeSquint: 4,   sweat: true,  pupils: 'wide'   },
 };
 
 function DealerCharacter({ mood = 'idle', isDealing }) {
   const m = DEALER_MOODS[mood] || DEALER_MOODS.idle;
+  const [blink, setBlink] = useState(false);
+  const [prevMood, setPrevMood] = useState(mood);
+  const [animating, setAnimating] = useState(false);
+
+  // Blink randomly
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setBlink(true);
+      setTimeout(() => setBlink(false), 150);
+    }, 2500 + Math.random() * 2000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Mood transition bounce
+  useEffect(() => {
+    if (mood !== prevMood) {
+      setAnimating(true);
+      setPrevMood(mood);
+      setTimeout(() => setAnimating(false), 400);
+    }
+  }, [mood]);
+
+  const eyeH = blink ? 1 : 10;
+  const bounce = animating ? 'dealerBounce 0.4s cubic-bezier(0.34,1.56,0.64,1)' : 'none';
+  const dealAnim = isDealing ? 'dealerDeal 0.35s ease-in-out infinite alternate' : 'none';
+
+  // Pupil position
+  const pupilOffset = {
+    center: { x: 0, y: 0 },
+    up:     { x: 0, y: -2 },
+    down:   { x: 0, y: 2 },
+    side:   { x: 2, y: 0 },
+    wide:   { x: 0, y: 0 },
+  }[m.pupils] || { x: 0, y: 0 };
+
+  const pupilSize = m.pupils === 'wide' ? 5 : 4;
+
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-      transition: 'all 0.4s ease',
-    }}>
-      {/* Caricature dealer face */}
-      <div style={{
-        width: 56, height: 56, borderRadius: '50%',
-        background: `radial-gradient(circle at 35% 30%, #2a1810, #1a0f0a)`,
-        border: `3px solid ${GOLD}`,
-        boxShadow: `0 0 20px ${GOLD}44, inset 0 -4px 8px rgba(0,0,0,0.4)`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 28,
-        animation: isDealing ? 'dealerDeal 0.4s ease-in-out infinite alternate' : 'none',
-        transition: 'all 0.3s',
-        position: 'relative',
-      }}>
-        {m.face}
-        {/* bow tie */}
-        <div style={{
-          position: 'absolute', bottom: -8, left: '50%', transform: 'translateX(-50%)',
-          fontSize: 12,
-        }}>🎀</div>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+      {/* SVG face */}
+      <div style={{ animation: `${bounce}, ${dealAnim}`, transformOrigin: 'center bottom' }}>
+        <svg width="90" height="100" viewBox="0 0 90 100" style={{ overflow: 'visible', filter: `drop-shadow(0 0 12px ${GOLD}55)` }}>
+
+          {/* ── Hat ── */}
+          <rect x="22" y="2" width="46" height="28" rx="3" fill="#1a1a1a" stroke={GOLD} strokeWidth="1.5"/>
+          <rect x="14" y="28" width="62" height="7" rx="2" fill="#111" stroke={GOLD} strokeWidth="1"/>
+          {/* hat band */}
+          <rect x="22" y="24" width="46" height="5" rx="1" fill={GOLD} opacity="0.7"/>
+          {/* hat shine */}
+          <ellipse cx="36" cy="10" rx="8" ry="3" fill="rgba(255,255,255,0.06)" transform="rotate(-10,36,10)"/>
+
+          {/* ── Head ── */}
+          {/* Neck */}
+          <rect x="36" y="87" width="18" height="12" rx="3" fill="#c8956b"/>
+          {/* Head shape — exaggerated large forehead */}
+          <ellipse cx="45" cy="64" rx="28" ry="30" fill="#d4956b"/>
+          {/* Forehead highlight */}
+          <ellipse cx="40" cy="50" rx="10" ry="7" fill="rgba(255,255,255,0.12)" transform="rotate(-15,40,50)"/>
+          {/* Cheek blush */}
+          <ellipse cx="25" cy="70" rx="7" ry="5" fill="rgba(220,100,80,0.2)"/>
+          <ellipse cx="65" cy="70" rx="7" ry="5" fill="rgba(220,100,80,0.2)"/>
+
+          {/* ── Eyebrows — exaggerated & animated ── */}
+          {/* Left eyebrow */}
+          <path
+            d={`M 26 ${56 + m.eyebrowL} Q 33 ${50 + m.eyebrowL} 38 ${56 + m.eyebrowL * 0.3}`}
+            stroke="#3a1f0a" strokeWidth="3.5" strokeLinecap="round" fill="none"
+            style={{ transition: 'd 0.3s ease' }}
+          />
+          {/* Right eyebrow */}
+          <path
+            d={`M 52 ${56 + m.eyebrowR * 0.3} Q 57 ${50 + m.eyebrowR} 64 ${56 + m.eyebrowR}`}
+            stroke="#3a1f0a" strokeWidth="3.5" strokeLinecap="round" fill="none"
+            style={{ transition: 'd 0.3s ease' }}
+          />
+
+          {/* ── Eyes ── */}
+          {/* Left eye white */}
+          <ellipse cx="32" cy="63" rx="8" ry={eyeH * 0.8 - m.eyeSquint * 0.5} fill="white" style={{ transition: 'ry 0.1s' }}/>
+          {/* Right eye white */}
+          <ellipse cx="58" cy="63" rx="8" ry={eyeH * 0.8 - m.eyeSquint * 0.5} fill="white" style={{ transition: 'ry 0.1s' }}/>
+          {/* Left pupil */}
+          <circle cx={32 + pupilOffset.x} cy={63 + pupilOffset.y} r={blink ? 0 : pupilSize} fill="#2c1a0a" style={{ transition: 'r 0.1s, cx 0.2s, cy 0.2s' }}/>
+          {/* Right pupil */}
+          <circle cx={58 + pupilOffset.x} cy={63 + pupilOffset.y} r={blink ? 0 : pupilSize} fill="#2c1a0a" style={{ transition: 'r 0.1s, cx 0.2s, cy 0.2s' }}/>
+          {/* Eye shine */}
+          {!blink && <><circle cx={34} cy={61} r={1.5} fill="white" opacity="0.8"/><circle cx={60} cy={61} r={1.5} fill="white" opacity="0.8"/></>}
+          {/* Lower eyelid squint lines */}
+          {m.eyeSquint > 1 && <>
+            <path d={`M 24 ${65 + m.eyeSquint} Q 32 ${63 + m.eyeSquint} 40 ${65 + m.eyeSquint}`} stroke="#b07040" strokeWidth="1.5" fill="none" opacity="0.5"/>
+            <path d={`M 50 ${65 + m.eyeSquint} Q 58 ${63 + m.eyeSquint} 66 ${65 + m.eyeSquint}`} stroke="#b07040" strokeWidth="1.5" fill="none" opacity="0.5"/>
+          </>}
+
+          {/* ── Nose — big caricature nose ── */}
+          <ellipse cx="45" cy="72" rx="6" ry="5" fill="#c07a50"/>
+          <ellipse cx="41" cy="74" rx="3" ry="2.5" fill="#a06040" opacity="0.6"/>
+          <ellipse cx="49" cy="74" rx="3" ry="2.5" fill="#a06040" opacity="0.6"/>
+          {/* nose bridge */}
+          <path d="M 43 63 Q 42 68 41 73" stroke="#b07040" strokeWidth="1.5" fill="none" opacity="0.4"/>
+
+          {/* ── Mouth — animated curve ── */}
+          <path
+            d={`M 33 ${80 - m.mouthCurve * 0.2} Q 45 ${80 + m.mouthCurve * 0.4} 57 ${80 - m.mouthCurve * 0.2}`}
+            stroke="#7a3520" strokeWidth="2.5" strokeLinecap="round" fill="none"
+            style={{ transition: 'd 0.35s ease' }}
+          />
+          {/* Teeth on big smile */}
+          {m.mouthCurve > 12 && (
+            <path d={`M 36 ${79 - m.mouthCurve * 0.1} Q 45 ${83 + m.mouthCurve * 0.3} 54 ${79 - m.mouthCurve * 0.1}`}
+              fill="white" opacity="0.85"/>
+          )}
+          {/* Frown line corners */}
+          {m.mouthCurve < -8 && <>
+            <path d={`M 33 ${80 - m.mouthCurve * 0.2} Q 30 ${82 - m.mouthCurve * 0.1} 29 ${85}`} stroke="#7a3520" strokeWidth="1.5" fill="none" opacity="0.5"/>
+            <path d={`M 57 ${80 - m.mouthCurve * 0.2} Q 60 ${82 - m.mouthCurve * 0.1} 61 ${85}`} stroke="#7a3520" strokeWidth="1.5" fill="none" opacity="0.5"/>
+          </>}
+
+          {/* ── Ears ── */}
+          <ellipse cx="17" cy="64" rx="5" ry="7" fill="#c8956b"/>
+          <ellipse cx="17" cy="64" rx="3" ry="4.5" fill="#b07855"/>
+          <ellipse cx="73" cy="64" rx="5" ry="7" fill="#c8956b"/>
+          <ellipse cx="73" cy="64" rx="3" ry="4.5" fill="#b07855"/>
+
+          {/* ── Collar & Bow tie ── */}
+          <path d="M 30 98 L 36 88 L 45 92 L 54 88 L 60 98" fill="#1a1a1a" stroke="#333" strokeWidth="1"/>
+          {/* bow tie */}
+          <polygon points="35,91 42,87 42,95" fill={GOLD} opacity="0.9"/>
+          <polygon points="55,91 48,87 48,95" fill={GOLD} opacity="0.9"/>
+          <circle cx="45" cy="91" r="3.5" fill={GOLD}/>
+
+          {/* ── Sweat drops ── */}
+          {m.sweat && <>
+            <ellipse cx="70" cy="52" rx="2.5" ry="4" fill="#7dd3fc" opacity="0.8" style={{ animation: 'sweatDrop 0.8s ease-in infinite' }}/>
+            <ellipse cx="74" cy="58" rx="2" ry="3" fill="#7dd3fc" opacity="0.6" style={{ animation: 'sweatDrop 0.8s ease-in 0.3s infinite' }}/>
+          </>}
+
+          {/* ── Dealing arm ── */}
+          {isDealing && (
+            <g style={{ animation: 'dealArm 0.4s ease-in-out infinite alternate', transformOrigin: '20px 85px' }}>
+              <line x1="20" y1="88" x2="5" y2="75" stroke="#c8956b" strokeWidth="5" strokeLinecap="round"/>
+              {/* card in hand */}
+              <rect x="-4" y="62" width="14" height="18" rx="2" fill="#fff" stroke={GOLD} strokeWidth="1.5" transform="rotate(-20,-4,62)"/>
+            </g>
+          )}
+
+        </svg>
       </div>
+
       {/* Speech bubble */}
       <div style={{
-        background: 'rgba(0,0,0,0.7)', border: `1px solid ${GOLD}33`,
-        borderRadius: 8, padding: '3px 10px',
-        fontSize: 8, color: `${GOLD}cc`, fontFamily: FONT,
-        letterSpacing: '0.06em', textAlign: 'center',
-        maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        opacity: 0.9,
+        position: 'relative',
+        background: 'rgba(5,8,13,0.92)',
+        border: `1px solid ${GOLD}44`,
+        borderRadius: 10, padding: '5px 12px',
+        fontSize: 9, color: `${GOLD}dd`, fontFamily: FONT,
+        letterSpacing: '0.05em', textAlign: 'center',
+        maxWidth: 180, lineHeight: 1.4,
+        boxShadow: `0 4px 16px rgba(0,0,0,0.5)`,
+        animation: animating ? 'bubblePop 0.3s ease' : 'none',
       }}>
+        {/* bubble tail */}
+        <div style={{
+          position: 'absolute', top: -6, left: '50%', transform: 'translateX(-50%)',
+          width: 0, height: 0,
+          borderLeft: '5px solid transparent',
+          borderRight: '5px solid transparent',
+          borderBottom: `6px solid ${GOLD}44`,
+        }}/>
         {m.label}
       </div>
     </div>
   );
 }
+
 
 // ── Card Projectile (thrown from dealer to seat) ───────────────────────────
 
@@ -963,7 +1100,11 @@ export default function BlackjackTable() {
 
       <style>{`
         @keyframes bannerPop { from { opacity:0; transform:translate(-50%,-50%) scale(0.7); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
-        @keyframes dealerDeal { from { transform: rotate(-8deg) scale(1.05); } to { transform: rotate(8deg) scale(0.95); } }
+        @keyframes dealerDeal { from { transform: rotate(-6deg) translateY(0px); } to { transform: rotate(6deg) translateY(-4px); } }
+        @keyframes dealerBounce { 0% { transform: scale(1); } 40% { transform: scale(1.12) translateY(-4px); } 70% { transform: scale(0.96) translateY(1px); } 100% { transform: scale(1); } }
+        @keyframes sweatDrop { 0% { transform: translateY(0); opacity: 0.8; } 100% { transform: translateY(12px); opacity: 0; } }
+        @keyframes dealArm { from { transform: rotate(-15deg); } to { transform: rotate(10deg); } }
+        @keyframes bubblePop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
       `}</style>
     </div>
   );

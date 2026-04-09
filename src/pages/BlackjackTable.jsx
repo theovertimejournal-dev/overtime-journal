@@ -138,9 +138,9 @@ function BetControls({ config, myChips, currentBet, onAddChip, onClear, onDeal, 
 
   return (
     <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 30,
+      flexShrink: 0,
       background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(16px)',
-      borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 22px',
+      borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 16px',
     }}>
       <div style={{ textAlign: 'center', fontSize: 9, color: '#374151', fontFamily: FONT, marginBottom: 6, letterSpacing: '0.12em' }}>
         PLACE YOUR BET · {config.minBet.toLocaleString()}–{config.maxBet.toLocaleString()} BUCKS
@@ -222,9 +222,9 @@ function ActionControls({ onHit, onStand, onDouble, onSplit, canDouble, canSplit
 
   return (
     <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 30,
+      flexShrink: 0,
       background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(16px)',
-      borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 22px',
+      borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 16px',
     }}>
       {timeLeft != null && (
         <div style={{ textAlign: 'center', marginBottom: 8 }}>
@@ -249,20 +249,97 @@ function ActionControls({ onHit, onStand, onDouble, onSplit, canDouble, canSplit
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
 function ChatPanel({ messages, onSend, myUsername }) {
-  const [input, setInput] = useState('');
+  const [input, setInput]   = useState('');
+  const [open, setOpen]     = useState(false);
+  const [unread, setUnread] = useState(0);
   const bottomRef = useRef(null);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  const isMobile  = window.innerWidth < 768;
 
-  function send() {
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isMobile && !open && messages.length > 0) {
+      setUnread(u => u + 1);
+    }
+  }, [messages]);
+
+  useEffect(() => { if (open) setUnread(0); }, [open]);
+
+  function sendMsg() {
     const m = input.trim();
     if (!m) return;
     onSend(m);
     setInput('');
   }
 
+  // Mobile: floating toggle button + slide-up drawer
+  if (isMobile) {
+    return (
+      <>
+        {/* Toggle button */}
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{
+            position: 'fixed', bottom: open ? 260 : 80, right: 12, zIndex: 40,
+            width: 42, height: 42, borderRadius: '50%',
+            background: `rgba(3,6,10,0.95)`, border: `1px solid ${GOLD}44`,
+            color: GOLD, fontSize: 16, cursor: 'pointer',
+            boxShadow: `0 4px 16px rgba(0,0,0,0.5)`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'bottom 0.3s ease',
+          }}
+        >
+          {open ? '✕' : '💬'}
+          {!open && unread > 0 && (
+            <div style={{
+              position: 'absolute', top: -4, right: -4,
+              width: 16, height: 16, borderRadius: '50%',
+              background: '#ef4444', color: '#fff',
+              fontSize: 8, fontWeight: 700, fontFamily: FONT,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>{unread > 9 ? '9+' : unread}</div>
+          )}
+        </button>
+
+        {/* Slide-up drawer */}
+        {open && (
+          <div style={{
+            position: 'fixed', bottom: 80, left: 0, right: 0, height: 220,
+            background: 'rgba(3,6,10,0.97)', borderTop: `1px solid ${GOLD}22`,
+            zIndex: 39, display: 'flex', flexDirection: 'column',
+            backdropFilter: 'blur(16px)',
+          }}>
+            <div style={{ padding: '6px 12px', borderBottom: `1px solid ${GOLD}15`, fontSize: 9, color: '#374151', fontFamily: FONT, letterSpacing: '0.12em' }}>
+              TABLE CHAT
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '6px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {messages.slice(-20).map((m, i) => (
+                <div key={i} style={{ fontSize: 10, lineHeight: 1.5 }}>
+                  {m.type === 'system'
+                    ? <span style={{ color: GOLD, fontStyle: 'italic', fontFamily: FONT }}>— {m.message}</span>
+                    : <><span style={{ color: m.username === myUsername ? '#ef4444' : '#818cf8', fontWeight: 700, fontFamily: FONT }}>{m.username}: </span>
+                       <span style={{ color: '#94a3b8' }}>{m.message}</span></>
+                  }
+                </div>
+              ))}
+              <div ref={bottomRef} />
+            </div>
+            <div style={{ padding: '6px 12px', borderTop: `1px solid ${GOLD}15`, display: 'flex', gap: 6 }}>
+              <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()}
+                placeholder="Say something..."
+                style={{ flex: 1, padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: `1px solid ${GOLD}22`, color: '#f1f5f9', fontSize: 10, fontFamily: FONT, outline: 'none' }}
+              />
+              <button onClick={sendMsg} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: `${GOLD}18`, border: `1px solid ${GOLD}33`, color: GOLD, fontSize: 10 }}>▶</button>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // Desktop: side panel
   return (
     <div style={{
-      position: 'fixed', right: 0, top: 52, bottom: 90, width: 210,
+      position: 'absolute', right: 0, top: 0, bottom: 0, width: 210,
       background: 'rgba(3,6,10,0.94)', borderLeft: `1px solid ${GOLD}22`,
       display: 'flex', flexDirection: 'column', zIndex: 20,
     }}>
@@ -282,11 +359,11 @@ function ChatPanel({ messages, onSend, myUsername }) {
         <div ref={bottomRef} />
       </div>
       <div style={{ padding: '8px 10px', borderTop: `1px solid ${GOLD}15`, display: 'flex', gap: 6 }}>
-        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()}
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMsg()}
           placeholder="Say something..."
           style={{ flex: 1, padding: '6px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: `1px solid ${GOLD}22`, color: '#f1f5f9', fontSize: 10, fontFamily: FONT, outline: 'none' }}
         />
-        <button onClick={send} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: `${GOLD}18`, border: `1px solid ${GOLD}33`, color: GOLD, fontSize: 10 }}>▶</button>
+        <button onClick={sendMsg} style={{ padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: `${GOLD}18`, border: `1px solid ${GOLD}33`, color: GOLD, fontSize: 10 }}>▶</button>
       </div>
     </div>
   );
@@ -644,8 +721,6 @@ export default function BlackjackTable() {
   const [payoutResults, setPayoutResults] = useState(null);
   const [emojiTarget, setEmojiTarget]   = useState(null);
   const [projectiles, setProjectiles]   = useState([]);
-  const [sitModal, setSitModal]         = useState(null); // { seatIndex }
-  const [sitBuyIn, setSitBuyIn]         = useState(0);
   const [dealerMood, setDealerMood]     = useState('idle');
   const [isDealing, setIsDealing]       = useState(false);
   const [cardProjectiles, setCardProjectiles] = useState([]);
@@ -801,29 +876,26 @@ export default function BlackjackTable() {
 
   // Derived
   const { phase, seats, mySeat, currentSeat, dealerCards, dealerTotal, config } = gameState || {};
-  const me         = mySeat != null ? seats?.[mySeat] : null;
+  const me         = (mySeat != null && mySeat !== -1) ? seats?.[mySeat] : null;
   const myHand     = me?.hands?.[me?.activeHand];
-  const isMyTurn   = phase === 'player_turn' && currentSeat === mySeat;
+  const isMyTurn   = phase === 'player_turn' && currentSeat === mySeat && mySeat !== -1;
   const isBetting  = phase === 'betting';
+  const isSeated   = mySeat != null && mySeat !== -1;
 
   function cardRank(c) { return ['T','J','Q','K'].includes(c[0]) ? 10 : c[0] === 'A' ? 11 : parseInt(c[0]); }
   const myCanDouble = isMyTurn && myHand?.cards.length === 2 && (me?.chips || 0) >= myHand.bet;
-  const myCanSplit  = isMyTurn && myHand?.cards.length === 2 && myHand.cards.length === 2 && cardRank(myHand.cards[0]) === cardRank(myHand.cards[1]);
+  const myCanSplit  = isMyTurn && myHand?.cards.length === 2 && cardRank(myHand.cards[0]) === cardRank(myHand.cards[1]);
 
   function handleSeatClick(seatIndex) {
-    if (mySeat != null && mySeat !== -1) return; // already seated
+    if (isSeated) return;
     if (phase && phase !== 'betting') return;
     const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
     const amount = buyIn || minBuyIn;
-    setSitBuyIn(amount);
-    setSitModal({ seatIndex });
+    // Send sit_down directly — no modal needed, buyIn comes from lobby
+    roomRef.current?.send('sit_down', { seatIndex, buyIn: amount });
   }
 
-  function confirmSitDown() {
-    if (!sitModal) return;
-    send('sit_down', { seatIndex: sitModal.seatIndex, buyIn: sitBuyIn });
-    setSitModal(null);
-  }
+
 
   const EMOJIS = ['🥧','💸','😡','😂','👏','💀','🔥','🥶'];
 
@@ -844,11 +916,12 @@ export default function BlackjackTable() {
   );
 
   return (
-    <div style={{ minHeight: '100vh', background: '#03060a', fontFamily: FONT, overflow: 'hidden' }}>
+    <div style={{ height: '100vh', background: '#03060a', fontFamily: FONT, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* Header */}
       <div style={{
-        position: 'fixed', top: 0, left: 0, right: 0, height: 52, zIndex: 25,
+        flexShrink: 0,
+        height: 52, zIndex: 25,
         background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(12px)',
         borderBottom: `1px solid ${GOLD}22`,
         display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10,
@@ -870,12 +943,19 @@ export default function BlackjackTable() {
         </div>
 
         <HouseBankPill />
-        {me && <div style={{ fontSize: 10, color: GOLD, fontWeight: 700 }}>${me.chips?.toLocaleString()}</div>}
+        {me && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: GOLD, fontFamily: FONT }}>
+              🪙 ${me.chips?.toLocaleString()}
+            </div>
+            <div style={{ fontSize: 8, color: '#374151', fontFamily: FONT }}>TABLE STACK</div>
+          </div>
+        )}
       </div>
 
       {/* Error */}
       {error && (
-        <div style={{ position: 'fixed', top: 58, left: '50%', transform: 'translateX(-50%)', zIndex: 50, background: 'rgba(239,68,68,0.9)', color: '#fff', padding: '6px 20px', borderRadius: 8, fontSize: 11, fontWeight: 600 }}>
+        <div style={{ flexShrink: 0, textAlign: 'center', background: 'rgba(239,68,68,0.9)', color: '#fff', padding: '6px 20px', fontSize: 11, fontWeight: 600 }}>
           {error}
         </div>
       )}
@@ -886,10 +966,10 @@ export default function BlackjackTable() {
       {/* Table felt */}
       <div ref={tableRef} style={{
         position: 'relative', width: '100%', maxWidth: 920,
-        height: 'calc(100vh - 150px)',
-        margin: '60px auto 0',
+        flex: 1,
+        margin: '0 auto',
         background: 'radial-gradient(ellipse at 50% 35%, #0e4425 0%, #082b18 55%, #030f08 100%)',
-        borderTop: '8px solid #7c4a1e', borderBottom: '8px solid #7c4a1e',
+        borderTop: '6px solid #7c4a1e',
         overflow: 'hidden',
       }}>
 
@@ -965,14 +1045,14 @@ export default function BlackjackTable() {
                 position: 'absolute', bottom: pos.bottom, left: pos.left,
                 transform: 'translateX(-50%)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-                cursor: (!seat && (mySeat == null || mySeat === -1)) || (seat && i !== mySeat) ? 'pointer' : 'default',
+                cursor: (!seat && !isSeated) || (seat && i !== mySeat) ? 'pointer' : 'default',
                 zIndex: myTurn ? 6 : 3,
               }}
             >
               {!seat ? (
                 <div
-                  style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: (mySeat == null || mySeat === -1) ? GOLD : '#374151', fontFamily: FONT, cursor: (mySeat == null || mySeat === -1) ? 'pointer' : 'default', transition: 'all 0.2s' }}
-                  onMouseEnter={e => { if (mySeat == null || mySeat === -1) e.currentTarget.style.background = `${GOLD}15`; }}
+                  style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: !isSeated ? GOLD : '#374151', fontFamily: FONT, cursor: !isSeated ? 'pointer' : 'default', transition: 'all 0.2s' }}
+                  onMouseEnter={e => { if (!isSeated) e.currentTarget.style.background = `${GOLD}15`; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.015)'; }}
                 >SIT</div>
               ) : (
@@ -1040,7 +1120,7 @@ export default function BlackjackTable() {
 
       <ChatPanel messages={chatMessages} onSend={m => send('chat', { message: m })} myUsername={username} />
 
-      {isBetting && me && config && !betLocked && (
+      {isBetting && isSeated && me && config && !betLocked && (
         <BetControls config={config} myChips={me.chips} currentBet={currentBet}
           onAddChip={v => setCurrentBet(p => Math.min(p + v, config.maxBet))}
           onClear={() => setCurrentBet(0)}
@@ -1061,56 +1141,7 @@ export default function BlackjackTable() {
         />
       )}
 
-      {/* Sit down modal */}
-      {sitModal && (
-        <>
-          <div onClick={() => setSitModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />
-          <div style={{
-            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-            zIndex: 201, background: '#0a0e14', border: `1px solid ${GOLD}44`,
-            borderRadius: 14, padding: 24, width: 290, fontFamily: FONT,
-            boxShadow: `0 20px 60px rgba(0,0,0,0.8)`,
-          }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>
-              Sit Down — Seat {(sitModal.seatIndex + 1)}
-            </div>
-            {(() => {
-              const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
-              const maxBuyIn = config?.minBet ? config.minBet * 50 : 25000;
-              return (
-                <>
-                  <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
-                    Min ${minBuyIn.toLocaleString()} · {config?.label || 'Standard Table'}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <input type="range"
-                      min={minBuyIn} max={maxBuyIn} step={config?.minBet || 100}
-                      value={sitBuyIn || minBuyIn}
-                      onChange={e => setSitBuyIn(Number(e.target.value))}
-                      style={{ flex: 1, accentColor: GOLD }}
-                    />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: GOLD, minWidth: 70, textAlign: 'right' }}>
-                      ${(sitBuyIn || minBuyIn).toLocaleString()}
-                    </span>
-                  </div>
-                </>
-              );
-            })()}
-            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-              <button onClick={() => setSitModal(null)} style={{
-                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
-                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
-                color: '#6b7280', fontSize: 11, fontFamily: FONT,
-              }}>CANCEL</button>
-              <button onClick={confirmSitDown} style={{
-                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
-                background: `linear-gradient(135deg, ${GOLD}, #a07828)`,
-                border: 'none', color: '#000', fontSize: 11, fontWeight: 900, fontFamily: FONT,
-              }}>SIT DOWN</button>
-            </div>
-          </div>
-        </>
-      )}
+
 
       <style>{`
         @keyframes bannerPop { from { opacity:0; transform:translate(-50%,-50%) scale(0.7); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }

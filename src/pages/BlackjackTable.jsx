@@ -14,6 +14,20 @@ const FONT = "'JetBrains Mono','SF Mono',monospace";
 const GOLD = '#c9a84c';
 const SESSION_KEY = 'otj_bj_session';
 
+function calcHandTotal(cards) {
+  if (!cards?.length) return 0;
+  let total = 0, aces = 0;
+  for (const c of cards) {
+    if (!c || c === '??') continue;
+    const r = c[0];
+    if (['T','J','Q','K'].includes(r)) total += 10;
+    else if (r === 'A') { total += 11; aces++; }
+    else total += parseInt(r);
+  }
+  while (total > 21 && aces > 0) { total -= 10; aces--; }
+  return total;
+}
+
 // ── Card ──────────────────────────────────────────────────────────────────────
 
 const SUIT_SYM   = { h: '♥', d: '♦', c: '♣', s: '♠' };
@@ -375,23 +389,129 @@ function PayoutBanner({ results, myUsername }) {
   if (!results) return null;
   const mine = results.find(r => r.username === myUsername);
   if (!mine) return null;
-  const net = mine.chipChange;
-  const bj  = mine.hands?.some(h => h.outcome === 'blackjack');
-  const win = net > 0;
-  const color = win ? (bj ? GOLD : '#22c55e') : net === 0 ? '#94a3b8' : '#ef4444';
+  const net  = mine.chipChange;
+  const bj   = mine.hands?.some(h => h.outcome === 'blackjack');
+  const win  = net > 0;
+  const push = net === 0;
+  const bust = !win && !push;
 
+  if (push) {
+    return (
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        zIndex: 150, textAlign: 'center', pointerEvents: 'none',
+        animation: 'bannerPop 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 900, fontFamily: FONT, color: '#94a3b8', letterSpacing: '0.1em' }}>PUSH</div>
+        <div style={{ fontSize: 12, color: '#94a3b8', fontFamily: FONT }}>Bet returned</div>
+      </div>
+    );
+  }
+
+  if (bust) {
+    return (
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        zIndex: 150, textAlign: 'center', pointerEvents: 'none',
+        animation: 'bannerPop 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+      }}>
+        <div style={{ fontSize: 22, fontWeight: 900, fontFamily: FONT, color: '#ef4444', textShadow: '0 0 20px #ef444488', letterSpacing: '0.08em' }}>
+          {mine.hands?.some(h => h.outcome === 'bust') ? 'BUST' : 'DEALER WINS'}
+        </div>
+        <div style={{ fontSize: 14, color: '#ef4444', fontFamily: FONT, marginTop: 4 }}>
+          {net.toLocaleString()} OTJ
+        </div>
+      </div>
+    );
+  }
+
+  // WIN or BLACKJACK — full drama
   return (
     <div style={{
-      position: 'fixed', top: '28%', left: '50%', transform: 'translate(-50%,-50%)',
-      zIndex: 100, textAlign: 'center', pointerEvents: 'none',
-      animation: 'bannerPop 0.4s cubic-bezier(0.34,1.56,0.64,1)',
+      position: 'fixed', inset: 0, zIndex: 150,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      pointerEvents: 'none',
     }}>
-      {bj && <div style={{ fontSize: 52, marginBottom: 4 }}>🂡</div>}
-      <div style={{ fontSize: bj ? 30 : 24, fontWeight: 900, fontFamily: FONT, color, textShadow: `0 0 30px ${color}`, letterSpacing: '0.04em' }}>
-        {bj ? 'BLACKJACK!' : win ? 'WIN!' : net === 0 ? 'PUSH' : 'BUST'}
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 700, color, fontFamily: FONT, marginTop: 4 }}>
-        {net > 0 ? '+' : ''}{net?.toLocaleString()} OTJ
+      {/* Background flash */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: bj
+          ? `radial-gradient(ellipse at center, ${GOLD}33 0%, transparent 70%)`
+          : 'radial-gradient(ellipse at center, rgba(34,197,94,0.2) 0%, transparent 70%)',
+        animation: 'flashIn 0.4s ease-out',
+      }} />
+
+      {/* Confetti particles */}
+      {bj && Array.from({ length: 16 }).map((_, i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          left: `${Math.random() * 100}%`,
+          top: `${Math.random() * 100}%`,
+          width: 8, height: 8,
+          background: [GOLD, '#ef4444', '#22c55e', '#3b82f6', '#a855f7'][i % 5],
+          borderRadius: Math.random() > 0.5 ? '50%' : '0',
+          animation: `confetti${i % 4} ${0.6 + Math.random() * 0.8}s ease-out forwards`,
+          opacity: 0,
+        }} />
+      ))}
+
+      {/* Main content */}
+      <div style={{
+        textAlign: 'center',
+        animation: 'winPop 0.5s cubic-bezier(0.34,1.56,0.64,1)',
+        position: 'relative',
+      }}>
+        {/* Card emoji for blackjack */}
+        {bj && (
+          <div style={{
+            fontSize: 80, marginBottom: 8,
+            animation: 'cardFlip 0.6s ease-out',
+            filter: `drop-shadow(0 0 20px ${GOLD})`,
+          }}>🂡</div>
+        )}
+
+        {/* Main label */}
+        <div style={{
+          fontSize: bj ? 56 : 48,
+          fontWeight: 900,
+          fontFamily: FONT,
+          color: bj ? GOLD : '#22c55e',
+          textShadow: bj
+            ? `0 0 40px ${GOLD}, 0 0 80px ${GOLD}88`
+            : '0 0 40px rgba(34,197,94,0.8)',
+          letterSpacing: bj ? '-0.02em' : '0.04em',
+          lineHeight: 1,
+          marginBottom: 12,
+        }}>
+          {bj ? 'BLACKJACK!' : 'WIN!'}
+        </div>
+
+        {/* Amount */}
+        <div style={{
+          display: 'inline-block',
+          padding: '8px 24px',
+          borderRadius: 40,
+          background: bj ? `linear-gradient(135deg, ${GOLD}33, ${GOLD}11)` : 'rgba(34,197,94,0.15)',
+          border: `2px solid ${bj ? GOLD : '#22c55e'}`,
+          fontSize: 28,
+          fontWeight: 800,
+          color: bj ? GOLD : '#22c55e',
+          fontFamily: FONT,
+          boxShadow: bj ? `0 0 30px ${GOLD}44` : '0 0 30px rgba(34,197,94,0.3)',
+          animation: 'slideUp 0.4s 0.2s cubic-bezier(0.34,1.56,0.64,1) both',
+        }}>
+          +{net.toLocaleString()} OTJ
+        </div>
+
+        {bj && (
+          <div style={{
+            marginTop: 10, fontSize: 11, color: `${GOLD}88`,
+            fontFamily: FONT, letterSpacing: '0.2em',
+            animation: 'slideUp 0.4s 0.4s ease both',
+          }}>
+            PAYS 3 TO 2
+          </div>
+        )}
       </div>
     </div>
   );
@@ -465,6 +585,153 @@ const DEALER_MOODS = {
   push:        { label: "We'll call it even.",       eyebrowL: 0,   eyebrowR: 2,   mouthCurve: 0,    eyeSquint: 1,   sweat: false, pupils: 'side'   },
   dealer_bust: { label: 'Dealer busts! Pay up.',     eyebrowL: 12,  eyebrowR: 12,  mouthCurve: -18,  eyeSquint: 4,   sweat: true,  pupils: 'wide'   },
 };
+
+// ── Dealer Zoom Reaction ──────────────────────────────────────────────────────
+// Zooms the dealer face in for specific big moments, then retreats
+
+const ZOOM_REACTIONS = {
+  bust: {
+    eyebrowL: -6, eyebrowR: -6, mouthCurve: 20, eyeSquint: 0, pupils: 'up', sweat: false,
+    scale: 2.8, bg: 'rgba(239,68,68,0.15)', label: 'HAHA!', labelColor: '#ef4444',
+    duration: 2200,
+  },
+  player_21: {
+    eyebrowL: 10, eyebrowR: 10, mouthCurve: -14, eyeSquint: 3, pupils: 'wide', sweat: true,
+    scale: 1.8, bg: `rgba(201,168,76,0.12)`, label: '...21', labelColor: GOLD,
+    duration: 1800,
+  },
+  blackjack: {
+    eyebrowL: 14, eyebrowR: 14, mouthCurve: -20, eyeSquint: 5, pupils: 'wide', sweat: true,
+    scale: 3.5, bg: `rgba(201,168,76,0.25)`, label: 'BLACKJACK!?', labelColor: GOLD,
+    duration: 2800,
+  },
+  dealer_bust: {
+    eyebrowL: 14, eyebrowR: 14, mouthCurve: -22, eyeSquint: 5, pupils: 'wide', sweat: true,
+    scale: 2.4, bg: 'rgba(239,68,68,0.2)', label: '...BUST', labelColor: '#ef4444',
+    duration: 2200,
+  },
+  dealer_21: {
+    eyebrowL: -10, eyebrowR: -10, mouthCurve: 22, eyeSquint: 0, pupils: 'center', sweat: false,
+    scale: 2.0, bg: 'rgba(239,68,68,0.15)', label: '21. NICE TRY.', labelColor: '#ef4444',
+    duration: 2000,
+  },
+};
+
+function DealerZoom({ reaction, onDone }) {
+  const [animPhase, setAnimPhase] = useState('in'); // in | hold | out
+  const r = ZOOM_REACTIONS[reaction];
+
+  useEffect(() => {
+    if (!r) return;
+    const t1 = setTimeout(() => setAnimPhase('hold'), 350);
+    const t2 = setTimeout(() => setAnimPhase('out'),  r.duration - 300);
+    const t3 = setTimeout(() => onDone?.(),           r.duration);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [reaction]);
+
+  if (!r) return null;
+
+  const scale   = animPhase === 'hold' ? r.scale : animPhase === 'out' ? 0.2 : 0.2;
+  const opacity = animPhase === 'out'  ? 0 : animPhase === 'hold' ? 1 : 0;
+
+  const po = { center:{x:0,y:0}, up:{x:0,y:-3}, down:{x:0,y:2}, side:{x:3,y:0}, wide:{x:0,y:0} }[r.pupils] || {x:0,y:0};
+  const ps = r.pupils === 'wide' ? 6 : 4;
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 160, pointerEvents: 'none',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {/* BG tint */}
+      <div style={{
+        position: 'absolute', inset: 0, background: r.bg,
+        opacity: animPhase === 'hold' ? 1 : 0,
+        transition: 'opacity 0.3s ease',
+      }} />
+
+      {/* Sweat drops for panic reactions */}
+      {r.sweat && animPhase === 'hold' && Array.from({length: 6}).map((_, i) => (
+        <div key={i} style={{
+          position: 'absolute',
+          left: `${48 + (i % 2 === 0 ? 8 : -8) + i * 2}%`,
+          top: `${25 + i * 4}%`,
+          fontSize: 16 + i * 2, opacity: 0.7,
+          animation: `sweatDrop ${0.6 + i * 0.15}s ease-in ${i * 0.1}s infinite`,
+        }}>💧</div>
+      ))}
+
+      {/* Face */}
+      <div style={{
+        transform: `scale(${scale})`,
+        opacity,
+        transition: animPhase === 'in'
+          ? 'transform 0.35s cubic-bezier(0.34,1.4,0.64,1), opacity 0.25s ease'
+          : animPhase === 'out'
+          ? 'transform 0.3s ease-in, opacity 0.3s ease-in'
+          : 'none',
+        transformOrigin: 'center center',
+        position: 'relative', zIndex: 2,
+        filter: `drop-shadow(0 0 40px ${r.labelColor}66) drop-shadow(0 20px 60px rgba(0,0,0,0.9))`,
+      }}>
+        <svg width="90" height="100" viewBox="0 0 90 100" style={{ overflow: 'visible' }}>
+          {/* Hat */}
+          <rect x="22" y="2" width="46" height="28" rx="3" fill="#1a1a1a" stroke={GOLD} strokeWidth="1.5"/>
+          <rect x="14" y="28" width="62" height="7" rx="2" fill="#111" stroke={GOLD} strokeWidth="1"/>
+          <rect x="22" y="24" width="46" height="5" rx="1" fill={GOLD} opacity="0.8"/>
+          {/* Head */}
+          <rect x="36" y="87" width="18" height="12" rx="3" fill="#c8956b"/>
+          <ellipse cx="45" cy="64" rx="28" ry="30" fill="#d4956b"/>
+          <ellipse cx="40" cy="50" rx="10" ry="7" fill="rgba(255,255,255,0.12)" transform="rotate(-15,40,50)"/>
+          <ellipse cx="25" cy="70" rx="7" ry="5" fill="rgba(220,100,80,0.25)"/>
+          <ellipse cx="65" cy="70" rx="7" ry="5" fill="rgba(220,100,80,0.25)"/>
+          {/* Eyebrows */}
+          <path d={`M 26 ${56+r.eyebrowL} Q 33 ${50+r.eyebrowL} 38 ${56+r.eyebrowL*0.3}`} stroke="#3a1f0a" strokeWidth="4" strokeLinecap="round" fill="none"/>
+          <path d={`M 52 ${56+r.eyebrowR*0.3} Q 57 ${50+r.eyebrowR} 64 ${56+r.eyebrowR}`} stroke="#3a1f0a" strokeWidth="4" strokeLinecap="round" fill="none"/>
+          {/* Eyes */}
+          <ellipse cx="32" cy="63" rx="8" ry={Math.max(1, 9 - r.eyeSquint * 0.6)} fill="white"/>
+          <ellipse cx="58" cy="63" rx="8" ry={Math.max(1, 9 - r.eyeSquint * 0.6)} fill="white"/>
+          <circle cx={32+po.x} cy={63+po.y} r={ps} fill="#2c1a0a"/>
+          <circle cx={58+po.x} cy={63+po.y} r={ps} fill="#2c1a0a"/>
+          <circle cx="34" cy="61" r="1.8" fill="white" opacity="0.9"/>
+          <circle cx="60" cy="61" r="1.8" fill="white" opacity="0.9"/>
+          {/* Squint lines */}
+          {r.eyeSquint > 2 && <>
+            <path d={`M 24 ${66+r.eyeSquint*0.5} Q 32 ${64+r.eyeSquint*0.3} 40 ${66+r.eyeSquint*0.5}`} stroke="#b07040" strokeWidth="1.5" fill="none" opacity="0.5"/>
+            <path d={`M 50 ${66+r.eyeSquint*0.5} Q 58 ${64+r.eyeSquint*0.3} 66 ${66+r.eyeSquint*0.5}`} stroke="#b07040" strokeWidth="1.5" fill="none" opacity="0.5"/>
+          </>}
+          {/* Nose */}
+          <ellipse cx="45" cy="72" rx="6" ry="5" fill="#c07a50"/>
+          <ellipse cx="41" cy="74" rx="3" ry="2.5" fill="#a06040" opacity="0.6"/>
+          <ellipse cx="49" cy="74" rx="3" ry="2.5" fill="#a06040" opacity="0.6"/>
+          {/* Mouth */}
+          <path d={`M 33 ${80-r.mouthCurve*0.2} Q 45 ${80+r.mouthCurve*0.4} 57 ${80-r.mouthCurve*0.2}`}
+            stroke="#7a3520" strokeWidth="3" strokeLinecap="round" fill="none"/>
+          {r.mouthCurve > 12 && (
+            <path d={`M 36 ${79-r.mouthCurve*0.1} Q 45 ${83+r.mouthCurve*0.3} 54 ${79-r.mouthCurve*0.1}`} fill="white" opacity="0.85"/>
+          )}
+          {/* Bow tie */}
+          <polygon points="35,91 42,87 42,95" fill={GOLD} opacity="0.9"/>
+          <polygon points="55,91 48,87 48,95" fill={GOLD} opacity="0.9"/>
+          <circle cx="45" cy="91" r="3.5" fill={GOLD}/>
+        </svg>
+      </div>
+
+      {/* Label */}
+      <div style={{
+        position: 'relative', zIndex: 3, marginTop: 16,
+        fontSize: 28, fontWeight: 900, fontFamily: FONT,
+        color: r.labelColor,
+        textShadow: `0 0 30px ${r.labelColor}`,
+        letterSpacing: '0.06em',
+        opacity: animPhase === 'hold' ? 1 : 0,
+        transform: animPhase === 'hold' ? 'translateY(0)' : 'translateY(20px)',
+        transition: 'opacity 0.3s ease, transform 0.3s ease',
+      }}>
+        {r.label}
+      </div>
+    </div>
+  );
+}
 
 function DealerCharacter({ mood = 'idle', isDealing }) {
   const m = DEALER_MOODS[mood] || DEALER_MOODS.idle;
@@ -847,6 +1114,7 @@ export default function BlackjackTable() {
   const [isDealing, setIsDealing]       = useState(false);
   const [cardProjectiles, setCardProjectiles] = useState([]);
   const cardProjectileId = useRef(0);
+  const [zoomReaction, setZoomReaction] = useState(null); // 'bust'|'player_21'|'blackjack'|'dealer_bust'|'dealer_21'
   const projectileId = useRef(0);
   const tableRef     = useRef(null);
   const roomRef      = useRef(null);
@@ -892,10 +1160,40 @@ export default function BlackjackTable() {
           if (state.phase === 'betting') { setBetLocked(false); setPayoutResults(null); }
         });
 
+        // ── Watch game_state for zoom-worthy moments ──
+        let lastPhase = 'betting';
+        room.onMessage('game_state', state => {
+          if (!mounted) return;
+          // After a player acts (player_turn phase) check their hand total
+          if (state.phase === 'player_turn' || state.phase === 'dealer_turn' || state.phase === 'payout') {
+            const myIdx = state.mySeat;
+            if (myIdx != null && myIdx !== -1 && state.seats?.[myIdx]) {
+              const mySeatData = state.seats[myIdx];
+              const activeHand = mySeatData.hands?.[mySeatData.activeHand];
+              if (activeHand?.cards?.length >= 2) {
+                const total = calcHandTotal(activeHand.cards);
+                const wasBust = activeHand.status === 'bust';
+                const is21    = total === 21 && !wasBust;
+                const isBJ    = activeHand.cards.length === 2 && total === 21;
+                if (wasBust)  setZoomReaction('bust');
+                else if (isBJ) setZoomReaction('blackjack');
+                else if (is21) setZoomReaction('player_21');
+              }
+            }
+            // Dealer bust check
+            if (state.phase === 'payout' && state.dealerCards?.length >= 2) {
+              const dt = calcHandTotal(state.dealerCards);
+              if (dt > 21) setZoomReaction('dealer_bust');
+              else if (dt === 21) setZoomReaction('dealer_21');
+            }
+          }
+          lastPhase = state.phase;
+        });
+
         room.onMessage('bet_timer',       ({ timeLeft }) => mounted && setBetTimer(timeLeft));
         room.onMessage('turn_change',     ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
         room.onMessage('turn_timer',      ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
-        room.onMessage('new_round',       ()             => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([]), setCutPending(null)));
+        room.onMessage('new_round', () => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([]), setCutPending(null), setZoomReaction(null)));
         // payout_results handled above with dealer mood
         room.onMessage('chat_message',    msg => mounted && setChatMessages(p => [...p.slice(-99), msg]));
         room.onMessage('emoji_reaction',  ({ fromSeat, toSeat, emoji }) => {
@@ -1299,6 +1597,14 @@ export default function BlackjackTable() {
 
 
 
+      {/* Dealer zoom reaction — only for big moments */}
+      {zoomReaction && (
+        <DealerZoom
+          reaction={zoomReaction}
+          onDone={() => setZoomReaction(null)}
+        />
+      )}
+
       {/* Cut card modal — shown to the cutter */}
       {cutCardUI && (
         <CutCardModal
@@ -1328,6 +1634,14 @@ export default function BlackjackTable() {
 
       <style>{`
         @keyframes bannerPop { from { opacity:0; transform:translate(-50%,-50%) scale(0.7); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
+        @keyframes winPop { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:scale(1); } }
+        @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes flashIn { from { opacity:0; } 30% { opacity:1; } to { opacity:0.6; } }
+        @keyframes cardFlip { from { transform:rotateY(90deg) scale(0.5); opacity:0; } to { transform:rotateY(0deg) scale(1); opacity:1; } }
+        @keyframes confetti0 { to { transform:translate(-120px,-200px) rotate(720deg); opacity:0; } }
+        @keyframes confetti1 { to { transform:translate(150px,-180px) rotate(-540deg); opacity:0; } }
+        @keyframes confetti2 { to { transform:translate(-80px,160px) rotate(480deg); opacity:0; } }
+        @keyframes confetti3 { to { transform:translate(100px,140px) rotate(-360deg); opacity:0; } }
         @keyframes dealerDeal { from { transform: rotate(-6deg) translateY(0px); } to { transform: rotate(6deg) translateY(-4px); } }
         @keyframes dealerBounce { 0% { transform: scale(1); } 40% { transform: scale(1.12) translateY(-4px); } 70% { transform: scale(0.96) translateY(1px); } 100% { transform: scale(1); } }
         @keyframes sweatDrop { 0% { transform: translateY(0); opacity: 0.8; } 100% { transform: translateY(12px); opacity: 0; } }

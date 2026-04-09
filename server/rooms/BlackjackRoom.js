@@ -108,6 +108,14 @@ class BlackjackRoom extends Room {
         this.currentSeat  = -1;
         this.chatLog      = [];
 
+        // CRITICAL: metadata makes filterBy(['tier']) work for room matching
+        this.setMetadata({
+            tier:      this.tier,
+            roomCode:  this.roomCode,
+            tableName: this.tableName,
+            phase:     'betting',
+        });
+
         this.onMessage('sit_down',      (c, d) => this.handleSitDown(c, d));
         this.onMessage('stand_up',      (c)    => this.handleStandUp(c));
         this.onMessage('place_bet',     (c, d) => this.handlePlaceBet(c, d));
@@ -827,6 +835,14 @@ class BlackjackRoom extends Room {
         // ── State broadcast ───────────────────────────────────────────────────────
 
     broadcastState() {
+        // Keep metadata fresh so room listing shows correct player count + phase
+        this.setMetadata({
+            tier:        this.tier,
+            roomCode:    this.roomCode,
+            tableName:   this.tableName,
+            phase:       this.phase,
+            playerCount: this.seats.filter(s => s !== null).length,
+        });
         for (const client of this.clients) {
             const mySeat = this.findSeat(client.sessionId);
             client.send('game_state', {

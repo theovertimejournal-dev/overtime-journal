@@ -143,7 +143,7 @@ function BetControls({ config, myChips, currentBet, onAddChip, onClear, onDeal, 
       borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 16px',
     }}>
       <div style={{ textAlign: 'center', fontSize: 9, color: '#374151', fontFamily: FONT, marginBottom: 6, letterSpacing: '0.12em' }}>
-        PLACE YOUR BET · {config.minBet.toLocaleString()}–{config.maxBet.toLocaleString()} BUCKS
+        PLACE YOUR BET · {config.minBet.toLocaleString()}–{config.maxBet.toLocaleString()} OTJ BUCKS
       </div>
 
       <div style={{ textAlign: 'center', marginBottom: 8, minHeight: 28 }}>
@@ -391,7 +391,7 @@ function PayoutBanner({ results, myUsername }) {
         {bj ? 'BLACKJACK!' : win ? 'WIN!' : net === 0 ? 'PUSH' : 'BUST'}
       </div>
       <div style={{ fontSize: 16, fontWeight: 700, color, fontFamily: FONT, marginTop: 4 }}>
-        {net > 0 ? '+' : ''}{net?.toLocaleString()} Bucks
+        {net > 0 ? '+' : ''}{net?.toLocaleString()} OTJ
       </div>
     </div>
   );
@@ -408,7 +408,7 @@ function HouseBankPill() {
   if (balance == null) return null;
   return (
     <div style={{ padding: '3px 10px', borderRadius: 20, background: `${GOLD}15`, border: `1px solid ${GOLD}33`, fontSize: 9, fontFamily: FONT, color: GOLD }}>
-      🏦 ${Math.round(balance / 10000).toLocaleString()}
+      🏦 {Math.round(balance / 10000).toLocaleString()} OTJ
     </div>
   );
 }
@@ -946,7 +946,7 @@ export default function BlackjackTable() {
         {me && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: GOLD, fontFamily: FONT }}>
-              🪙 ${me.chips?.toLocaleString()}
+              🪙 {me.chips?.toLocaleString()} OTJ
             </div>
             <div style={{ fontSize: 8, color: '#374151', fontFamily: FONT }}>TABLE STACK</div>
           </div>
@@ -1065,7 +1065,7 @@ export default function BlackjackTable() {
                   )}
                   {seat.bet > 0 && (
                     <div style={{ fontSize: 9, fontWeight: 700, color: GOLD, background: `${GOLD}12`, border: `1px solid ${GOLD}28`, padding: '1px 6px', borderRadius: 8, fontFamily: FONT, marginBottom: 2 }}>
-                      BET ${seat.bet.toLocaleString()}
+                      BET {seat.bet.toLocaleString()} OTJ
                     </div>
                   )}
                   <div style={{ border: `2px solid ${myTurn ? GOLD : isMe ? '#ef4444' : 'rgba(255,255,255,0.07)'}`, borderRadius: '50%', boxShadow: myTurn ? `0 0 16px ${GOLD}55` : 'none', transition: 'all 0.3s' }}>
@@ -1073,7 +1073,7 @@ export default function BlackjackTable() {
                   </div>
                   <div style={{ background: 'rgba(3,6,10,0.88)', borderRadius: 5, padding: '2px 7px', textAlign: 'center', minWidth: 68, border: `1px solid ${GOLD}18` }}>
                     <div style={{ fontSize: 9, fontWeight: 700, color: isMe ? '#ef4444' : '#f1f5f9', fontFamily: FONT }}>{seat.username?.slice(0,10)}{isMe ? ' (you)' : ''}</div>
-                    <div style={{ fontSize: 9, color: GOLD, fontFamily: FONT }}>${seat.chips?.toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: GOLD, fontFamily: FONT }}>{seat.chips?.toLocaleString()} OTJ</div>
                   </div>
                 </>
               )}

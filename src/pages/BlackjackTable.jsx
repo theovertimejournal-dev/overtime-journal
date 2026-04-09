@@ -946,17 +946,20 @@ export default function BlackjackTable() {
           const myTurn = i === currentSeat && phase === 'player_turn';
           return (
             <div key={i}
-              onClick={() => seat && !isMe && setEmojiTarget(i)}
+              onClick={() => {
+                if (!seat) { handleSeatClick(i); }
+                else if (!isMe) { setEmojiTarget(i); }
+              }}
               style={{
                 position: 'absolute', bottom: pos.bottom, left: pos.left,
                 transform: 'translateX(-50%)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-                cursor: seat && !isMe ? 'pointer' : 'default', zIndex: myTurn ? 6 : 3,
+                cursor: (!seat && mySeat == null) || (seat && !isMe) ? 'pointer' : 'default',
+                zIndex: myTurn ? 6 : 3,
               }}
             >
               {!seat ? (
                 <div
-                  onClick={() => handleSeatClick(i)}
                   style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: mySeat == null ? GOLD : '#374151', fontFamily: FONT, cursor: mySeat == null ? 'pointer' : 'default', transition: 'all 0.2s' }}
                   onMouseEnter={e => { if (mySeat == null) e.currentTarget.style.background = `${GOLD}15`; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.015)'; }}

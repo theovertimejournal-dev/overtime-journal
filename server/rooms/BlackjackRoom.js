@@ -16,9 +16,9 @@ const supabase = createClient(
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const TIERS = {
-    low:  { minBet: 100,  maxBet: 500,   label: "Low Stakes"  },
-    mid:  { minBet: 500,  maxBet: 5000,  label: "Mid Stakes"  },
-    high: { minBet: 2500, maxBet: 25000, label: "High Roller" },
+    low:  { minBet: 25,  maxBet: 250,  label: "Low Stakes"  },
+    mid:  { minBet: 100, maxBet: 1000, label: "Mid Stakes"  },
+    high: { minBet: 500, maxBet: 5000, label: "High Roller" },
 };
 
 const RAKE_PCT     = 0.02;

@@ -369,8 +369,6 @@ function SheetItem({ to, emoji, label, sub, onNavigate }) {
 function MobileBottomBar({ user, profile, onSignIn }) {
   const [activeSheet, setActiveSheet] = useState(null);
   const location = useLocation();
-  const isGameTable = location.pathname.startsWith('/blackjack/table') || location.pathname.startsWith('/poker/table');
-  if (isGameTable) return null; // hide on game table pages
 
   // Close sheet on route change
   useEffect(() => { setActiveSheet(null); }, [location.pathname]);
@@ -380,7 +378,6 @@ function MobileBottomBar({ user, profile, onSignIn }) {
   // Determine which tab is active
   const isSport = ["/nba", "/props", "/mlb", "/mlb-props", "/nhl", "/nfl"].some(p => path.startsWith(p));
   const isArcade = path.startsWith("/arcade") || path === "/poker" || path.startsWith("/poker/table") || path === "/blackjack" || path.startsWith("/blackjack/table");
-  const isGameTable = path.startsWith("/blackjack/table") || path.startsWith("/poker/table"); // full screen game — hide all nav on mobile
   const isMore = ["/record", "/leaderboard", "/faq", "/daily"].some(p => path.startsWith(p)) || isArcade;
   const isHome = path === "/";
   const isJournal = path === "/daily";
@@ -877,9 +874,9 @@ export default function App() {
         <DesktopNav user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />
 
         {/* Mobile: clean minimal top bar — hidden on game table pages */}
-        {!isGameTable && <MobileTopBar user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />}
+        <MobileTopBar user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />
 
-        <div className="otj-app-content" style={isGameTable ? { paddingBottom: 0 } : {}}>
+        <div className="otj-app-content">
           <Routes>
             <Route path="/" element={<LandingPage user={user} profile={profile} sessionValidated={sessionValidated} />} />
             <Route path="/faq" element={<FAQ />} />

@@ -59,7 +59,7 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
       const c = new Client(COLYSEUS_URL);
       const room = await c.joinById(roomId, { userId: profile.user_id, username: profile.username, avatar: { config: profile.avatar_config }, buyIn: b });
       onEnterTable(room, { tier: t, buyIn: b, userId: profile.user_id, username: profile.username, avatarConfig: profile.avatar_config });
-    } catch (err) { setStatus({ type: 'error', msg: `Join failed: ${err.message}` }); setLoading(false); }
+    } catch (err) { setStatus({ type: 'error', msg: `Couldn't join: ${err.message}` }); setLoading(false); }
   }
 
   async function quickPlay() {
@@ -68,12 +68,8 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
     try {
       const c = new Client(COLYSEUS_URL);
       const opts = { userId: profile.user_id, username: profile.username, avatar: { config: profile.avatar_config }, buyIn, tier: selectedTier };
-      // Use the already-polled rooms list to find an open table
-      const open = rooms.find(r => r.metadata?.tier === selectedTier && r.clients < 5);
-      console.log("[BJ] rooms available:", rooms.length, "open:", open?.roomId);
-      const room = open
-        ? await c.joinById(open.roomId, opts)
-        : await c.create('blackjack', { ...opts });
+      // joinOrCreate with filterBy(['tier']) on server handles matching automatically
+      const room = await c.joinOrCreate('blackjack', opts);
       onEnterTable(room, { tier: selectedTier, buyIn, userId: profile.user_id, username: profile.username, avatarConfig: profile.avatar_config });
     } catch (err) { setStatus({ type: 'error', msg: err.message }); setLoading(false); }
   }

@@ -415,7 +415,7 @@ function PayoutBanner({ results, myUsername }) {
       <div style={{
         position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
         zIndex: 150, textAlign: 'center', pointerEvents: 'none',
-        animation: 'bannerPop 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+        animation: 'bannerPop 0.5s cubic-bezier(0.34,1.56,0.64,1)',
       }}>
         <div style={{ fontSize: 18, fontWeight: 900, fontFamily: FONT, color: '#94a3b8', letterSpacing: '0.1em' }}>PUSH</div>
         <div style={{ fontSize: 12, color: '#94a3b8', fontFamily: FONT }}>Bet returned</div>
@@ -428,7 +428,7 @@ function PayoutBanner({ results, myUsername }) {
       <div style={{
         position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
         zIndex: 150, textAlign: 'center', pointerEvents: 'none',
-        animation: 'bannerPop 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+        animation: 'bannerPop 0.5s cubic-bezier(0.34,1.56,0.64,1)',
       }}>
         <div style={{ fontSize: 22, fontWeight: 900, fontFamily: FONT, color: '#ef4444', textShadow: '0 0 20px #ef444488', letterSpacing: '0.08em' }}>
           {mine.hands?.some(h => h.outcome === 'bust') ? 'BUST' : 'DEALER WINS'}
@@ -608,27 +608,27 @@ const ZOOM_REACTIONS = {
   bust: {
     eyebrowL: -6, eyebrowR: -6, mouthCurve: 20, eyeSquint: 0, pupils: 'up', sweat: false,
     scale: 5, bg: 'rgba(239,68,68,0.2)', label: 'HAHA!', labelColor: '#ef4444',
-    duration: 2400,
+    duration: 3200,
   },
   player_21: {
     eyebrowL: 10, eyebrowR: 10, mouthCurve: -14, eyeSquint: 3, pupils: 'wide', sweat: true,
     scale: 3.5, bg: `rgba(201,168,76,0.15)`, label: '...21', labelColor: GOLD,
-    duration: 2000,
+    duration: 2600,
   },
   blackjack: {
     eyebrowL: 14, eyebrowR: 14, mouthCurve: -20, eyeSquint: 5, pupils: 'wide', sweat: true,
     scale: 6, bg: `rgba(201,168,76,0.3)`, label: 'BLACKJACK!?', labelColor: GOLD,
-    duration: 3000,
+    duration: 4000,
   },
   dealer_bust: {
     eyebrowL: 14, eyebrowR: 14, mouthCurve: -22, eyeSquint: 5, pupils: 'wide', sweat: true,
     scale: 5, bg: 'rgba(239,68,68,0.25)', label: 'DEALER BUSTS!', labelColor: '#ef4444',
-    duration: 2500,
+    duration: 3500,
   },
   dealer_21: {
     eyebrowL: -10, eyebrowR: -10, mouthCurve: 22, eyeSquint: 0, pupils: 'center', sweat: false,
     scale: 4, bg: 'rgba(239,68,68,0.2)', label: '21. NICE TRY.', labelColor: '#ef4444',
-    duration: 2200,
+    duration: 3000,
   },
 };
 
@@ -750,7 +750,7 @@ function DealerZoom({ reaction, onDone }) {
         transform: 'translateX(-50%)',
         opacity,
         transition: animPhase === 'in'
-          ? 'bottom 0.45s cubic-bezier(0.22,1.4,0.36,1), opacity 0.3s ease'
+          ? 'bottom 0.6s cubic-bezier(0.22,1.4,0.36,1), opacity 0.4s ease'
           : animPhase === 'out'
           ? 'bottom 0.4s cubic-bezier(0.55,0,1,0.45), opacity 0.35s ease-in'
           : 'none',
@@ -1564,7 +1564,7 @@ export default function BlackjackTable() {
   );
 
   return (
-    <div style={{ height: '100dvh', minHeight: '-webkit-fill-available', background: '#03060a', fontFamily: FONT, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div data-page="bj-table" style={{ height: '100dvh', minHeight: '-webkit-fill-available', background: '#03060a', fontFamily: FONT, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* Header */}
       <div style={{
@@ -1616,6 +1616,7 @@ export default function BlackjackTable() {
       <div ref={tableRef} style={{
         position: 'relative', width: '100%', maxWidth: 920,
         flex: 1,
+        maxHeight: 'min(calc(100dvh - 44px - 120px), 680px)',
         margin: '0 auto',
         background: 'radial-gradient(ellipse at 50% 35%, #0e4425 0%, #082b18 55%, #030f08 100%)',
         borderTop: '6px solid #7c4a1e',
@@ -1861,6 +1862,7 @@ export default function BlackjackTable() {
       <style>{`
         @keyframes bannerPop { from { opacity:0; transform:translate(-50%,-50%) scale(0.7); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
         @keyframes winPop { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:scale(1); } }
+        @keyframes winHold { 0%,100% { transform:scale(1); } 50% { transform:scale(1.04); } }
         @keyframes slideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
         @keyframes flashIn { from { opacity:0; } 30% { opacity:1; } to { opacity:0.6; } }
         @keyframes cardFlip { from { transform:rotateY(90deg) scale(0.5); opacity:0; } to { transform:rotateY(0deg) scale(1); opacity:1; } }

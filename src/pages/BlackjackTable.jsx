@@ -796,6 +796,7 @@ export default function BlackjackTable() {
 
   // Derived
   const { phase, seats, mySeat, currentSeat, dealerCards, dealerTotal, config } = gameState || {};
+  console.log('[BJ] gameState:', { phase, seatsLen: seats?.length, mySeat, config });
   const me         = mySeat != null ? seats?.[mySeat] : null;
   const myHand     = me?.hands?.[me?.activeHand];
   const isMyTurn   = phase === 'player_turn' && currentSeat === mySeat;
@@ -806,10 +807,13 @@ export default function BlackjackTable() {
   const myCanSplit  = isMyTurn && myHand?.cards.length === 2 && myHand.cards.length === 2 && cardRank(myHand.cards[0]) === cardRank(myHand.cards[1]);
 
   function handleSeatClick(seatIndex) {
-    if (mySeat != null) return; // already seated
-    if (phase && phase !== 'betting') return; // mid-hand, can't join
+    console.log('[BJ] handleSeatClick', seatIndex, 'mySeat:', mySeat, 'phase:', phase);
+    if (mySeat != null) return;
+    if (phase && phase !== 'betting') return;
     const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
-    setSitBuyIn(buyIn || minBuyIn);
+    const amount = buyIn || minBuyIn;
+    console.log('[BJ] opening sit modal, buyIn:', amount);
+    setSitBuyIn(amount);
     setSitModal({ seatIndex });
   }
 
@@ -1051,6 +1055,7 @@ export default function BlackjackTable() {
       )}
 
       {/* Sit down modal */}
+      {sitModal && console.log('[BJ] sitModal rendering', sitModal)}
       {sitModal && (
         <>
           <div onClick={() => setSitModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />

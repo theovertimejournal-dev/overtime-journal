@@ -372,6 +372,119 @@ function EmojiProjectile({ emoji, fromSeat, toSeat, tableRef, onDone }) {
   );
 }
 
+
+// ── Dealer Character ─────────────────────────────────────────────────────────
+
+const DEALER_MOODS = {
+  idle:      { face: '🎩', label: 'Place your bets...' },
+  dealing:   { face: '🤵', label: 'Dealing...' },
+  waiting:   { face: '🧐', label: 'Your move.' },
+  bust:      { face: '😏', label: 'Bust! Better luck next time.' },
+  blackjack: { face: '😤', label: 'Blackjack! Lucky hand.' },
+  win:       { face: '😬', label: 'You got me this time.' },
+  lose:      { face: '😈', label: 'House wins again!' },
+  push:      { face: '😐', label: "We'll call it a tie." },
+  dealer_bust: { face: '😤', label: 'Dealer busts! Pay the table.' },
+};
+
+function DealerCharacter({ mood = 'idle', isDealing }) {
+  const m = DEALER_MOODS[mood] || DEALER_MOODS.idle;
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+      transition: 'all 0.4s ease',
+    }}>
+      {/* Caricature dealer face */}
+      <div style={{
+        width: 56, height: 56, borderRadius: '50%',
+        background: `radial-gradient(circle at 35% 30%, #2a1810, #1a0f0a)`,
+        border: `3px solid ${GOLD}`,
+        boxShadow: `0 0 20px ${GOLD}44, inset 0 -4px 8px rgba(0,0,0,0.4)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 28,
+        animation: isDealing ? 'dealerDeal 0.4s ease-in-out infinite alternate' : 'none',
+        transition: 'all 0.3s',
+        position: 'relative',
+      }}>
+        {m.face}
+        {/* bow tie */}
+        <div style={{
+          position: 'absolute', bottom: -8, left: '50%', transform: 'translateX(-50%)',
+          fontSize: 12,
+        }}>🎀</div>
+      </div>
+      {/* Speech bubble */}
+      <div style={{
+        background: 'rgba(0,0,0,0.7)', border: `1px solid ${GOLD}33`,
+        borderRadius: 8, padding: '3px 10px',
+        fontSize: 8, color: `${GOLD}cc`, fontFamily: FONT,
+        letterSpacing: '0.06em', textAlign: 'center',
+        maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        opacity: 0.9,
+      }}>
+        {m.label}
+      </div>
+    </div>
+  );
+}
+
+// ── Card Projectile (thrown from dealer to seat) ───────────────────────────
+
+function CardProjectile({ id, toSeat, faceDown = true, tableRef, onDone, delay = 0 }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current || !tableRef.current) return;
+    const timer = setTimeout(() => {
+      if (!ref.current || !tableRef.current) return;
+      const tr = tableRef.current.getBoundingClientRect();
+      const W = tr.width, H = tr.height;
+
+      // Dealer position — top center
+      const from = { x: tr.left + W * 0.5, y: tr.top + H * 0.08 };
+
+      // Target seat
+      const pos = SEAT_POSITIONS[toSeat];
+      const to = {
+        x: tr.left + W * (parseFloat(pos.left) / 100),
+        y: tr.top  + H * (1 - parseFloat(pos.bottom) / 100) - 30,
+      };
+
+      const midX = from.x + (to.x - from.x) * 0.4 + (Math.random() - 0.5) * 60;
+      const midY = Math.min(from.y, to.y) - 80;
+
+      ref.current.animate([
+        { left: from.x+'px', top: from.y+'px', opacity: 1, transform: 'rotate(0deg) scale(0.7)' },
+        { left: midX+'px',   top: midY+'px',   opacity: 1, transform: `rotate(${-180 + Math.random()*60}deg) scale(1.1)` },
+        { left: to.x+'px',   top: to.y+'px',   opacity: 1, transform: `rotate(${-360 + Math.random()*30 - 15}deg) scale(1)` },
+      ], {
+        duration: 550,
+        easing: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+        fill: 'forwards',
+      }).onfinish = onDone;
+    }, delay);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div ref={ref} style={{
+      position: 'fixed', pointerEvents: 'none', zIndex: 150,
+      left: 0, top: 0,
+      width: 28, height: 40, borderRadius: 4,
+      background: faceDown
+        ? 'linear-gradient(135deg, #1a1060 0%, #2d1b8e 50%, #1a1060 100%)'
+        : '#fff5f5',
+      border: faceDown ? '1px solid rgba(99,102,241,0.6)' : `1px solid ${GOLD}`,
+      boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 10, color: faceDown ? 'rgba(255,255,255,0.2)' : '#dc2626',
+    }}>
+      {faceDown ? '🂠' : '🃏'}
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function BlackjackTable() {
@@ -394,6 +507,12 @@ export default function BlackjackTable() {
   const [payoutResults, setPayoutResults] = useState(null);
   const [emojiTarget, setEmojiTarget]   = useState(null);
   const [projectiles, setProjectiles]   = useState([]);
+  const [sitModal, setSitModal]         = useState(null); // { seatIndex }
+  const [sitBuyIn, setSitBuyIn]         = useState(0);
+  const [dealerMood, setDealerMood]     = useState('idle');
+  const [isDealing, setIsDealing]       = useState(false);
+  const [cardProjectiles, setCardProjectiles] = useState([]);
+  const cardProjectileId = useRef(0);
   const projectileId = useRef(0);
   const tableRef     = useRef(null);
   const roomRef      = useRef(null);
@@ -441,12 +560,8 @@ export default function BlackjackTable() {
         room.onMessage('bet_timer',       ({ timeLeft }) => mounted && setBetTimer(timeLeft));
         room.onMessage('turn_change',     ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
         room.onMessage('turn_timer',      ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
-        room.onMessage('new_round',       ()             => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null)));
-        room.onMessage('payout_results',  ({ results })  => {
-          if (!mounted) return;
-          setPayoutResults(results);
-          setTimeout(() => setPayoutResults(null), 3500);
-        });
+        room.onMessage('new_round',       ()             => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([])));
+        // payout_results handled above with dealer mood
         room.onMessage('chat_message',    msg => mounted && setChatMessages(p => [...p.slice(-99), msg]));
         room.onMessage('emoji_reaction',  ({ fromSeat, toSeat, emoji }) => {
           if (!mounted) return;
@@ -454,7 +569,58 @@ export default function BlackjackTable() {
           setProjectiles(p => [...p, { id: pid, emoji, fromSeat, toSeat }]);
         });
 
-        ['deal_complete','dealer_reveal','dealer_hit','dealer_blackjack','player_bust','player_doubled','player_split'].forEach(t => room.onMessage(t, () => {}));
+        room.onMessage('deal_complete', ({ handNumber }) => {
+          if (!mounted) return;
+          setIsDealing(true);
+          setDealerMood('dealing');
+          // Throw cards to each seated player — 2 rounds, staggered
+          const seatedIndices = [];
+          // We don't know seats yet from this message, throw to all 5 positions
+          // game_state will follow immediately and render real cards
+          for (let round = 0; round < 2; round++) {
+            for (let seat = 0; seat < 5; seat++) {
+              const pid = ++cardProjectileId.current;
+              const delay = (round * 5 + seat) * 120;
+              setCardProjectiles(prev => [...prev, { id: pid, toSeat: seat, delay, faceDown: true }]);
+            }
+          }
+          // Also deal 2 to dealer
+          setTimeout(() => {
+            setIsDealing(false);
+            setDealerMood('waiting');
+          }, 1800);
+        });
+
+        room.onMessage('dealer_blackjack', () => {
+          if (mounted) setDealerMood('blackjack');
+        });
+        room.onMessage('dealer_hit', () => {
+          if (mounted) setIsDealing(true);
+          setTimeout(() => { if (mounted) setIsDealing(false); }, 600);
+        });
+        room.onMessage('player_bust', () => {
+          if (mounted) setDealerMood('bust');
+          setTimeout(() => { if (mounted) setDealerMood('waiting'); }, 2500);
+        });
+
+        room.onMessage('payout_results', ({ results }) => {
+          if (!mounted) return;
+          setPayoutResults(results);
+          // Set dealer mood based on overall result
+          const allBust = results.every(r => r.hands?.every(h => h.outcome === 'bust' || h.outcome === 'lose'));
+          const anyWin  = results.some(r => r.chipChange > 0);
+          const anyBJ   = results.some(r => r.hands?.some(h => h.outcome === 'blackjack'));
+          if (anyBJ) setDealerMood('blackjack');
+          else if (allBust) setDealerMood('lose');
+          else if (anyWin) setDealerMood('win');
+          else setDealerMood('lose');
+          setTimeout(() => { if (mounted) { setPayoutResults(null); setDealerMood('idle'); } }, 3500);
+        });
+
+        room.onMessage('dealer_reveal', () => {
+          if (mounted) { setIsDealing(true); setDealerMood('dealing'); }
+        });
+        ['player_doubled','player_split','dealer_blackjack'].forEach(t => room.onMessage(t, () => {}));
         room.onMessage('error', ({ message }) => { if (mounted) { setError(message); setTimeout(() => setError(null), 3000); } });
 
         room.onLeave(code => {
@@ -501,6 +667,20 @@ export default function BlackjackTable() {
   function cardRank(c) { return ['T','J','Q','K'].includes(c[0]) ? 10 : c[0] === 'A' ? 11 : parseInt(c[0]); }
   const myCanDouble = isMyTurn && myHand?.cards.length === 2 && (me?.chips || 0) >= myHand.bet;
   const myCanSplit  = isMyTurn && myHand?.cards.length === 2 && myHand.cards.length === 2 && cardRank(myHand.cards[0]) === cardRank(myHand.cards[1]);
+
+  function handleSeatClick(seatIndex) {
+    if (mySeat != null) return; // already seated
+    if (phase !== 'betting' && phase !== undefined) return; // mid-hand
+    const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
+    setSitBuyIn(buyIn || minBuyIn);
+    setSitModal({ seatIndex });
+  }
+
+  function confirmSitDown() {
+    if (!sitModal) return;
+    send('sit_down', { seatIndex: sitModal.seatIndex, buyIn: sitBuyIn });
+    setSitModal(null);
+  }
 
   const EMOJIS = ['🥧','💸','😡','😂','👏','💀','🔥','🥶'];
 
@@ -580,11 +760,13 @@ export default function BlackjackTable() {
         </div>
 
         {/* Dealer zone */}
-        <div style={{ position: 'absolute', top: '5%', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-          <div style={{ fontSize: 9, color: `${GOLD}66`, letterSpacing: '0.15em', fontFamily: FONT }}>DEALER</div>
-          <div style={{ display: 'flex', gap: 5 }}>
-            {(dealerCards || []).map((c, i) => <Card key={i} card={c} />)}
-          </div>
+        <div style={{ position: 'absolute', top: '3%', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <DealerCharacter mood={dealerMood} isDealing={isDealing} />
+          {(dealerCards || []).length > 0 && (
+            <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
+              {dealerCards.map((c, i) => <Card key={i} card={c} />)}
+            </div>
+          )}
           {dealerTotal > 0 && (
             <div style={{ fontSize: 12, fontWeight: 700, color: dealerTotal > 21 ? '#ef4444' : GOLD, fontFamily: FONT }}>
               {dealerTotal > 21 ? `BUST (${dealerTotal})` : dealerTotal}
@@ -636,7 +818,12 @@ export default function BlackjackTable() {
               }}
             >
               {!seat ? (
-                <div style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: '#374151', fontFamily: FONT }}>OPEN</div>
+                <div
+                  onClick={() => handleSeatClick(i)}
+                  style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: mySeat == null ? GOLD : '#374151', fontFamily: FONT, cursor: mySeat == null ? 'pointer' : 'default', transition: 'all 0.2s' }}
+                  onMouseEnter={e => { if (mySeat == null) e.currentTarget.style.background = `${GOLD}15`; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.015)'; }}
+                >SIT</div>
               ) : (
                 <>
                   {/* Small hands for other players */}
@@ -662,6 +849,19 @@ export default function BlackjackTable() {
             </div>
           );
         })}
+
+        {/* Card projectiles — thrown from dealer on deal */}
+        {cardProjectiles.map(p => (
+          <CardProjectile
+            key={p.id}
+            id={p.id}
+            toSeat={p.toSeat}
+            faceDown={p.faceDown}
+            delay={p.delay}
+            tableRef={tableRef}
+            onDone={() => setCardProjectiles(prev => prev.filter(x => x.id !== p.id))}
+          />
+        ))}
 
         {/* Emoji projectiles */}
         {projectiles.map(p => (
@@ -710,8 +910,60 @@ export default function BlackjackTable() {
         />
       )}
 
+      {/* Sit down modal */}
+      {sitModal && config && (
+        <>
+          <div onClick={() => setSitModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />
+          <div style={{
+            position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+            zIndex: 201, background: '#0a0e14', border: `1px solid ${GOLD}44`,
+            borderRadius: 14, padding: 24, width: 290, fontFamily: FONT,
+            boxShadow: `0 20px 60px rgba(0,0,0,0.8)`,
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>
+              Sit Down — Seat {(sitModal.seatIndex + 1)}
+            </div>
+            <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
+              Min {(config.minBet * 5).toLocaleString()} · Max bet ${config.maxBet.toLocaleString()}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <input type="range"
+                min={config.minBet * 5}
+                max={Math.min(config.minBet * 50, 100000)}
+                step={config.minBet}
+                value={sitBuyIn}
+                onChange={e => setSitBuyIn(Number(e.target.value))}
+                style={{ flex: 1, accentColor: GOLD }}
+              />
+              <span style={{ fontSize: 13, fontWeight: 700, color: GOLD, minWidth: 70, textAlign: 'right' }}>
+                ${sitBuyIn.toLocaleString()}
+              </span>
+            </div>
+
+            <div style={{ fontSize: 9, color: '#374151', marginBottom: 18 }}>
+              Table: {config.label} · Blinds ${config.minBet}–${config.maxBet}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setSitModal(null)} style={{
+                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
+                background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#6b7280', fontSize: 11, fontFamily: FONT,
+              }}>CANCEL</button>
+              <button onClick={confirmSitDown} style={{
+                flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
+                background: `linear-gradient(135deg, ${GOLD}, #a07828)`,
+                border: 'none', color: '#000', fontSize: 11, fontWeight: 900, fontFamily: FONT,
+              }}>SIT DOWN</button>
+            </div>
+          </div>
+        </>
+      )}
+
       <style>{`
         @keyframes bannerPop { from { opacity:0; transform:translate(-50%,-50%) scale(0.7); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }
+        @keyframes dealerDeal { from { transform: rotate(-8deg) scale(1.05); } to { transform: rotate(8deg) scale(0.95); } }
       `}</style>
     </div>
   );

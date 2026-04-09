@@ -699,6 +699,124 @@ function CardProjectile({ id, toSeat, faceDown = true, tableRef, onDone, delay =
   );
 }
 
+
+// ── Cut Card Modal ────────────────────────────────────────────────────────────
+
+function CutCardModal({ data, position, onPositionChange, onConfirm, timerLeft }) {
+  const total    = data.deckSize;
+  const pct      = Math.round((position / total) * 100);
+  const numCards = NUM_DECKS_VISUAL * 52;
+
+  // Visual deck — show as stacked card layers
+  const DECK_HEIGHT = 160;
+  const cutY = DECK_HEIGHT - Math.round((position / total) * DECK_HEIGHT);
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 300 }} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        zIndex: 301, background: '#0a0e14',
+        border: `1px solid ${GOLD}55`, borderRadius: 16,
+        padding: '24px 28px', width: 320, fontFamily: FONT,
+        boxShadow: `0 20px 60px rgba(0,0,0,0.8), 0 0 40px ${GOLD}22`,
+      }}>
+        {/* Header */}
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.1em' }}>CUT THE DECK</div>
+          <div style={{ fontSize: 9, color: '#4a5568', marginTop: 4, fontFamily: FONT }}>
+            Drag the slider to choose where to cut
+          </div>
+        </div>
+
+        {/* Visual deck with cut indicator */}
+        <div style={{ position: 'relative', height: DECK_HEIGHT + 20, marginBottom: 16, display: 'flex', justifyContent: 'center' }}>
+          {/* Bottom half */}
+          <div style={{
+            position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)',
+            width: 80, height: DECK_HEIGHT - cutY,
+            background: 'linear-gradient(180deg, #1a1060 0%, #2d1b8e 100%)',
+            border: `1px solid ${GOLD}44`, borderRadius: '0 0 4px 4px',
+            boxShadow: '4px 4px 0 rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ position: 'absolute', top: 4, left: 0, right: 0, textAlign: 'center', fontSize: 8, color: `${GOLD}88`, fontFamily: FONT }}>
+              {total - position} cards
+            </div>
+          </div>
+
+          {/* Top half (separated) */}
+          <div style={{
+            position: 'absolute', bottom: DECK_HEIGHT - cutY + 12, left: '50%', transform: 'translateX(-50%)',
+            width: 80, height: cutY,
+            background: 'linear-gradient(180deg, #312e81 0%, #1a1060 100%)',
+            border: `1px solid ${GOLD}66`, borderRadius: '4px 4px 0 0',
+            boxShadow: '-4px -4px 0 rgba(0,0,0,0.3)',
+            transition: 'bottom 0.1s',
+          }}>
+            <div style={{ position: 'absolute', bottom: 4, left: 0, right: 0, textAlign: 'center', fontSize: 8, color: `${GOLD}88`, fontFamily: FONT }}>
+              {position} cards
+            </div>
+          </div>
+
+          {/* Cut line */}
+          <div style={{
+            position: 'absolute', bottom: DECK_HEIGHT - cutY + 5, left: '50%',
+            transform: 'translateX(-50%)',
+            width: 100, height: 2,
+            background: GOLD, borderRadius: 1,
+            boxShadow: `0 0 8px ${GOLD}`,
+          }} />
+
+          {/* Cut card indicator */}
+          <div style={{
+            position: 'absolute', bottom: DECK_HEIGHT - cutY + 1, right: 'calc(50% - 56px)',
+            fontSize: 8, color: GOLD, fontFamily: FONT, whiteSpace: 'nowrap',
+          }}>◀ cut</div>
+        </div>
+
+        {/* Slider */}
+        <div style={{ marginBottom: 12 }}>
+          <input
+            type="range"
+            min={data.minCut} max={data.maxCut} step={1}
+            value={position}
+            onChange={e => onPositionChange(Number(e.target.value))}
+            style={{ width: '100%', accentColor: GOLD, height: 4 }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 8, color: '#374151', fontFamily: FONT, marginTop: 4 }}>
+            <span>Front</span>
+            <span style={{ color: GOLD, fontWeight: 700 }}>{pct}% through deck</span>
+            <span>Back</span>
+          </div>
+        </div>
+
+        {/* Timer */}
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <div style={{ fontSize: 9, color: timerLeft <= 5 ? '#ef4444' : '#4a5568', fontFamily: FONT }}>
+            {timerLeft <= 5 ? `⚠️ Auto-cutting in ${timerLeft}s` : `${timerLeft}s to cut`}
+          </div>
+          <div style={{ height: 2, background: 'rgba(255,255,255,0.06)', borderRadius: 1, marginTop: 4, overflow: 'hidden' }}>
+            <div style={{ height: '100%', background: timerLeft <= 5 ? '#ef4444' : GOLD, width: `${(timerLeft / data.timeLimit) * 100}%`, transition: 'width 1s linear, background 0.3s', borderRadius: 1 }} />
+          </div>
+        </div>
+
+        {/* Confirm button */}
+        <button onClick={onConfirm} style={{
+          width: '100%', padding: '12px', borderRadius: 8, cursor: 'pointer',
+          background: `linear-gradient(135deg, ${GOLD}, #a07828)`,
+          border: 'none', color: '#000', fontSize: 12, fontWeight: 900,
+          fontFamily: FONT, letterSpacing: '0.08em',
+          boxShadow: `0 4px 20px ${GOLD}44`,
+        }}>
+          ✂️ CUT HERE
+        </button>
+      </div>
+    </>
+  );
+}
+
+const NUM_DECKS_VISUAL = 5;
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function BlackjackTable() {
@@ -720,6 +838,10 @@ export default function BlackjackTable() {
   const [betLocked, setBetLocked]       = useState(false);
   const [payoutResults, setPayoutResults] = useState(null);
   const [emojiTarget, setEmojiTarget]   = useState(null);
+  const [cutCardUI, setCutCardUI]       = useState(null); // { deckSize, minCut, maxCut, timeLimit, cutterName }
+  const [cutPosition, setCutPosition]   = useState(0);
+  const [cutTimer, setCutTimer]         = useState(0);
+  const [cutPending, setCutPending]     = useState(null); // { cutterName } for spectators
   const [projectiles, setProjectiles]   = useState([]);
   const [dealerMood, setDealerMood]     = useState('idle');
   const [isDealing, setIsDealing]       = useState(false);
@@ -773,7 +895,7 @@ export default function BlackjackTable() {
         room.onMessage('bet_timer',       ({ timeLeft }) => mounted && setBetTimer(timeLeft));
         room.onMessage('turn_change',     ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
         room.onMessage('turn_timer',      ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
-        room.onMessage('new_round',       ()             => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([])));
+        room.onMessage('new_round',       ()             => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([]), setCutPending(null)));
         // payout_results handled above with dealer mood
         room.onMessage('chat_message',    msg => mounted && setChatMessages(p => [...p.slice(-99), msg]));
         room.onMessage('emoji_reaction',  ({ fromSeat, toSeat, emoji }) => {
@@ -834,6 +956,23 @@ export default function BlackjackTable() {
           if (mounted) { setIsDealing(true); setDealerMood('dealing'); }
         });
         ['player_doubled','player_split','dealer_blackjack'].forEach(t => room.onMessage(t, () => {}));
+
+        room.onMessage('cut_card_request', (data) => {
+          if (!mounted) return;
+          setCutCardUI(data);
+          setCutPosition(Math.floor((data.minCut + data.maxCut) / 2));
+          setCutTimer(data.timeLimit);
+          const iv = setInterval(() => {
+            setCutTimer(t => {
+              if (t <= 1) { clearInterval(iv); setCutCardUI(null); return 0; }
+              return t - 1;
+            });
+          }, 1000);
+        });
+
+        room.onMessage('cut_card_pending', ({ cutterName }) => {
+          if (mounted) setCutPending({ cutterName });
+        });
         room.onMessage('error', ({ message }) => { if (mounted) { setError(message); setTimeout(() => setError(null), 3000); } });
 
         room.onLeave(code => {
@@ -980,6 +1119,23 @@ export default function BlackjackTable() {
         <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontSize: 10, fontWeight: 900, color: 'rgba(201,168,76,0.05)', letterSpacing: '0.35em', fontFamily: FONT, whiteSpace: 'nowrap', pointerEvents: 'none' }}>
           ★ OVERTIME JOURNAL CASINO ★
         </div>
+
+        {/* Shoe progress bar */}
+        {gameState?.shoe && (
+          <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+            <div style={{ fontSize: 7, color: `${GOLD}55`, fontFamily: FONT, letterSpacing: '0.1em' }}>
+              SHOE {gameState.shoe.pctRemaining}% · {gameState.shoe.remaining} cards
+            </div>
+            <div style={{ width: 60, height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2,
+                background: gameState.shoe.pctRemaining > 40 ? GOLD : gameState.shoe.pctRemaining > 20 ? '#f59e0b' : '#ef4444',
+                width: `${gameState.shoe.pctRemaining}%`,
+                transition: 'width 0.5s ease',
+              }} />
+            </div>
+          </div>
+        )}
 
         {/* BJ payout arc text */}
         <div style={{ position: 'absolute', top: '36%', left: '50%', transform: 'translateX(-50%)', textAlign: 'center', pointerEvents: 'none' }}>
@@ -1142,6 +1298,33 @@ export default function BlackjackTable() {
       )}
 
 
+
+      {/* Cut card modal — shown to the cutter */}
+      {cutCardUI && (
+        <CutCardModal
+          data={cutCardUI}
+          position={cutPosition}
+          onPositionChange={setCutPosition}
+          timerLeft={cutTimer}
+          onConfirm={() => {
+            send('cut_card', { position: cutPosition });
+            setCutCardUI(null);
+          }}
+        />
+      )}
+
+      {/* Cut pending banner — shown to everyone else */}
+      {cutPending && !cutCardUI && (
+        <div style={{
+          position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+          zIndex: 100, textAlign: 'center', pointerEvents: 'none',
+          background: 'rgba(3,6,10,0.9)', border: `1px solid ${GOLD}44`,
+          borderRadius: 12, padding: '16px 24px',
+        }}>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>✂️</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: GOLD, fontFamily: FONT }}>{cutPending.cutterName} is cutting the deck...</div>
+        </div>
+      )}
 
       <style>{`
         @keyframes bannerPop { from { opacity:0; transform:translate(-50%,-50%) scale(0.7); } to { opacity:1; transform:translate(-50%,-50%) scale(1); } }

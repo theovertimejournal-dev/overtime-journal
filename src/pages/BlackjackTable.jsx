@@ -132,11 +132,11 @@ function Hand({ hand, isActive, small = false }) {
 // ── Seat positions (arc along bottom) ────────────────────────────────────────
 
 const SEAT_POSITIONS = [
-  { bottom: '7%', left: '8%'  },
-  { bottom: '7%', left: '27%' },
-  { bottom: '7%', left: '50%' },
-  { bottom: '7%', left: '73%' },
-  { bottom: '7%', left: '92%' },
+  { bottom: '8%', left: '8%'  },
+  { bottom: '8%', left: '27%' },
+  { bottom: '8%', left: '50%' },
+  { bottom: '8%', left: '73%' },
+  { bottom: '8%', left: '92%' },
 ];
 
 // ── Chip selector ─────────────────────────────────────────────────────────────
@@ -866,7 +866,7 @@ function DealerCharacter({ mood = 'idle', isDealing }) {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
       {/* SVG face */}
       <div style={{ animation: `${bounce}, ${dealAnim}`, transformOrigin: 'center bottom' }}>
-        <svg width="90" height="100" viewBox="0 0 90 100" style={{ overflow: 'visible', filter: `drop-shadow(0 0 12px ${GOLD}55)` }}>
+        <svg width="min(90px, 22vw)" height="min(100px, 24vw)" viewBox="0 0 90 100" style={{ overflow: 'visible', filter: `drop-shadow(0 0 12px ${GOLD}55)` }}>
 
           {/* ── Hat ── */}
           <rect x="22" y="2" width="46" height="28" rx="3" fill="#1a1a1a" stroke={GOLD} strokeWidth="1.5"/>
@@ -1564,15 +1564,15 @@ export default function BlackjackTable() {
   );
 
   return (
-    <div style={{ height: '100vh', background: '#03060a', fontFamily: FONT, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100dvh', minHeight: '-webkit-fill-available', background: '#03060a', fontFamily: FONT, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* Header */}
       <div style={{
         flexShrink: 0,
-        height: 52, zIndex: 25,
+        height: 44, zIndex: 25,
         background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(12px)',
         borderBottom: `1px solid ${GOLD}22`,
-        display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10,
+        display: 'flex', alignItems: 'center', padding: '0 10px', gap: 8,
       }}>
         <button onClick={() => {
           leaveCalledRef.current = true;
@@ -1654,15 +1654,19 @@ export default function BlackjackTable() {
         </div>
 
         {/* Dealer zone */}
-        <div style={{ position: 'absolute', top: '3%', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <div style={{ position: 'absolute', top: '2%', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
           <DealerCharacter mood={dealerMood} isDealing={isDealing} />
           {(dealerCards || []).length > 0 && (
-            <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
-              {dealerCards.map((c, i) => <Card key={i} card={c} />)}
+            <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
+              {dealerCards.map((c, i) => (
+                <div key={i} style={{ transform: 'scale(0.85)', transformOrigin: 'top center' }}>
+                  <Card card={c} />
+                </div>
+              ))}
             </div>
           )}
           {dealerTotal > 0 && (
-            <div style={{ fontSize: 12, fontWeight: 700, color: dealerTotal > 21 ? '#ef4444' : GOLD, fontFamily: FONT }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: dealerTotal > 21 ? '#ef4444' : GOLD, fontFamily: FONT, marginTop: -4 }}>
               {dealerTotal > 21 ? `BUST (${dealerTotal})` : dealerTotal}
             </div>
           )}
@@ -1864,6 +1868,8 @@ export default function BlackjackTable() {
         @keyframes confetti1 { to { transform:translate(150px,-180px) rotate(-540deg); opacity:0; } }
         @keyframes confetti2 { to { transform:translate(-80px,160px) rotate(480deg); opacity:0; } }
         @keyframes confetti3 { to { transform:translate(100px,140px) rotate(-360deg); opacity:0; } }
+        html, body { height: 100%; height: -webkit-fill-available; overflow: hidden; }
+        * { -webkit-tap-highlight-color: transparent; }
         @keyframes dealerDeal { from { transform: rotate(-6deg) translateY(0px); } to { transform: rotate(6deg) translateY(-4px); } }
         @keyframes fingerGrab { from { transform: scaleX(-1) rotate(-10deg) translateX(-20px); opacity:0; } to { transform: scaleX(-1) rotate(-10deg) translateX(0); opacity:1; } }
         @keyframes handSlideUp { from { transform: translateY(140px); opacity:0; } to { transform: translateY(0); opacity:1; } }

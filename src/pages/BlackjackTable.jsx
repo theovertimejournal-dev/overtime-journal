@@ -154,7 +154,8 @@ function BetControls({ config, myChips, currentBet, onAddChip, onClear, onDeal, 
     <div style={{
       flexShrink: 0,
       background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(16px)',
-      borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 16px',
+      borderTop: `1px solid ${GOLD}33`,
+      padding: `10px 16px max(16px, env(safe-area-inset-bottom, 16px))`,
     }}>
       <div style={{ textAlign: 'center', fontSize: 9, color: '#374151', fontFamily: FONT, marginBottom: 6, letterSpacing: '0.12em' }}>
         PLACE YOUR BET · {config.minBet.toLocaleString()}–{config.maxBet.toLocaleString()} OTJ BUCKS
@@ -238,7 +239,8 @@ function ActionControls({ onHit, onStand, onDouble, onSplit, canDouble, canSplit
     <div style={{
       flexShrink: 0,
       background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(16px)',
-      borderTop: `1px solid ${GOLD}33`, padding: '10px 16px 16px',
+      borderTop: `1px solid ${GOLD}33`,
+      padding: `10px 16px max(16px, env(safe-area-inset-bottom, 16px))`,
     }}>
       {timeLeft != null && (
         <div style={{ textAlign: 'center', marginBottom: 8 }}>
@@ -293,7 +295,7 @@ function ChatPanel({ messages, onSend, myUsername }) {
         <button
           onClick={() => setOpen(o => !o)}
           style={{
-            position: 'fixed', bottom: open ? 260 : 80, right: 12, zIndex: 40,
+            position: 'fixed', bottom: open ? 'calc(230px + env(safe-area-inset-bottom, 0px))' : 'calc(8px + env(safe-area-inset-bottom, 0px))', right: 12, zIndex: 40,
             width: 42, height: 42, borderRadius: '50%',
             background: `rgba(3,6,10,0.95)`, border: `1px solid ${GOLD}44`,
             color: GOLD, fontSize: 16, cursor: 'pointer',
@@ -317,10 +319,11 @@ function ChatPanel({ messages, onSend, myUsername }) {
         {/* Slide-up drawer */}
         {open && (
           <div style={{
-            position: 'fixed', bottom: 80, left: 0, right: 0, height: 220,
+            position: 'fixed', bottom: 0, left: 0, right: 0, height: 210,
             background: 'rgba(3,6,10,0.97)', borderTop: `1px solid ${GOLD}22`,
             zIndex: 39, display: 'flex', flexDirection: 'column',
             backdropFilter: 'blur(16px)',
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
           }}>
             <div style={{ padding: '6px 12px', borderBottom: `1px solid ${GOLD}15`, fontSize: 9, color: '#374151', fontFamily: FONT, letterSpacing: '0.12em' }}>
               TABLE CHAT
@@ -660,20 +663,27 @@ function DealerZoom({ reaction, onDone }) {
         }}>💧</div>
       ))}
 
-      {/* Face */}
+      {/* Face — rendered at viewport size for real zoom feel */}
       <div style={{
-        transform: `scale(${scale})`,
+        position: 'absolute',
+        top: animPhase === 'hold' ? '-10%' : animPhase === 'out' ? '-80%' : '-80%',
+        left: '50%',
+        transform: 'translateX(-50%)',
         opacity,
         transition: animPhase === 'in'
-          ? 'transform 0.35s cubic-bezier(0.34,1.4,0.64,1), opacity 0.25s ease'
+          ? 'top 0.4s cubic-bezier(0.34,1.2,0.64,1), opacity 0.3s ease'
           : animPhase === 'out'
-          ? 'transform 0.3s ease-in, opacity 0.3s ease-in'
+          ? 'top 0.35s ease-in, opacity 0.35s ease-in'
           : 'none',
-        transformOrigin: 'center center',
-        position: 'relative', zIndex: 2,
-        filter: `drop-shadow(0 0 40px ${r.labelColor}66) drop-shadow(0 20px 60px rgba(0,0,0,0.9))`,
+        zIndex: 2,
+        filter: `drop-shadow(0 0 60px ${r.labelColor}88) drop-shadow(0 30px 80px rgba(0,0,0,0.95))`,
       }}>
-        <svg width="90" height="100" viewBox="0 0 90 100" style={{ overflow: 'visible' }}>
+        <svg
+          width={Math.round(r.scale * 90)}
+          height={Math.round(r.scale * 100)}
+          viewBox="0 0 90 100"
+          style={{ overflow: 'visible' }}
+        >
           {/* Hat */}
           <rect x="22" y="2" width="46" height="28" rx="3" fill="#1a1a1a" stroke={GOLD} strokeWidth="1.5"/>
           <rect x="14" y="28" width="62" height="7" rx="2" fill="#111" stroke={GOLD} strokeWidth="1"/>
@@ -1385,7 +1395,7 @@ export default function BlackjackTable() {
             <div style={{ fontSize: 11, fontWeight: 700, color: GOLD, fontFamily: FONT }}>
               🪙 {me.chips?.toLocaleString()} OTJ
             </div>
-            <div style={{ fontSize: 8, color: '#374151', fontFamily: FONT }}>TABLE STACK</div>
+            <div style={{ fontSize: 8, color: '#374151', fontFamily: FONT }}>OTJ BUCKS</div>
           </div>
         )}
       </div>

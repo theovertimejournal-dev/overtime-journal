@@ -9,14 +9,41 @@ const { BlackjackRoom } = require("./rooms/BlackjackRoom");
 const app  = express();
 const port = process.env.PORT || 2567;
 
+const ALLOWED_ORIGINS = [
+  "https://overtimejournal.com",
+  "https://www.overtimejournal.com",
+];
+
+// Apply CORS to ALL requests including Colyseus matchmake routes
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const allowed = ALLOWED_ORIGINS.includes(origin) ||
+    (origin && origin.endsWith(".vercel.app")) ||
+    origin === "http://localhost:5173" ||
+    origin === "http://localhost:3000";
+
+  if (allowed) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 app.use(cors({
-  origin: [
-    "https://overtimejournal.com",
-    "https://www.overtimejournal.com",
-    /\.vercel\.app$/,
-    "http://localhost:5173",
-    "http://localhost:3000",
-  ],
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    const ok = ALLOWED_ORIGINS.includes(origin) ||
+      origin.endsWith(".vercel.app") ||
+      origin === "http://localhost:5173" ||
+      origin === "http://localhost:3000";
+    cb(null, ok ? origin : false);
+  },
   credentials: true,
 }));
 

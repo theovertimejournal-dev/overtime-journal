@@ -540,15 +540,15 @@ function MobileTopBar({ user, profile, onSignIn, slates }) {
       {/* Right: weather + notifications + avatar */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <WeatherCountdownPill slates={slates || []} />
-        {user && profile?.bankroll != null && (
-          <NavLink to="/blackjack" style={{ textDecoration: "none", flexShrink: 0 }}>
+        {user && profile?.bankroll != null && profile?.username && (
+          <NavLink to={`/profile/${profile.username}`} style={{ textDecoration: "none", flexShrink: 0 }}>
             <div style={{
               padding: "2px 7px", borderRadius: 20,
               background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)",
               fontSize: 9, fontWeight: 700, color: "#c9a84c",
               fontFamily: "'JetBrains Mono',monospace",
             }}>
-              🪙 ${profile.bankroll.toLocaleString()}
+              🪙 {profile.bankroll.toLocaleString()} OTJ
             </div>
           </NavLink>
         )}
@@ -647,7 +647,7 @@ function DesktopNav({ user, profile, onSignIn, slates }) {
               <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
             </NavLink>
             {profile.bankroll != null && (
-              <NavLink to="/blackjack" style={{ textDecoration: "none", flexShrink: 0 }}>
+              <NavLink to={`/profile/${profile.username}`} style={{ textDecoration: "none", flexShrink: 0 }}>
                 <div style={{
                   display: "flex", alignItems: "center", gap: 4,
                   padding: "3px 8px", borderRadius: 20,
@@ -655,7 +655,7 @@ function DesktopNav({ user, profile, onSignIn, slates }) {
                   fontSize: 10, fontWeight: 700, color: "#c9a84c",
                   fontFamily: "'JetBrains Mono',monospace", whiteSpace: "nowrap",
                 }}>
-                  🪙 ${profile.bankroll.toLocaleString()}
+                  🪙 {profile.bankroll.toLocaleString()} OTJ
                 </div>
               </NavLink>
             )}

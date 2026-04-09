@@ -369,7 +369,7 @@ function MobileBottomBar({ user, profile, onSignIn }) {
 
   // Determine which tab is active
   const isSport = ["/nba", "/props", "/mlb", "/mlb-props", "/nhl", "/nfl"].some(p => path.startsWith(p));
-  const isArcade = path.startsWith("/arcade") || path.startsWith("/poker") || path.startsWith("/blackjack");
+  const isArcade = path.startsWith("/arcade") || path === "/poker" || path.startsWith("/poker/table") || path === "/blackjack" || path.startsWith("/blackjack/table");
   const isMore = ["/record", "/leaderboard", "/faq", "/daily"].some(p => path.startsWith(p)) || isArcade;
   const isHome = path === "/";
   const isJournal = path === "/daily";
@@ -540,6 +540,18 @@ function MobileTopBar({ user, profile, onSignIn, slates }) {
       {/* Right: weather + notifications + avatar */}
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <WeatherCountdownPill slates={slates || []} />
+        {user && profile?.bankroll != null && (
+          <NavLink to="/blackjack" style={{ textDecoration: "none", flexShrink: 0 }}>
+            <div style={{
+              padding: "2px 7px", borderRadius: 20,
+              background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)",
+              fontSize: 9, fontWeight: 700, color: "#c9a84c",
+              fontFamily: "'JetBrains Mono',monospace",
+            }}>
+              🪙 ${profile.bankroll.toLocaleString()}
+            </div>
+          </NavLink>
+        )}
         {user && <NotificationBell user={user} />}
         {user && profile?.username && (
           <NavLink to={`/profile/${profile.username}`} style={{ textDecoration: "none", flexShrink: 0 }}>
@@ -634,6 +646,19 @@ function DesktopNav({ user, profile, onSignIn, slates }) {
               style={{ alignItems: "center", textDecoration: "none" }}>
               <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>@{profile.username}</span>
             </NavLink>
+            {profile.bankroll != null && (
+              <NavLink to="/blackjack" style={{ textDecoration: "none", flexShrink: 0 }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "3px 8px", borderRadius: 20,
+                  background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)",
+                  fontSize: 10, fontWeight: 700, color: "#c9a84c",
+                  fontFamily: "'JetBrains Mono',monospace", whiteSpace: "nowrap",
+                }}>
+                  🪙 ${profile.bankroll.toLocaleString()}
+                </div>
+              </NavLink>
+            )}
           </>
         )}
         {user && <NotificationBell user={user} />}

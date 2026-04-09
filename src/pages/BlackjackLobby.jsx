@@ -36,22 +36,10 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
     let mounted = true;
     async function poll() {
       try {
-        // Colyseus 0.16: use HTTP endpoint directly for room listing
-        const res = await fetch(`${COLYSEUS_URL.replace('wss://', 'https://').replace('ws://', 'http://')}/matchmake/poll/blackjack`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (mounted) setRooms(data.rooms || []);
-        }
-      } catch {
-        // fallback: try client method
-        try {
-          const c = new Client(COLYSEUS_URL);
-          const r = await c.getAvailableRooms('blackjack');
-          if (mounted) setRooms(r || []);
-        } catch { if (mounted) setRooms([]); }
-      }
+        const c = new Client(COLYSEUS_URL);
+        const r = await c.getAvailableRooms('blackjack');
+        if (mounted) setRooms(r || []);
+      } catch { if (mounted) setRooms([]); }
     }
     poll();
     const iv = setInterval(poll, 8000);
@@ -81,7 +69,8 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
       const c = new Client(COLYSEUS_URL);
       const opts = { userId: profile.user_id, username: profile.username, avatar: { config: profile.avatar_config }, buyIn, tier: selectedTier };
       // Use the already-polled rooms list to find an open table
-      const open = rooms.find(r => (r.metadata?.tier === selectedTier || r.metadata?.tier === selectedTier) && r.clients < 5);
+      const open = rooms.find(r => r.metadata?.tier === selectedTier && r.clients < 5);
+      console.log("[BJ] rooms available:", rooms.length, "open:", open?.roomId);
       const room = open
         ? await c.joinById(open.roomId, opts)
         : await c.create('blackjack', { ...opts });

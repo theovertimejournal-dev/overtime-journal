@@ -634,6 +634,7 @@ const ZOOM_REACTIONS = {
 
 function DealerZoom({ reaction, onDone }) {
   const [animPhase, setAnimPhase] = useState('in'); // in | hold | out
+  const [lookDir, setLookDir]     = useState(0);    // -4=left, 0=center, 4=right
   const r = ZOOM_REACTIONS[reaction];
 
   useEffect(() => {
@@ -641,7 +642,20 @@ function DealerZoom({ reaction, onDone }) {
     const t1 = setTimeout(() => setAnimPhase('hold'), 350);
     const t2 = setTimeout(() => setAnimPhase('out'),  r.duration - 300);
     const t3 = setTimeout(() => onDone?.(),           r.duration);
-    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+
+    // Side-to-side nervous look — starts 400ms after appearing
+    const lookSeq = [-5, 5, -4, 4, -3, 0];
+    let li = 0;
+    const lookInterval = setInterval(() => {
+      setLookDir(lookSeq[li % lookSeq.length]);
+      li++;
+    }, 300);
+    const stopLook = setTimeout(() => clearInterval(lookInterval), r.duration - 400);
+
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
+      clearInterval(lookInterval); clearTimeout(stopLook);
+    };
   }, [reaction]);
 
   if (!r) return null;
@@ -664,31 +678,56 @@ function DealerZoom({ reaction, onDone }) {
         transition: 'opacity 0.3s ease',
       }} />
 
-      {/* Fake hands gripping screen edges — pop-out effect */}
+      {/* Hands gripping bottom edge over UI — slide up from below */}
       {animPhase === 'hold' && ['bust','blackjack','dealer_bust'].includes(reaction) && (
         <>
-          {/* Left hand fingers */}
-          {[15,30,45,60].map((top, i) => (
-            <div key={`lf${i}`} style={{
-              position: 'absolute', left: -8, top: `${top}%`,
-              fontSize: 28 + i * 2,
-              transform: 'scaleX(-1) rotate(-10deg)',
-              animation: `fingerGrab 0.15s ${i * 0.05}s ease-out both`,
-              filter: 'drop-shadow(4px 0 8px rgba(0,0,0,0.8))',
-              zIndex: 5,
-            }}>🤙</div>
-          ))}
-          {/* Right hand fingers */}
-          {[20,35,50,65].map((top, i) => (
-            <div key={`rf${i}`} style={{
-              position: 'absolute', right: -8, top: `${top}%`,
-              fontSize: 28 + i * 2,
-              transform: 'rotate(10deg)',
-              animation: `fingerGrab 0.15s ${i * 0.05}s ease-out both`,
-              filter: 'drop-shadow(-4px 0 8px rgba(0,0,0,0.8))',
-              zIndex: 5,
-            }}>🤙</div>
-          ))}
+          {/* Left hand — grips bottom-left, fingers pointing up */}
+          <svg viewBox="0 0 80 120" style={{
+            position: 'fixed', bottom: -10, left: '8%',
+            width: 80, height: 120, zIndex: 200, overflow: 'visible',
+            animation: 'handSlideUp 0.4s 0.1s cubic-bezier(0.34,1.4,0.64,1) both',
+            filter: 'drop-shadow(0 -8px 20px rgba(0,0,0,0.9))',
+            transform: 'scaleX(-1)',
+          }}>
+            {/* Palm */}
+            <ellipse cx="40" cy="85" rx="28" ry="30" fill="#d4956b"/>
+            <rect x="12" y="60" width="56" height="40" rx="8" fill="#d4956b"/>
+            {/* Fingers */}
+            <rect x="14" y="20" width="14" height="50" rx="7" fill="#d4956b"/>
+            <rect x="30" y="10" width="14" height="55" rx="7" fill="#d4956b"/>
+            <rect x="46" y="14" width="14" height="52" rx="7" fill="#d4956b"/>
+            <rect x="60" y="22" width="12" height="46" rx="6" fill="#d4956b"/>
+            {/* Thumb */}
+            <ellipse cx="8" cy="75" rx="8" ry="18" fill="#d4956b" transform="rotate(20,8,75)"/>
+            {/* Knuckle lines */}
+            <line x1="14" y1="55" x2="28" y2="55" stroke="#b07040" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+            <line x1="30" y1="52" x2="44" y2="52" stroke="#b07040" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+            <line x1="46" y1="53" x2="60" y2="53" stroke="#b07040" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+            {/* Cuff */}
+            <rect x="10" y="90" width="60" height="28" rx="4" fill="#1a1a2e"/>
+            <rect x="10" y="90" width="60" height="8" rx="2" fill={GOLD} opacity="0.8"/>
+          </svg>
+
+          {/* Right hand */}
+          <svg viewBox="0 0 80 120" style={{
+            position: 'fixed', bottom: -10, right: '8%',
+            width: 80, height: 120, zIndex: 200, overflow: 'visible',
+            animation: 'handSlideUp 0.4s 0.2s cubic-bezier(0.34,1.4,0.64,1) both',
+            filter: 'drop-shadow(0 -8px 20px rgba(0,0,0,0.9))',
+          }}>
+            <ellipse cx="40" cy="85" rx="28" ry="30" fill="#d4956b"/>
+            <rect x="12" y="60" width="56" height="40" rx="8" fill="#d4956b"/>
+            <rect x="14" y="20" width="14" height="50" rx="7" fill="#d4956b"/>
+            <rect x="30" y="10" width="14" height="55" rx="7" fill="#d4956b"/>
+            <rect x="46" y="14" width="14" height="52" rx="7" fill="#d4956b"/>
+            <rect x="60" y="22" width="12" height="46" rx="6" fill="#d4956b"/>
+            <ellipse cx="72" cy="75" rx="8" ry="18" fill="#d4956b" transform="rotate(-20,72,75)"/>
+            <line x1="14" y1="55" x2="28" y2="55" stroke="#b07040" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+            <line x1="30" y1="52" x2="44" y2="52" stroke="#b07040" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+            <line x1="46" y1="53" x2="60" y2="53" stroke="#b07040" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+            <rect x="10" y="90" width="60" height="28" rx="4" fill="#1a1a2e"/>
+            <rect x="10" y="90" width="60" height="8" rx="2" fill={GOLD} opacity="0.8"/>
+          </svg>
         </>
       )}
 
@@ -741,8 +780,8 @@ function DealerZoom({ reaction, onDone }) {
           {/* Eyes */}
           <ellipse cx="32" cy="63" rx="8" ry={Math.max(1, 9 - r.eyeSquint * 0.6)} fill="white"/>
           <ellipse cx="58" cy="63" rx="8" ry={Math.max(1, 9 - r.eyeSquint * 0.6)} fill="white"/>
-          <circle cx={32+po.x} cy={63+po.y} r={ps} fill="#2c1a0a"/>
-          <circle cx={58+po.x} cy={63+po.y} r={ps} fill="#2c1a0a"/>
+          <circle cx={32 + po.x + lookDir} cy={63+po.y} r={ps} fill="#2c1a0a" style={{ transition: 'cx 0.15s ease' }}/>
+          <circle cx={58 + po.x + lookDir} cy={63+po.y} r={ps} fill="#2c1a0a" style={{ transition: 'cx 0.15s ease' }}/>
           <circle cx="34" cy="61" r="1.8" fill="white" opacity="0.9"/>
           <circle cx="60" cy="61" r="1.8" fill="white" opacity="0.9"/>
           {/* Squint lines */}
@@ -1827,6 +1866,7 @@ export default function BlackjackTable() {
         @keyframes confetti3 { to { transform:translate(100px,140px) rotate(-360deg); opacity:0; } }
         @keyframes dealerDeal { from { transform: rotate(-6deg) translateY(0px); } to { transform: rotate(6deg) translateY(-4px); } }
         @keyframes fingerGrab { from { transform: scaleX(-1) rotate(-10deg) translateX(-20px); opacity:0; } to { transform: scaleX(-1) rotate(-10deg) translateX(0); opacity:1; } }
+        @keyframes handSlideUp { from { transform: translateY(140px); opacity:0; } to { transform: translateY(0); opacity:1; } }
         @keyframes dealerBounce { 0% { transform: scale(1); } 40% { transform: scale(1.12) translateY(-4px); } 70% { transform: scale(0.96) translateY(1px); } 100% { transform: scale(1); } }
         @keyframes sweatDrop { 0% { transform: translateY(0); opacity: 0.8; } 100% { transform: translateY(12px); opacity: 0; } }
         @keyframes dealArm { from { transform: rotate(-15deg); } to { transform: rotate(10deg); } }

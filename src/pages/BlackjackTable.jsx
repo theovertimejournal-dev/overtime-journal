@@ -808,7 +808,7 @@ export default function BlackjackTable() {
 
   function handleSeatClick(seatIndex) {
     console.log('[BJ] handleSeatClick', seatIndex, 'mySeat:', mySeat, 'phase:', phase);
-    if (mySeat != null) return;
+    if (mySeat != null && mySeat !== -1) return; // already seated
     if (phase && phase !== 'betting') return;
     const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
     const amount = buyIn || minBuyIn;
@@ -946,26 +946,26 @@ export default function BlackjackTable() {
         {/* Player seats */}
         {seats?.map((seat, i) => {
           const pos    = SEAT_POSITIONS[i];
-          const isMe   = i === mySeat;
+          const isMe   = mySeat !== -1 && i === mySeat;
           const myTurn = i === currentSeat && phase === 'player_turn';
           return (
             <div key={i}
               onClick={() => {
                 if (!seat) { handleSeatClick(i); }
-                else if (!isMe) { setEmojiTarget(i); }
+                else if (i !== mySeat) { setEmojiTarget(i); }
               }}
               style={{
                 position: 'absolute', bottom: pos.bottom, left: pos.left,
                 transform: 'translateX(-50%)',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-                cursor: (!seat && mySeat == null) || (seat && !isMe) ? 'pointer' : 'default',
+                cursor: (!seat && (mySeat == null || mySeat === -1)) || (seat && i !== mySeat) ? 'pointer' : 'default',
                 zIndex: myTurn ? 6 : 3,
               }}
             >
               {!seat ? (
                 <div
-                  style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: mySeat == null ? GOLD : '#374151', fontFamily: FONT, cursor: mySeat == null ? 'pointer' : 'default', transition: 'all 0.2s' }}
-                  onMouseEnter={e => { if (mySeat == null) e.currentTarget.style.background = `${GOLD}15`; }}
+                  style={{ width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.015)', border: `2px dashed ${GOLD}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 8, color: (mySeat == null || mySeat === -1) ? GOLD : '#374151', fontFamily: FONT, cursor: (mySeat == null || mySeat === -1) ? 'pointer' : 'default', transition: 'all 0.2s' }}
+                  onMouseEnter={e => { if (mySeat == null || mySeat === -1) e.currentTarget.style.background = `${GOLD}15`; }}
                   onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.015)'; }}
                 >SIT</div>
               ) : (

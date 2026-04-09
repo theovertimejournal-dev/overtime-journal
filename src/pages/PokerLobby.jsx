@@ -143,22 +143,10 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
     let cancelled = false;
     async function fetchRooms() {
       try {
-        // Try HTTP poll endpoint first (Colyseus 0.16 compatible)
-        const COLYSEUS_HTTP = COLYSEUS_URL.replace('wss://', 'https://').replace('ws://', 'http://');
-        const res = await fetch(`${COLYSEUS_HTTP}/matchmake/poll/poker`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (!cancelled) { setRooms(data.rooms || []); setLoading(false); return; }
-        }
-      } catch {}
-      // Fallback to client method
-      try {
         const r = await client.getAvailableRooms("poker");
         if (!cancelled) setRooms(r);
       } catch {
-        // silently ignore — show stale data
+        // silently ignore
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -180,13 +168,13 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
         avatar: { config: profile?.avatar_config },
       };
       // Always prefer joining an existing open table
-      // Use already-polled rooms list — avoids calling getAvailableRooms again
+      // Use polled rooms list to find open table for this tier
       const openRoom = rooms.find(r =>
         r.metadata?.tier === selectedTier && r.clients < (r.maxClients || 6)
       );
       const room = openRoom
         ? await joinClient.joinById(openRoom.roomId, joinOpts)
-        : await joinClient.create('poker', { ...joinOpts });
+        : await joinClient.create('poker', joinOpts);
       setStatus(null);
       onEnterTable?.(room, {
         tier: selectedTier,

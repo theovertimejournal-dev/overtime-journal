@@ -1648,15 +1648,6 @@ export default function BlackjackTable() {
           </div>
         )}
 
-        {/* My hand (large, centered above seats) */}
-        {me?.hands?.length > 0 && (
-          <div style={{ position: 'absolute', bottom: '22%', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 12, zIndex: 4 }}>
-            {me.hands.map((hand, hi) => (
-              <Hand key={hi} hand={hand} isActive={isMyTurn && hi === me.activeHand} />
-            ))}
-          </div>
-        )}
-
         {/* Player seats */}
         {seats?.map((seat, i) => {
           const pos    = SEAT_POSITIONS[i];
@@ -1684,10 +1675,21 @@ export default function BlackjackTable() {
                 >SIT</div>
               ) : (
                 <>
-                  {/* Small hands for other players */}
-                  {!isMe && seat.hands?.length > 0 && (
-                    <div style={{ display: 'flex', gap: 4, marginBottom: 2 }}>
-                      {seat.hands.map((hand, hi) => <Hand key={hi} hand={hand} isActive={myTurn && hi === seat.activeHand} small />)}
+                  {/* Hands — large for me, small for others, stacked for splits */}
+                  {seat.hands?.length > 0 && (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+                      marginBottom: 4,
+                      // Contain within a fixed-width column so splits don't overflow
+                      maxWidth: isMe ? 200 : 120,
+                    }}>
+                      {seat.hands.map((hand, hi) => (
+                        <div key={hi} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                          <div style={{ display: 'flex', gap: isMe ? 4 : 2 }}>
+                            <Hand hand={hand} isActive={(isMe ? isMyTurn : myTurn) && hi === seat.activeHand} small={!isMe} />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {seat.bet > 0 && (
@@ -1695,11 +1697,14 @@ export default function BlackjackTable() {
                       BET {seat.bet.toLocaleString()} OTJ
                     </div>
                   )}
-                  <div style={{ border: `2px solid ${myTurn ? GOLD : isMe ? '#ef4444' : 'rgba(255,255,255,0.07)'}`, borderRadius: '50%', boxShadow: myTurn ? `0 0 16px ${GOLD}55` : 'none', transition: 'all 0.3s' }}>
+                  <div style={{ border: `2px solid ${myTurn ? GOLD : isMe ? '#ef4444' : 'rgba(255,255,255,0.07)'}`, borderRadius: '50%', boxShadow: myTurn ? `0 0 20px ${GOLD}88, 0 0 40px ${GOLD}44` : 'none', transition: 'all 0.3s', animation: myTurn ? 'seatPulse 1.2s ease-in-out infinite' : 'none' }}>
                     <AvatarMini config={seat.avatar?.config} size={40} />
                   </div>
-                  <div style={{ background: 'rgba(3,6,10,0.88)', borderRadius: 5, padding: '2px 7px', textAlign: 'center', minWidth: 68, border: `1px solid ${GOLD}18` }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: isMe ? '#ef4444' : '#f1f5f9', fontFamily: FONT }}>{seat.username?.slice(0,10)}{isMe ? ' (you)' : ''}</div>
+                  <div style={{ background: myTurn ? `rgba(201,168,76,0.15)` : 'rgba(3,6,10,0.88)', borderRadius: 5, padding: '2px 7px', textAlign: 'center', minWidth: 68, border: `1px solid ${myTurn ? GOLD+'55' : GOLD+'18'}`, transition: 'all 0.3s' }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: isMe ? '#ef4444' : myTurn ? GOLD : '#f1f5f9', fontFamily: FONT }}>
+                      {seat.username?.slice(0,10)}{isMe ? ' (you)' : ''}
+                      {myTurn && !isMe && <span style={{ color: GOLD, marginLeft: 3 }}>←</span>}
+                    </div>
                     <div style={{ fontSize: 9, color: GOLD, fontFamily: FONT }}>{seat.chips?.toLocaleString()} OTJ</div>
                   </div>
                 </>

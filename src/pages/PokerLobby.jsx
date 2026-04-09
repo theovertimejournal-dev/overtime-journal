@@ -168,13 +168,8 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
         avatar: { config: profile?.avatar_config },
       };
       // Always prefer joining an existing open table
-      // Use polled rooms list to find open table for this tier
-      const openRoom = rooms.find(r =>
-        r.metadata?.tier === selectedTier && r.clients < (r.maxClients || 6)
-      );
-      const room = openRoom
-        ? await joinClient.joinById(openRoom.roomId, joinOpts)
-        : await joinClient.create('poker', joinOpts);
+      // joinOrCreate — server filterBy(['tier']) handles matching
+      const room = await joinClient.joinOrCreate('poker', joinOpts);
       setStatus(null);
       onEnterTable?.(room, {
         tier: selectedTier,

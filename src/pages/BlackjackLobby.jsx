@@ -36,10 +36,22 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
     let mounted = true;
     async function poll() {
       try {
-        const c = new Client(COLYSEUS_URL);
-        const r = await c.getAvailableRooms('blackjack');
-        if (mounted) setRooms(r || []);
-      } catch { if (mounted) setRooms([]); }
+        // Colyseus 0.16: use HTTP endpoint directly for room listing
+        const res = await fetch(`${COLYSEUS_URL.replace('wss://', 'https://').replace('ws://', 'http://')}/matchmake/poll/blackjack`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (mounted) setRooms(data.rooms || []);
+        }
+      } catch {
+        // fallback: try client method
+        try {
+          const c = new Client(COLYSEUS_URL);
+          const r = await c.getAvailableRooms('blackjack');
+          if (mounted) setRooms(r || []);
+        } catch { if (mounted) setRooms([]); }
+      }
     }
     poll();
     const iv = setInterval(poll, 8000);
@@ -59,7 +71,7 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
       const c = new Client(COLYSEUS_URL);
       const room = await c.joinById(roomId, { userId: profile.user_id, username: profile.username, avatar: { config: profile.avatar_config }, buyIn: b });
       onEnterTable(room, { tier: t, buyIn: b, userId: profile.user_id, username: profile.username, avatarConfig: profile.avatar_config });
-    } catch { setStatus({ type: 'error', msg: 'Failed to join' }); setLoading(false); }
+    } catch (err) { setStatus({ type: 'error', msg: `Join failed: ${err.message}` }); setLoading(false); }
   }
 
   async function quickPlay() {
@@ -68,9 +80,8 @@ export default function BlackjackLobby({ user, profile, onEnterTable }) {
     try {
       const c = new Client(COLYSEUS_URL);
       const opts = { userId: profile.user_id, username: profile.username, avatar: { config: profile.avatar_config }, buyIn, tier: selectedTier };
-      // Always try to join an existing open table first
-      const available = await c.getAvailableRooms('blackjack');
-      const open = available.find(r => r.metadata?.tier === selectedTier && r.clients < 5);
+      // Use the already-polled rooms list to find an open table
+      const open = rooms.find(r => (r.metadata?.tier === selectedTier || r.metadata?.tier === selectedTier) && r.clients < 5);
       const room = open
         ? await c.joinById(open.roomId, opts)
         : await c.create('blackjack', { ...opts });

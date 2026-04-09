@@ -369,6 +369,8 @@ function SheetItem({ to, emoji, label, sub, onNavigate }) {
 function MobileBottomBar({ user, profile, onSignIn }) {
   const [activeSheet, setActiveSheet] = useState(null);
   const location = useLocation();
+  const isGameTable = location.pathname.startsWith('/blackjack/table') || location.pathname.startsWith('/poker/table');
+  if (isGameTable) return null; // hide on game table pages
 
   // Close sheet on route change
   useEffect(() => { setActiveSheet(null); }, [location.pathname]);
@@ -456,8 +458,8 @@ function MobileBottomBar({ user, profile, onSignIn }) {
         </div>
       </BottomSheet>
 
-      {/* The bar itself — hidden on game table pages */}
-      {!isGameTable && <div
+      {/* The bar itself */}
+      <div
         className="otj-mobile-bottom-bar"
         style={{
           position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
@@ -522,7 +524,7 @@ function MobileBottomBar({ user, profile, onSignIn }) {
           <span style={labelStyle(isMore && !isSport)}>More</span>
           {(isMore && !isSport) && <div className="otj-btab-active-dot" />}
         </button>
-      </div>}
+      </div>
     </>
   );
 }

@@ -86,12 +86,16 @@ class BlackjackRoom extends Room {
     onCreate(options) {
         this.maxClients  = MAX_SEATS;
         this.autoDispose = false;
+        this.persistent  = options.persistent || false;
 
         this.tier      = options.tier || 'mid';
         this.config    = TIERS[this.tier] || TIERS.mid;
         this.tableName = `OTJ BJ — ${this.config.label}`;
         this.shoe         = shuffle(createShoe());
-        this.cutCardPos   = this.getDefaultCutPos();  // index where cut card sits
+        this.cutCardPos   = this.getDefaultCutPos();
+        this.roomCode     = this.persistent
+            ? `OTJ-${this.tier.toUpperCase()}`  // persistent rooms have fixed codes
+            : Math.random().toString(36).slice(2,6).toUpperCase();
         this.cutRequested = false;  // waiting for player to cut
         this.cutTimer     = null;
         this.cutRotation  = 0;      // which seat gets to cut next
@@ -136,6 +140,10 @@ class BlackjackRoom extends Room {
     }
 
     onDispose() {
+        if (this.persistent) {
+            console.log(`[BJ] Persistent room ${this.tier} tried to dispose — blocked`);
+            return;
+        }
         this.clearTimers();
         for (let i = 0; i < MAX_SEATS; i++) {
             if (this.seats[i]) this.returnChips(i, 'server shutdown');
@@ -189,7 +197,7 @@ class BlackjackRoom extends Room {
             status:           'waiting',
         };
 
-        this.systemMsg(`${client.userData.username} sat down with $${buyIn.toLocaleString()}`);
+        this.systemMsg(`${client.userData.username} sat down with ${startingChips.toLocaleString()} OTJ`);
         this.broadcastState();
         if (this.phase === 'betting') this.startBetTimer();
     }
@@ -842,6 +850,7 @@ class BlackjackRoom extends Room {
                     status:     s.status,
                 } : null),
                 config: { minBet: this.config.minBet, maxBet: this.config.maxBet, tier: this.tier, label: this.config.label },
+                roomCode: this.roomCode,
                 shoe: {
                     remaining:    this.shoe.length,
                     total:        NUM_DECKS * 52,

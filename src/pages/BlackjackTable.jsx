@@ -653,6 +653,7 @@ export default function BlackjackTable() {
   const projectileId = useRef(0);
   const tableRef     = useRef(null);
   const roomRef      = useRef(null);
+  const leaveCalledRef = useRef(false);
 
   useEffect(() => {
     if (tier && buyIn && userId)
@@ -761,7 +762,7 @@ export default function BlackjackTable() {
         room.onMessage('error', ({ message }) => { if (mounted) { setError(message); setTimeout(() => setError(null), 3000); } });
 
         room.onLeave(code => {
-          if (!mounted) return;
+          if (!mounted || leaveCalledRef.current) return;
           if (code !== 1000) {
             retries++;
             if (retries <= MAX_RETRIES) {
@@ -771,8 +772,7 @@ export default function BlackjackTable() {
               setError('Could not connect to table. Please try again.');
               setTimeout(() => navigate('/blackjack'), 3000);
             }
-          }
-          else navigate('/blackjack');
+          } else navigate('/blackjack');
         });
 
       } catch (err) {
@@ -789,14 +789,18 @@ export default function BlackjackTable() {
     }
 
     connect();
-    return () => { mounted = false; roomRef.current?.leave(); };
+    return () => {
+      mounted = false;
+      if (!leaveCalledRef.current && roomRef.current) {
+        try { roomRef.current.leave(); } catch {}
+      }
+    };
   }, [roomId, tier]);
 
   function send(action, data = {}) { roomRef.current?.send(action, data); }
 
   // Derived
   const { phase, seats, mySeat, currentSeat, dealerCards, dealerTotal, config } = gameState || {};
-  console.log('[BJ] gameState:', { phase, seatsLen: seats?.length, mySeat, config });
   const me         = mySeat != null ? seats?.[mySeat] : null;
   const myHand     = me?.hands?.[me?.activeHand];
   const isMyTurn   = phase === 'player_turn' && currentSeat === mySeat;
@@ -807,12 +811,10 @@ export default function BlackjackTable() {
   const myCanSplit  = isMyTurn && myHand?.cards.length === 2 && myHand.cards.length === 2 && cardRank(myHand.cards[0]) === cardRank(myHand.cards[1]);
 
   function handleSeatClick(seatIndex) {
-    console.log('[BJ] handleSeatClick', seatIndex, 'mySeat:', mySeat, 'phase:', phase);
     if (mySeat != null && mySeat !== -1) return; // already seated
     if (phase && phase !== 'betting') return;
     const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
     const amount = buyIn || minBuyIn;
-    console.log('[BJ] opening sit modal, buyIn:', amount);
     setSitBuyIn(amount);
     setSitModal({ seatIndex });
   }
@@ -851,7 +853,12 @@ export default function BlackjackTable() {
         borderBottom: `1px solid ${GOLD}22`,
         display: 'flex', alignItems: 'center', padding: '0 14px', gap: 10,
       }}>
-        <button onClick={() => { roomRef.current?.leave(true); navigate('/blackjack'); }} style={{
+        <button onClick={() => {
+          leaveCalledRef.current = true;
+          if (roomRef.current) { try { roomRef.current.leave(true); } catch {} roomRef.current = null; }
+          sessionStorage.removeItem(SESSION_KEY);
+          navigate('/blackjack');
+        }} style={{
           padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
           background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)',
           color: '#ef4444', fontSize: 10, fontFamily: FONT,
@@ -1055,7 +1062,6 @@ export default function BlackjackTable() {
       )}
 
       {/* Sit down modal */}
-      {sitModal && console.log('[BJ] sitModal rendering', sitModal)}
       {sitModal && (
         <>
           <div onClick={() => setSitModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />

@@ -807,7 +807,7 @@ export default function BlackjackTable() {
 
   function handleSeatClick(seatIndex) {
     if (mySeat != null) return; // already seated
-    if (phase !== 'betting' && phase !== undefined) return; // mid-hand
+    if (phase && phase !== 'betting') return; // mid-hand, can't join
     const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
     setSitBuyIn(buyIn || minBuyIn);
     setSitModal({ seatIndex });
@@ -1048,7 +1048,7 @@ export default function BlackjackTable() {
       )}
 
       {/* Sit down modal */}
-      {sitModal && config && (
+      {sitModal && (
         <>
           <div onClick={() => setSitModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200 }} />
           <div style={{
@@ -1060,29 +1060,29 @@ export default function BlackjackTable() {
             <div style={{ fontSize: 14, fontWeight: 700, color: '#f1f5f9', marginBottom: 4 }}>
               Sit Down — Seat {(sitModal.seatIndex + 1)}
             </div>
-            <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
-              Min {(config.minBet * 5).toLocaleString()} · Max bet ${config.maxBet.toLocaleString()}
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <input type="range"
-                min={config.minBet * 5}
-                max={Math.min(config.minBet * 50, 100000)}
-                step={config.minBet}
-                value={sitBuyIn}
-                onChange={e => setSitBuyIn(Number(e.target.value))}
-                style={{ flex: 1, accentColor: GOLD }}
-              />
-              <span style={{ fontSize: 13, fontWeight: 700, color: GOLD, minWidth: 70, textAlign: 'right' }}>
-                ${sitBuyIn.toLocaleString()}
-              </span>
-            </div>
-
-            <div style={{ fontSize: 9, color: '#374151', marginBottom: 18 }}>
-              Table: {config.label} · Blinds ${config.minBet}–${config.maxBet}
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
+            {(() => {
+              const minBuyIn = config?.minBet ? config.minBet * 5 : 500;
+              const maxBuyIn = config?.minBet ? config.minBet * 50 : 25000;
+              return (
+                <>
+                  <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
+                    Min ${minBuyIn.toLocaleString()} · {config?.label || 'Standard Table'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <input type="range"
+                      min={minBuyIn} max={maxBuyIn} step={config?.minBet || 100}
+                      value={sitBuyIn || minBuyIn}
+                      onChange={e => setSitBuyIn(Number(e.target.value))}
+                      style={{ flex: 1, accentColor: GOLD }}
+                    />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: GOLD, minWidth: 70, textAlign: 'right' }}>
+                      ${(sitBuyIn || minBuyIn).toLocaleString()}
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
+            <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
               <button onClick={() => setSitModal(null)} style={{
                 flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
                 background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',

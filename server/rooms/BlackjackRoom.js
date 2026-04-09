@@ -159,37 +159,34 @@ class BlackjackRoom extends Room {
             return;
         }
 
+        // Load current bankroll — that becomes their chip stack at the table
+        let startingChips = 0;
         try {
             const { data: profile } = await supabase
                 .from('profiles').select('bankroll').eq('user_id', client.userData.userId).single();
 
-            if (!profile || profile.bankroll < buyIn) {
-                client.send('error', { message: 'Not enough OTJ Bucks' });
+            if (!profile || profile.bankroll < this.config.minBet * 5) {
+                client.send('error', { message: 'Not enough OTJ Bucks to sit' });
                 return;
             }
-
-            const newBankroll = profile.bankroll - buyIn;
-            await supabase.from('profiles').update({ bankroll: newBankroll }).eq('user_id', client.userData.userId);
-            await supabase.from('bucks_ledger').insert({
-                user_id: client.userData.userId, type: 'bj_buyin',
-                amount: -buyIn, balance_after: newBankroll,
-                note: `BJ buy-in — ${this.tier} table`,
-            });
+            // Their full bankroll IS their chip stack — no separate deduction
+            startingChips = profile.bankroll;
         } catch (err) {
-            client.send('error', { message: 'Failed to deduct Bucks. Try again.' });
+            client.send('error', { message: 'Failed to load balance. Try again.' });
             return;
         }
 
         this.seats[seatIndex] = {
-            sessionId:   client.sessionId,
-            userId:      client.userData.userId,
-            username:    client.userData.username,
-            avatar:      client.userData.avatar,
-            chips:       buyIn,
-            bet:         0,
-            hands:       [],
-            activeHand:  0,
-            status:      'waiting',
+            sessionId:        client.sessionId,
+            userId:           client.userData.userId,
+            username:         client.userData.username,
+            avatar:           client.userData.avatar,
+            chips:            startingChips,
+            lastSettledChips: startingChips,  // watermark for net change tracking
+            bet:              0,
+            hands:            [],
+            activeHand:       0,
+            status:           'waiting',
         };
 
         this.systemMsg(`${client.userData.username} sat down with $${buyIn.toLocaleString()}`);
@@ -214,18 +211,17 @@ class BlackjackRoom extends Room {
         const chips = seat.chips;
         this.seats[seatIndex] = null;
         if (!seat.userId || chips <= 0) return;
+        // Final sync — write current chips directly as bankroll
         try {
-            const { data: profile } = await supabase
-                .from('profiles').select('bankroll').eq('user_id', seat.userId).single();
-            if (profile) {
-                const newBankroll = (profile.bankroll || 0) + chips;
-                await supabase.from('profiles').update({ bankroll: newBankroll }).eq('user_id', seat.userId);
-                await supabase.from('bucks_ledger').insert({
-                    user_id: seat.userId, type: 'bj_cashout',
-                    amount: chips, balance_after: newBankroll,
-                    note: `BJ cashout — ${this.tier} — ${reason}`,
-                });
-            }
+            await supabase.from('profiles')
+                .update({ bankroll: chips })
+                .eq('user_id', seat.userId);
+            await supabase.from('bucks_ledger').insert({
+                user_id: seat.userId, type: 'bj_leave',
+                amount: chips - (seat.lastSettledChips || chips),
+                balance_after: chips,
+                note: `BJ table exit — ${this.tier} — ${reason}`,
+            });
         } catch (err) {
             console.error('[BJ] returnChips error:', err.message);
         }
@@ -592,31 +588,38 @@ class BlackjackRoom extends Room {
             if (!seat) continue;
             if (seat.chips <= 0) {
                 this.systemMsg(`${seat.username} ran out of chips`);
-                // Return whatever tiny amount is left (could be 0)
                 this.seats[i] = null;
                 continue;
             }
-            // ── Persist updated chip count to Supabase after every hand ──
+
+            // ── Return the hand's net change to Supabase ──
+            // We already deducted the buy-in on sit_down.
+            // Each hand: chips go down by bet, come back up by payout.
+            // Net change since last settle = seat.chips - seat.lastSettledChips
+            // On first hand, lastSettledChips was set to buyIn on sit_down.
+            // Write chip stack directly to bankroll — chips ARE the bankroll
+            const lastSettled = seat.lastSettledChips || seat.chips;
+            const netChange   = seat.chips - lastSettled;
+
             try {
-                const { data: profile } = await supabase
-                    .from('profiles').select('bankroll').eq('user_id', seat.userId).single();
-                if (profile) {
-                    // Replace bankroll with current chip stack
-                    // (chips already reflect wins/losses from resolvePayout)
-                    await supabase.from('profiles')
-                        .update({ bankroll: seat.chips })
-                        .eq('user_id', seat.userId);
+                await supabase.from('profiles')
+                    .update({ bankroll: seat.chips })
+                    .eq('user_id', seat.userId);
+
+                if (netChange !== 0) {
                     await supabase.from('bucks_ledger').insert({
-                        user_id: seat.userId,
-                        type: 'bj_hand_settle',
-                        amount: seat.chips - profile.bankroll,
+                        user_id:       seat.userId,
+                        type:          netChange > 0 ? 'bj_win' : 'bj_loss',
+                        amount:        netChange,
                         balance_after: seat.chips,
-                        note: `BJ hand #${this.handNumber} settle — ${this.tier} table`,
+                        note:          `BJ hand #${this.handNumber} — ${this.tier} table`,
                     });
                 }
+                seat.lastSettledChips = seat.chips;
             } catch (err) {
-                console.error('[BJ] resetHand bankroll sync error:', err.message);
+                console.error('[BJ] resetHand settle error:', err.message);
             }
+
             seat.bet        = 0;
             seat.hands      = [];
             seat.activeHand = 0;

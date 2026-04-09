@@ -155,7 +155,8 @@ function BetControls({ config, myChips, currentBet, onAddChip, onClear, onDeal, 
       flexShrink: 0,
       background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(16px)',
       borderTop: `1px solid ${GOLD}33`,
-      padding: `10px 16px max(16px, env(safe-area-inset-bottom, 16px))`,
+      padding: '10px 16px 16px',
+      paddingBottom: 'max(16px, calc(env(safe-area-inset-bottom, 0px) + 72px))',
     }}>
       <div style={{ textAlign: 'center', fontSize: 9, color: '#374151', fontFamily: FONT, marginBottom: 6, letterSpacing: '0.12em' }}>
         PLACE YOUR BET · {config.minBet.toLocaleString()}–{config.maxBet.toLocaleString()} OTJ BUCKS
@@ -240,7 +241,8 @@ function ActionControls({ onHit, onStand, onDouble, onSplit, canDouble, canSplit
       flexShrink: 0,
       background: 'rgba(3,6,10,0.97)', backdropFilter: 'blur(16px)',
       borderTop: `1px solid ${GOLD}33`,
-      padding: `10px 16px max(16px, env(safe-area-inset-bottom, 16px))`,
+      padding: '10px 16px 16px',
+      paddingBottom: 'max(16px, calc(env(safe-area-inset-bottom, 0px) + 72px))',
     }}>
       {timeLeft != null && (
         <div style={{ textAlign: 'center', marginBottom: 8 }}>
@@ -264,12 +266,22 @@ function ActionControls({ onHit, onStand, onDouble, onSplit, canDouble, canSplit
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return isMobile;
+}
+
 function ChatPanel({ messages, onSend, myUsername }) {
   const [input, setInput]   = useState('');
   const [open, setOpen]     = useState(false);
   const [unread, setUnread] = useState(0);
   const bottomRef = useRef(null);
-  const isMobile  = window.innerWidth < 768;
+  const isMobile  = useIsMobile();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -595,28 +607,28 @@ const DEALER_MOODS = {
 const ZOOM_REACTIONS = {
   bust: {
     eyebrowL: -6, eyebrowR: -6, mouthCurve: 20, eyeSquint: 0, pupils: 'up', sweat: false,
-    scale: 2.8, bg: 'rgba(239,68,68,0.15)', label: 'HAHA!', labelColor: '#ef4444',
-    duration: 2200,
+    scale: 5, bg: 'rgba(239,68,68,0.2)', label: 'HAHA!', labelColor: '#ef4444',
+    duration: 2400,
   },
   player_21: {
     eyebrowL: 10, eyebrowR: 10, mouthCurve: -14, eyeSquint: 3, pupils: 'wide', sweat: true,
-    scale: 1.8, bg: `rgba(201,168,76,0.12)`, label: '...21', labelColor: GOLD,
-    duration: 1800,
+    scale: 3.5, bg: `rgba(201,168,76,0.15)`, label: '...21', labelColor: GOLD,
+    duration: 2000,
   },
   blackjack: {
     eyebrowL: 14, eyebrowR: 14, mouthCurve: -20, eyeSquint: 5, pupils: 'wide', sweat: true,
-    scale: 3.5, bg: `rgba(201,168,76,0.25)`, label: 'BLACKJACK!?', labelColor: GOLD,
-    duration: 2800,
+    scale: 6, bg: `rgba(201,168,76,0.3)`, label: 'BLACKJACK!?', labelColor: GOLD,
+    duration: 3000,
   },
   dealer_bust: {
     eyebrowL: 14, eyebrowR: 14, mouthCurve: -22, eyeSquint: 5, pupils: 'wide', sweat: true,
-    scale: 2.4, bg: 'rgba(239,68,68,0.2)', label: '...BUST', labelColor: '#ef4444',
-    duration: 2200,
+    scale: 5, bg: 'rgba(239,68,68,0.25)', label: 'DEALER BUSTS!', labelColor: '#ef4444',
+    duration: 2500,
   },
   dealer_21: {
     eyebrowL: -10, eyebrowR: -10, mouthCurve: 22, eyeSquint: 0, pupils: 'center', sweat: false,
-    scale: 2.0, bg: 'rgba(239,68,68,0.15)', label: '21. NICE TRY.', labelColor: '#ef4444',
-    duration: 2000,
+    scale: 4, bg: 'rgba(239,68,68,0.2)', label: '21. NICE TRY.', labelColor: '#ef4444',
+    duration: 2200,
   },
 };
 
@@ -652,6 +664,34 @@ function DealerZoom({ reaction, onDone }) {
         transition: 'opacity 0.3s ease',
       }} />
 
+      {/* Fake hands gripping screen edges — pop-out effect */}
+      {animPhase === 'hold' && ['bust','blackjack','dealer_bust'].includes(reaction) && (
+        <>
+          {/* Left hand fingers */}
+          {[15,30,45,60].map((top, i) => (
+            <div key={`lf${i}`} style={{
+              position: 'absolute', left: -8, top: `${top}%`,
+              fontSize: 28 + i * 2,
+              transform: 'scaleX(-1) rotate(-10deg)',
+              animation: `fingerGrab 0.15s ${i * 0.05}s ease-out both`,
+              filter: 'drop-shadow(4px 0 8px rgba(0,0,0,0.8))',
+              zIndex: 5,
+            }}>🤙</div>
+          ))}
+          {/* Right hand fingers */}
+          {[20,35,50,65].map((top, i) => (
+            <div key={`rf${i}`} style={{
+              position: 'absolute', right: -8, top: `${top}%`,
+              fontSize: 28 + i * 2,
+              transform: 'rotate(10deg)',
+              animation: `fingerGrab 0.15s ${i * 0.05}s ease-out both`,
+              filter: 'drop-shadow(-4px 0 8px rgba(0,0,0,0.8))',
+              zIndex: 5,
+            }}>🤙</div>
+          ))}
+        </>
+      )}
+
       {/* Sweat drops for panic reactions */}
       {r.sweat && animPhase === 'hold' && Array.from({length: 6}).map((_, i) => (
         <div key={i} style={{
@@ -663,26 +703,27 @@ function DealerZoom({ reaction, onDone }) {
         }}>💧</div>
       ))}
 
-      {/* Face — rendered at viewport size for real zoom feel */}
+      {/* Face — true full-screen pop-out */}
       <div style={{
         position: 'absolute',
-        top: animPhase === 'hold' ? '-10%' : animPhase === 'out' ? '-80%' : '-80%',
+        bottom: animPhase === 'hold' ? '-5vh' : animPhase === 'out' ? '-120vh' : '-120vh',
         left: '50%',
         transform: 'translateX(-50%)',
         opacity,
         transition: animPhase === 'in'
-          ? 'top 0.4s cubic-bezier(0.34,1.2,0.64,1), opacity 0.3s ease'
+          ? 'bottom 0.45s cubic-bezier(0.22,1.4,0.36,1), opacity 0.3s ease'
           : animPhase === 'out'
-          ? 'top 0.35s ease-in, opacity 0.35s ease-in'
+          ? 'bottom 0.4s cubic-bezier(0.55,0,1,0.45), opacity 0.35s ease-in'
           : 'none',
         zIndex: 2,
-        filter: `drop-shadow(0 0 60px ${r.labelColor}88) drop-shadow(0 30px 80px rgba(0,0,0,0.95))`,
+        filter: `drop-shadow(0 0 80px ${r.labelColor}) drop-shadow(0 40px 100px rgba(0,0,0,0.95))`,
       }}>
         <svg
-          width={Math.round(r.scale * 90)}
-          height={Math.round(r.scale * 100)}
+          width="100vw"
+          height="110vh"
           viewBox="0 0 90 100"
-          style={{ overflow: 'visible' }}
+          preserveAspectRatio="xMidYMax meet"
+          style={{ overflow: 'visible', display: 'block' }}
         >
           {/* Hat */}
           <rect x="22" y="2" width="46" height="28" rx="3" fill="#1a1a1a" stroke={GOLD} strokeWidth="1.5"/>
@@ -1094,6 +1135,109 @@ function CutCardModal({ data, position, onPositionChange, onConfirm, timerLeft }
 
 const NUM_DECKS_VISUAL = 5;
 
+
+// ── Hand History Panel ────────────────────────────────────────────────────────
+
+function HandHistoryPanel({ history, onClose }) {
+  const SUIT_SYM = { h:'♥', d:'♦', c:'♣', s:'♠' };
+  const SUIT_COLOR = { h:'#dc2626', d:'#dc2626', c:'#1e1b4b', s:'#1e1b4b' };
+
+  function MiniCard({ card }) {
+    if (!card || card === '??') return (
+      <div style={{ width:18, height:24, borderRadius:3, background:'#1a1060', border:'1px solid #6366f1', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8, color:'#6366f1' }}>🂠</div>
+    );
+    const val = card.slice(0,-1), suit = card.slice(-1);
+    return (
+      <div style={{ width:18, height:24, borderRadius:3, background: suit==='h'||suit==='d'?'#fff5f5':'#f0f0ff', border:'1px solid rgba(0,0,0,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8, fontWeight:800, color:SUIT_COLOR[suit]||'#111', lineHeight:1 }}>
+        {val}<span style={{fontSize:6}}>{SUIT_SYM[suit]}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, zIndex:300, background:'rgba(0,0,0,0.8)', backdropFilter:'blur(8px)',
+      display:'flex', alignItems:'flex-end', justifyContent:'center',
+    }} onClick={onClose}>
+      <div style={{
+        width:'100%', maxWidth:640, maxHeight:'80vh',
+        background:'#0a0e14', borderRadius:'16px 16px 0 0',
+        border:`1px solid ${GOLD}33`, borderBottom:'none',
+        display:'flex', flexDirection:'column', overflow:'hidden',
+      }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 16px', borderBottom:`1px solid ${GOLD}22` }}>
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:'#f1f5f9', fontFamily:FONT }}>HAND HISTORY</div>
+            <div style={{ fontSize:9, color:'#374151', fontFamily:FONT }}>{history.length} hands recorded this session</div>
+          </div>
+          <button onClick={onClose} style={{ background:'transparent', border:'none', color:'#6b7280', fontSize:18, cursor:'pointer' }}>✕</button>
+        </div>
+
+        {/* List */}
+        <div style={{ overflowY:'auto', flex:1, padding:'8px 12px', display:'flex', flexDirection:'column', gap:6 }}>
+          {history.length === 0 ? (
+            <div style={{ textAlign:'center', padding:40, fontSize:11, color:'#374151', fontFamily:FONT }}>No hands played yet</div>
+          ) : history.map(hand => {
+            const win = hand.chipChange > 0;
+            const push = hand.chipChange === 0;
+            const bj = hand.hands?.some(h => h.outcome === 'blackjack');
+            const outcomeColor = bj ? GOLD : win ? '#22c55e' : push ? '#94a3b8' : '#ef4444';
+            const outcomeLabel = bj ? 'BLACKJACK' : win ? 'WIN' : push ? 'PUSH' : hand.hands?.some(h=>h.outcome==='bust') ? 'BUST' : 'LOSE';
+
+            return (
+              <div key={hand.id} style={{
+                background:'rgba(255,255,255,0.02)', border:`1px solid ${outcomeColor}22`,
+                borderLeft:`3px solid ${outcomeColor}`, borderRadius:8,
+                padding:'10px 12px',
+              }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{ fontSize:8, color:'#374151', fontFamily:FONT }}>HAND #{hand.handNumber}</span>
+                    <span style={{ fontSize:8, color:'#374151', fontFamily:FONT }}>{hand.timestamp}</span>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                    <span style={{ fontSize:9, fontWeight:700, color:outcomeColor, fontFamily:FONT, letterSpacing:'0.08em' }}>{outcomeLabel}</span>
+                    <span style={{ fontSize:10, fontWeight:700, color:outcomeColor, fontFamily:FONT }}>
+                      {hand.chipChange > 0 ? '+' : ''}{hand.chipChange?.toLocaleString()} OTJ
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
+                  {/* Player hands */}
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:7, color:'#374151', fontFamily:FONT, marginBottom:3 }}>YOU</div>
+                    {hand.hands?.map((h, hi) => (
+                      <div key={hi} style={{ display:'flex', gap:2, alignItems:'center', marginBottom:2 }}>
+                        {h.cards?.map((c,ci) => <MiniCard key={ci} card={c} />)}
+                        <span style={{ fontSize:8, color:'#94a3b8', marginLeft:4, fontFamily:FONT }}>{calcHandTotal(h.cards)}</span>
+                        <span style={{ fontSize:7, color:outcomeColor, marginLeft:2, fontFamily:FONT, textTransform:'uppercase' }}>{h.outcome}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Dealer hand */}
+                  <div>
+                    <div style={{ fontSize:7, color:'#374151', fontFamily:FONT, marginBottom:3 }}>DEALER</div>
+                    <div style={{ display:'flex', gap:2, alignItems:'center' }}>
+                      {hand.dealerCards?.map((c,ci) => <MiniCard key={ci} card={c} />)}
+                      <span style={{ fontSize:8, color:'#94a3b8', marginLeft:4, fontFamily:FONT }}>
+                        {hand.dealerTotal > 21 ? `BUST(${hand.dealerTotal})` : hand.dealerTotal}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function BlackjackTable() {
@@ -1124,7 +1268,9 @@ export default function BlackjackTable() {
   const [isDealing, setIsDealing]       = useState(false);
   const [cardProjectiles, setCardProjectiles] = useState([]);
   const cardProjectileId = useRef(0);
-  const [zoomReaction, setZoomReaction] = useState(null); // 'bust'|'player_21'|'blackjack'|'dealer_bust'|'dealer_21'
+  const [zoomReaction, setZoomReaction] = useState(null);
+  const [handHistory, setHandHistory]   = useState([]); // last 20 hands
+  const [showHistory, setShowHistory]   = useState(false);
   const projectileId = useRef(0);
   const tableRef     = useRef(null);
   const roomRef      = useRef(null);
@@ -1246,9 +1392,25 @@ export default function BlackjackTable() {
           setTimeout(() => { if (mounted) setDealerMood('waiting'); }, 2500);
         });
 
-        room.onMessage('payout_results', ({ results }) => {
+        room.onMessage('payout_results', ({ results, dealerCards, dealerTotal }) => {
           if (!mounted) return;
           setPayoutResults(results);
+          // Record this hand in history
+          setHandHistory(prev => {
+            const mine = results.find(r => r.username === username);
+            if (!mine) return prev;
+            const entry = {
+              id:           Date.now(),
+              handNumber:   gameState?.handNumber || 0,
+              dealerCards:  dealerCards || [],
+              dealerTotal:  dealerTotal || 0,
+              hands:        mine.hands || [],
+              chipChange:   mine.chipChange,
+              newChips:     mine.newChips,
+              timestamp:    new Date().toLocaleTimeString(),
+            };
+            return [entry, ...prev].slice(0, 20);
+          });
           // Set dealer mood based on overall result
           const allBust = results.every(r => r.hands?.every(h => h.outcome === 'bust' || h.outcome === 'lose'));
           const anyWin  = results.some(r => r.chipChange > 0);
@@ -1386,6 +1548,7 @@ export default function BlackjackTable() {
 
         <div style={{ flex: 1, textAlign: 'center' }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: '#f1f5f9', letterSpacing: '0.1em' }}>🎰 OTJ BLACKJACK</span>
+          <button onClick={() => setShowHistory(true)} style={{ marginLeft: 8, fontSize: 9, color: GOLD, background: `${GOLD}15`, border: `1px solid ${GOLD}33`, borderRadius: 6, padding: '2px 8px', cursor: 'pointer', fontFamily: FONT }}>📋 HISTORY</button>
           <span style={{ fontSize: 9, color: '#374151', marginLeft: 8 }}>{config?.label}</span>
         </div>
 
@@ -1607,6 +1770,11 @@ export default function BlackjackTable() {
 
 
 
+      {/* Hand history panel */}
+      {showHistory && (
+        <HandHistoryPanel history={handHistory} onClose={() => setShowHistory(false)} />
+      )}
+
       {/* Dealer zoom reaction — only for big moments */}
       {zoomReaction && (
         <DealerZoom
@@ -1653,6 +1821,7 @@ export default function BlackjackTable() {
         @keyframes confetti2 { to { transform:translate(-80px,160px) rotate(480deg); opacity:0; } }
         @keyframes confetti3 { to { transform:translate(100px,140px) rotate(-360deg); opacity:0; } }
         @keyframes dealerDeal { from { transform: rotate(-6deg) translateY(0px); } to { transform: rotate(6deg) translateY(-4px); } }
+        @keyframes fingerGrab { from { transform: scaleX(-1) rotate(-10deg) translateX(-20px); opacity:0; } to { transform: scaleX(-1) rotate(-10deg) translateX(0); opacity:1; } }
         @keyframes dealerBounce { 0% { transform: scale(1); } 40% { transform: scale(1.12) translateY(-4px); } 70% { transform: scale(0.96) translateY(1px); } 100% { transform: scale(1); } }
         @keyframes sweatDrop { 0% { transform: translateY(0); opacity: 0.8; } 100% { transform: translateY(12px); opacity: 0; } }
         @keyframes dealArm { from { transform: rotate(-15deg); } to { transform: rotate(10deg); } }

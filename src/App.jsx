@@ -378,6 +378,7 @@ function MobileBottomBar({ user, profile, onSignIn }) {
   // Determine which tab is active
   const isSport = ["/nba", "/props", "/mlb", "/mlb-props", "/nhl", "/nfl"].some(p => path.startsWith(p));
   const isArcade = path.startsWith("/arcade") || path === "/poker" || path.startsWith("/poker/table") || path === "/blackjack" || path.startsWith("/blackjack/table");
+  const isGameTable = path.startsWith("/blackjack/table") || path.startsWith("/poker/table"); // full screen game — hide all nav on mobile
   const isMore = ["/record", "/leaderboard", "/faq", "/daily"].some(p => path.startsWith(p)) || isArcade;
   const isHome = path === "/";
   const isJournal = path === "/daily";
@@ -455,8 +456,8 @@ function MobileBottomBar({ user, profile, onSignIn }) {
         </div>
       </BottomSheet>
 
-      {/* The bar itself */}
-      <div
+      {/* The bar itself — hidden on game table pages */}
+      {!isGameTable && <div
         className="otj-mobile-bottom-bar"
         style={{
           position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 100,
@@ -521,7 +522,7 @@ function MobileBottomBar({ user, profile, onSignIn }) {
           <span style={labelStyle(isMore && !isSport)}>More</span>
           {(isMore && !isSport) && <div className="otj-btab-active-dot" />}
         </button>
-      </div>
+      </div>}
     </>
   );
 }
@@ -873,10 +874,10 @@ export default function App() {
         {/* Desktop: full horizontal nav (hidden on mobile via CSS) */}
         <DesktopNav user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />
 
-        {/* Mobile: clean minimal top bar (hidden on desktop via CSS) */}
-        <MobileTopBar user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />
+        {/* Mobile: clean minimal top bar — hidden on game table pages */}
+        {!isGameTable && <MobileTopBar user={user} profile={profile} onSignIn={() => setShowWelcome(true)} slates={navSlates} />}
 
-        <div className="otj-app-content">
+        <div className="otj-app-content" style={isGameTable ? { paddingBottom: 0 } : {}}>
           <Routes>
             <Route path="/" element={<LandingPage user={user} profile={profile} sessionValidated={sessionValidated} />} />
             <Route path="/faq" element={<FAQ />} />

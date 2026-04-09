@@ -1689,6 +1689,20 @@ export default function BlackjackTable() {
           </div>
         )}
 
+        {/* MY hand — always centered on table regardless of seat position */}
+        {me?.hands?.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: '22%', left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            zIndex: 5, pointerEvents: 'none',
+          }}>
+            {me.hands.map((hand, hi) => (
+              <Hand key={hi} hand={hand} isActive={isMyTurn && hi === me.activeHand} />
+            ))}
+          </div>
+        )}
+
         {/* Phase label */}
         {phase && phase !== 'betting' && (
           <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translateX(-50%)', fontSize: 9, color: `${GOLD}55`, letterSpacing: '0.2em', fontFamily: FONT }}>
@@ -1723,19 +1737,15 @@ export default function BlackjackTable() {
                 >SIT</div>
               ) : (
                 <>
-                  {/* Hands — large for me, small for others, stacked for splits */}
-                  {seat.hands?.length > 0 && (
+                  {/* Hands — MY hands render centered via absolute overlay, others small at seat */}
+                  {seat.hands?.length > 0 && !isMe && (
                     <div style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                      marginBottom: 4,
-                      // Contain within a fixed-width column so splits don't overflow
-                      maxWidth: isMe ? 200 : 120,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                      marginBottom: 3, maxWidth: 100,
                     }}>
                       {seat.hands.map((hand, hi) => (
-                        <div key={hi} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                          <div style={{ display: 'flex', gap: isMe ? 4 : 2 }}>
-                            <Hand hand={hand} isActive={(isMe ? isMyTurn : myTurn) && hi === seat.activeHand} small={!isMe} />
-                          </div>
+                        <div key={hi} style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                          <Hand hand={hand} isActive={myTurn && hi === seat.activeHand} small />
                         </div>
                       ))}
                     </div>

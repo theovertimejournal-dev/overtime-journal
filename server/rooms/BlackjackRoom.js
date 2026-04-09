@@ -25,8 +25,10 @@ const RAKE_PCT     = 0.02;
 const BJ_PAYOUT    = 1.5;   // 3:2
 const MAX_SEATS    = 5;
 const TURN_TIME    = 30;
-const NUM_DECKS    = 6;
-const RESHUFFLE_AT = 0.25;
+const NUM_DECKS     = 5;
+const CUT_CARD_MIN  = 0.55;   // cut card no earlier than 55% through shoe
+const CUT_CARD_MAX  = 0.75;   // cut card no later than 75% through shoe
+const CUT_TIMER     = 15;     // seconds to cut before auto-cut
 
 // ── Card utils ────────────────────────────────────────────────────────────────
 
@@ -88,15 +90,19 @@ class BlackjackRoom extends Room {
         this.tier      = options.tier || 'mid';
         this.config    = TIERS[this.tier] || TIERS.mid;
         this.tableName = `OTJ BJ — ${this.config.label}`;
-        this.shoe      = shuffle(createShoe());
-        this.phase     = 'betting';
-        this.seats     = new Array(MAX_SEATS).fill(null);
-        this.dealerCards = [];
-        this.handNumber  = 0;
-        this.betTimer    = null;
-        this.turnTimer   = null;
-        this.currentSeat = -1;
-        this.chatLog     = [];
+        this.shoe         = shuffle(createShoe());
+        this.cutCardPos   = this.getDefaultCutPos();  // index where cut card sits
+        this.cutRequested = false;  // waiting for player to cut
+        this.cutTimer     = null;
+        this.cutRotation  = 0;      // which seat gets to cut next
+        this.phase        = 'betting';
+        this.seats        = new Array(MAX_SEATS).fill(null);
+        this.dealerCards  = [];
+        this.handNumber   = 0;
+        this.betTimer     = null;
+        this.turnTimer    = null;
+        this.currentSeat  = -1;
+        this.chatLog      = [];
 
         this.onMessage('sit_down',      (c, d) => this.handleSitDown(c, d));
         this.onMessage('stand_up',      (c)    => this.handleStandUp(c));
@@ -107,6 +113,7 @@ class BlackjackRoom extends Room {
         this.onMessage('split',         (c)    => this.handleSplit(c));
         this.onMessage('chat',          (c, d) => this.handleChat(c, d));
         this.onMessage('emoji_reaction',(c, d) => this.handleEmoji(c, d));
+        this.onMessage('cut_card',      (c, d) => this.handleCutCard(c, d));
 
         console.log(`[BJ] Room created — ${this.tableName}`);
     }
@@ -275,7 +282,7 @@ class BlackjackRoom extends Room {
 
     // ── Deal ──────────────────────────────────────────────────────────────────
 
-    startDeal() {
+    async startDeal() {
         const bettors = this.seats.map((s, i) => s?.bet > 0 ? i : -1).filter(i => i !== -1);
         if (bettors.length === 0) {
             this.phase = 'betting';
@@ -284,9 +291,9 @@ class BlackjackRoom extends Room {
             return;
         }
 
-        if (this.shoe.length < NUM_DECKS * 52 * RESHUFFLE_AT) {
-            this.shoe = shuffle(createShoe());
-            this.systemMsg('Shoe reshuffled 🃏');
+        // Check if we've hit the cut card
+        if (this.shouldReshuffle()) {
+            await this.reshuffleShoe();
         }
 
         this.phase       = 'dealing';
@@ -345,7 +352,11 @@ class BlackjackRoom extends Room {
     }
 
     dealCard() {
-        if (this.shoe.length === 0) this.shoe = shuffle(createShoe());
+        if (this.shoe.length === 0) {
+            // Emergency reshuffle (shouldn't happen with cut card but safety net)
+            this.shoe       = shuffle(createShoe());
+            this.cutCardPos = this.getDefaultCutPos();
+        }
         return this.shoe.pop();
     }
 
@@ -575,14 +586,36 @@ class BlackjackRoom extends Room {
         setTimeout(() => this.resetHand(), 3500);
     }
 
-    resetHand() {
+    async resetHand() {
         for (let i = 0; i < MAX_SEATS; i++) {
             const seat = this.seats[i];
             if (!seat) continue;
             if (seat.chips <= 0) {
                 this.systemMsg(`${seat.username} ran out of chips`);
+                // Return whatever tiny amount is left (could be 0)
                 this.seats[i] = null;
                 continue;
+            }
+            // ── Persist updated chip count to Supabase after every hand ──
+            try {
+                const { data: profile } = await supabase
+                    .from('profiles').select('bankroll').eq('user_id', seat.userId).single();
+                if (profile) {
+                    // Replace bankroll with current chip stack
+                    // (chips already reflect wins/losses from resolvePayout)
+                    await supabase.from('profiles')
+                        .update({ bankroll: seat.chips })
+                        .eq('user_id', seat.userId);
+                    await supabase.from('bucks_ledger').insert({
+                        user_id: seat.userId,
+                        type: 'bj_hand_settle',
+                        amount: seat.chips - profile.bankroll,
+                        balance_after: seat.chips,
+                        note: `BJ hand #${this.handNumber} settle — ${this.tier} table`,
+                    });
+                }
+            } catch (err) {
+                console.error('[BJ] resetHand bankroll sync error:', err.message);
             }
             seat.bet        = 0;
             seat.hands      = [];
@@ -691,7 +724,96 @@ class BlackjackRoom extends Room {
         this.broadcast('chat_message', msg);
     }
 
-    // ── State broadcast ───────────────────────────────────────────────────────
+    // ── Cut card helpers ─────────────────────────────────────────────────────
+
+    getDefaultCutPos() {
+        const total = NUM_DECKS * 52;
+        const pct = CUT_CARD_MIN + Math.random() * (CUT_CARD_MAX - CUT_CARD_MIN);
+        return Math.floor(total * pct);
+    }
+
+    reshuffleShoe() {
+        this.shoe       = shuffle(createShoe());
+        this.cutCardPos = this.getDefaultCutPos();
+        const total     = this.shoe.length;
+
+        // Find the seat to ask for cut — rotate through seated players
+        const seatedIndices = this.seats.map((s, i) => s ? i : -1).filter(i => i !== -1);
+        if (seatedIndices.length === 0) {
+            this.systemMsg('Shoe reshuffled 🃏');
+            this.broadcastState();
+            return Promise.resolve();
+        }
+
+        const cutSeatIdx = seatedIndices[this.cutRotation % seatedIndices.length];
+        this.cutRotation++;
+        const cutSeat    = this.seats[cutSeatIdx];
+
+        this.cutRequested = true;
+        this.systemMsg(`${cutSeat.username} is cutting the deck...`);
+
+        // Send cut request to that specific client
+        const cutClient = this.clients.find(c => c.sessionId === cutSeat.sessionId);
+        if (cutClient) {
+            cutClient.send('cut_card_request', {
+                deckSize:    total,
+                minCut:      Math.floor(total * CUT_CARD_MIN),
+                maxCut:      Math.floor(total * CUT_CARD_MAX),
+                timeLimit:   CUT_TIMER,
+                cutterName:  cutSeat.username,
+            });
+        }
+
+        this.broadcast('cut_card_pending', {
+            cutterName: cutSeat.username,
+            timeLimit:  CUT_TIMER,
+        });
+
+        // Auto-cut timer
+        return new Promise(resolve => {
+            let t = CUT_TIMER;
+            this.cutTimer = setInterval(() => {
+                t--;
+                if (t <= 0) {
+                    clearInterval(this.cutTimer);
+                    this.cutTimer     = null;
+                    this.cutRequested = false;
+                    this.systemMsg('Deck auto-cut 🃏');
+                    this.broadcastState();
+                    resolve();
+                }
+            }, 1000);
+        });
+    }
+
+    handleCutCard(client, { position }) {
+        if (!this.cutRequested) return;
+        const seat = this.seats[this.findSeat(client.sessionId)];
+        if (!seat) return;
+
+        clearInterval(this.cutTimer);
+        this.cutTimer     = null;
+        this.cutRequested = false;
+
+        // Validate position is within allowed range
+        const total  = this.shoe.length;
+        const minCut = Math.floor(total * CUT_CARD_MIN);
+        const maxCut = Math.floor(total * CUT_CARD_MAX);
+        const pos    = Math.max(minCut, Math.min(maxCut, Math.floor(position)));
+
+        // Cut the shoe: move cards after cut point to the front
+        this.shoe = [...this.shoe.slice(total - pos), ...this.shoe.slice(0, total - pos)];
+        this.cutCardPos = pos;
+
+        this.systemMsg(`${seat.username} cut the deck at ${Math.round((pos/total)*100)}% 🃏`);
+        this.broadcastState();
+    }
+
+    shouldReshuffle() {
+        return this.shoe.length <= (NUM_DECKS * 52) - this.cutCardPos;
+    }
+
+        // ── State broadcast ───────────────────────────────────────────────────────
 
     broadcastState() {
         for (const client of this.clients) {
@@ -717,6 +839,13 @@ class BlackjackRoom extends Room {
                     status:     s.status,
                 } : null),
                 config: { minBet: this.config.minBet, maxBet: this.config.maxBet, tier: this.tier, label: this.config.label },
+                shoe: {
+                    remaining:    this.shoe.length,
+                    total:        NUM_DECKS * 52,
+                    cutCardPos:   this.cutCardPos,
+                    pctRemaining: Math.round((this.shoe.length / (NUM_DECKS * 52)) * 100),
+                },
+                cutPending: this.cutRequested,
             });
         }
     }

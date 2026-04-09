@@ -78,6 +78,14 @@ const NAV_STYLES = `
 
     /* Add bottom padding so content doesn't hide behind bottom bar */
     .otj-app-content { padding-bottom: 72px; }
+
+    /* ── On game table pages: hide ALL nav so game gets full screen ── */
+    body:has([data-page="bj-table"]) .otj-mobile-topbar,
+    body:has([data-page="bj-table"]) .otj-mobile-bottom-bar,
+    body:has([data-page="poker-table"]) .otj-mobile-topbar,
+    body:has([data-page="poker-table"]) .otj-mobile-bottom-bar { display: none !important; }
+    body:has([data-page="bj-table"]) .otj-app-content,
+    body:has([data-page="poker-table"]) .otj-app-content { padding-bottom: 0 !important; }
   }
 
   /* ── Bottom sheet animation ── */

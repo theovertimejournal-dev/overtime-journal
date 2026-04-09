@@ -161,12 +161,20 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
     setStatus({ type: "info", msg: "Finding you a seat…" });
     try {
       const joinClient = new Client(COLYSEUS_URL);
-      const room = await joinClient.joinOrCreate("poker", {
+      const joinOpts = {
         tier: selectedTier,
         userId: user?.id,
         username: profile?.username,
         avatar: { config: profile?.avatar_config },
-      });
+      };
+      // Always prefer joining an existing open table
+      const available = await joinClient.getAvailableRooms('poker');
+      const openRoom  = available.find(r =>
+        r.metadata?.tier === selectedTier && r.clients < (r.maxClients || 6)
+      );
+      const room = openRoom
+        ? await joinClient.joinById(openRoom.roomId, joinOpts)
+        : await joinClient.create('poker', { ...joinOpts });
       setStatus(null);
       onEnterTable?.(room, {
         tier: selectedTier,
@@ -176,7 +184,7 @@ export default function PokerLobby({ userBucks = 12450, onEnterTable, user, prof
         avatarConfig: profile?.avatar_config,
       });
     } catch (e) {
-      setStatus({ type: "error", msg: "Couldn't find a table. Try again." });
+      setStatus({ type: "error", msg: `Couldn't join: ${e.message}` });
     }
   }
 

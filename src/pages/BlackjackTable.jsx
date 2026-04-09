@@ -1616,7 +1616,7 @@ export default function BlackjackTable() {
       <div ref={tableRef} style={{
         position: 'relative', width: '100%', maxWidth: 920,
         flex: 1,
-        maxHeight: 'min(calc(100dvh - 44px - 120px), 680px)',
+        maxHeight: 'min(calc(100dvh - 44px - 110px), 620px)',
         margin: '0 auto',
         background: 'radial-gradient(ellipse at 50% 35%, #0e4425 0%, #082b18 55%, #030f08 100%)',
         borderTop: '6px solid #7c4a1e',

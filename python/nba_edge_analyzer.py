@@ -4077,6 +4077,19 @@ def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_
 
     print(f"  Fetching props...", end=" ", flush=True)
 
+    # ── Populate SGO event cache if empty (push_to_supabase calls this fresh) ──
+    if SGO_KEY and not _SGO_EVENT_CACHE:
+        sgo_resp = sgo_get("events", {
+            "leagueID": "NBA",
+            "startDate": game_date,
+            "endDate":   game_date,
+            "limit":     20,
+        })
+        for ev in sgo_resp.get("data", []):
+            ev_id = ev.get("eventID", ev.get("id", ""))
+            if ev_id:
+                _SGO_EVENT_CACHE[ev_id] = ev
+
     all_raw_props = []
     game_map = {}
 

@@ -3743,28 +3743,46 @@ def get_player_props_for_game(game_id: str) -> list:
     if not SGO_KEY:
         return []
 
-    data = sgo_get(f"events/{game_id}", {
-        "includePlayerProps": "true",
+    # SGO doesn't support /events/{id} — use list endpoint filtered by eventID
+    data = sgo_get("events", {
+        "eventID": game_id,
+        "oddType": "player-prop",
+        "limit": 200,
     })
 
-    if not data or not data.get("success"):
-        # Try alternate endpoint format
+    # If that doesn't work, try fetching all NBA props and filter
+    if not data.get("data"):
         data = sgo_get("events", {
-            "eventID": game_id,
-            "includePlayerProps": "true",
+            "leagueID": "NBA",
+            "oddType": "player-prop",
+            "limit": 200,
         })
 
     events = data.get("data", [])
-    if isinstance(events, list) and len(events) > 0:
+    if not events:
+        return []
+
+    # Find our specific event
+    event = None
+    for ev in events:
+        if ev.get("eventID") == game_id or ev.get("id") == game_id:
+            event = ev
+            break
+
+    if not event and len(events) == 1:
         event = events[0]
-    elif isinstance(events, dict):
-        event = events
-    else:
-        event = data  # maybe the response IS the event directly
+
+    if not event:
+        return []
 
     odds = event.get("odds", {})
     if not odds:
         return []
+
+    # Debug: print a few sample odd IDs to understand the format
+    sample_keys = list(odds.keys())[:5]
+    if sample_keys:
+        print(f"  SGO sample oddIDs: {sample_keys}", file=sys.stderr)
 
     props = []
     for odd_id, odd_data in odds.items():
@@ -3772,51 +3790,42 @@ def get_player_props_for_game(game_id: str) -> list:
             continue
 
         # SGO oddID format: statID-statEntityID-periodID-betTypeID-sideID
-        # Player props look like: points-LEBRON_JAMES-game-ou-over
         parts = odd_id.split("-")
         if len(parts) < 5:
             continue
 
         stat_id   = parts[0]
-        entity_id = parts[1]   # player name like LEBRON_JAMES
-        period_id = parts[2]   # should be 'game'
-        bet_type  = parts[3]   # should be 'ou'
-        side_id   = parts[4]   # 'over' or 'under'
+        entity_id = parts[1]
+        period_id = parts[2]
+        bet_type  = parts[3]
+        side_id   = parts[4]
 
-        if bet_type != "ou" or period_id != "game":
+        if bet_type != "ou" or period_id != "game" or side_id != "over":
             continue
-        if side_id != "over":
-            continue  # only need one side to get the line
 
         prop_type = SGO_STAT_TO_PROP.get(stat_id.lower())
         if not prop_type:
             continue
 
-        # Entity must be a player name (not 'home', 'away', 'all')
         if entity_id.lower() in ("home", "away", "all", ""):
             continue
 
-        player_name = entity_id.replace("_", " ").title()
         line = odd_data.get("bookLine") or odd_data.get("fairLine")
         if not line:
             continue
 
-        # Get over/under odds
-        over_key  = odd_id
-        under_key = odd_id.replace("-over", "-under")
-        over_data  = odds.get(over_key, {})
-        under_data = odds.get(under_key, {})
-        over_odds  = over_data.get("bookOdds") or over_data.get("fairOdds")
-        under_odds = under_data.get("bookOdds") or under_data.get("fairOdds")
+        under_key  = odd_id.replace("-over", "-under")
+        over_odds  = odd_data.get("bookOdds") or odd_data.get("fairOdds")
+        under_odds = (odds.get(under_key) or {}).get("bookOdds") or (odds.get(under_key) or {}).get("fairOdds")
 
-        # Use entity as player_id (we'll resolve name→stats later)
+        player_name = entity_id.replace("_", " ").title()
         props.append({
-            "game_id":    game_id,
-            "player_id":  entity_id,        # SGO entity ID
+            "game_id":     game_id,
+            "player_id":   entity_id,
             "player_name": player_name,
-            "prop_type":  prop_type,
-            "line_value": float(line),
-            "vendor":     "draftkings",
+            "prop_type":   prop_type,
+            "line_value":  float(line),
+            "vendor":      "draftkings",
             "market": {
                 "type":       "over_under",
                 "over_odds":  over_odds,

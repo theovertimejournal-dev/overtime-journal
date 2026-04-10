@@ -107,6 +107,8 @@ class BlackjackRoom extends Room {
         this.turnTimer    = null;
         this.currentSeat  = -1;
         this.chatLog      = [];
+        this.insuranceBets = {}; // { userId: amount }
+        this.insuranceOpen = false;
 
         // CRITICAL: metadata makes filterBy(['tier']) work for room matching
         this.setMetadata({
@@ -126,6 +128,7 @@ class BlackjackRoom extends Room {
         this.onMessage('chat',          (c, d) => this.handleChat(c, d));
         this.onMessage('emoji_reaction',(c, d) => this.handleEmoji(c, d));
         this.onMessage('cut_card',      (c, d) => this.handleCutCard(c, d));
+        this.onMessage('insurance',      (c, d) => this.handleInsurance(c, d));
 
         console.log(`[BJ] Room created — ${this.tableName}`);
     }
@@ -326,37 +329,25 @@ class BlackjackRoom extends Room {
             this.dealerCards.push(this.dealCard());
         }
 
-        const dealerBJ = isBlackjack(this.dealerCards);
-
-        // Check BJ outcomes
-        let allDone = true;
-        for (const i of bettors) {
-            const seat = this.seats[i];
-            if (isBlackjack(seat.hands[0].cards)) {
-                seat.hands[0].status = dealerBJ ? 'push' : 'blackjack';
-                seat.status = 'done';
-            } else if (dealerBJ) {
-                seat.hands[0].status = 'lose';
-                seat.status = 'done';
-            } else {
-                allDone = false;
-            }
-        }
-
         this.phase = 'player_turn';
         this.broadcast('deal_complete', { handNumber: this.handNumber });
         this.broadcastState();
 
-        if (dealerBJ) {
-            this.broadcast('dealer_blackjack', { cards: this.dealerCards });
-            setTimeout(() => this.resolvePayout(), 1500);
+        // ── Insurance window: dealer shows Ace ──
+        const dealerUpCard = this.dealerCards[1]; // second card is face-up
+        if (dealerUpCard && dealerUpCard[0] === 'A') {
+            this.insuranceBets  = {};
+            this.insuranceOpen  = true;
+            this.broadcast('insurance_offered', {
+                timeLimit: 10,
+                dealerUpCard,
+            });
+            // Auto-close after 10s
+            setTimeout(() => this.resolveInsurance(), 10000);
             return;
         }
 
-        if (allDone) {
-            setTimeout(() => this.dealerPlay(), 500);
-            return;
-        }
+        this.resolveDealOutcomes();
 
         this.currentSeat = bettors[0];
         this.broadcastState();
@@ -373,6 +364,102 @@ class BlackjackRoom extends Room {
     }
 
     // ── Player actions ────────────────────────────────────────────────────────
+
+
+    handleInsurance(client, { amount }) {
+        if (!this.insuranceOpen) return;
+        const seatIdx = this.findSeat(client.sessionId);
+        if (seatIdx === -1) return;
+        const seat = this.seats[seatIdx];
+        if (!seat) return;
+        const maxInsurance = Math.floor(seat.bet / 2);
+        const insAmount    = Math.max(0, Math.min(amount || maxInsurance, maxInsurance, seat.chips));
+        this.insuranceBets[seat.userId] = insAmount;
+        if (insAmount > 0) seat.chips -= insAmount;
+        this.systemMsg(`${seat.username} ${insAmount > 0 ? `insured for ${insAmount.toLocaleString()} OTJ` : 'declined insurance'}`);
+        this.broadcastState();
+
+        // If all seated players have responded, resolve early
+        const seated = this.seats.filter(Boolean);
+        const responded = seated.every(s => this.insuranceBets.hasOwnProperty(s.userId));
+        if (responded) {
+            clearTimeout(this._insuranceTimer);
+            this.resolveInsurance();
+        }
+    }
+
+    resolveInsurance() {
+        if (!this.insuranceOpen) return;
+        this.insuranceOpen = false;
+
+        const dealerBJ = isBlackjack(this.dealerCards);
+
+        if (dealerBJ) {
+            // Pay out insurance bets 2:1, then resolve hand
+            for (const [userId, insAmount] of Object.entries(this.insuranceBets)) {
+                if (insAmount > 0) {
+                    const seat = this.seats.find(s => s && s.userId === userId);
+                    if (seat) {
+                        seat.chips += insAmount * 3; // return bet + 2:1 payout
+                        this.systemMsg(`${seat.username} insurance pays out ${(insAmount * 2).toLocaleString()} OTJ`);
+                    }
+                }
+            }
+            this.insuranceBets = {};
+            this.broadcastState();
+            this.broadcast('dealer_blackjack', { cards: this.dealerCards });
+            setTimeout(() => this.resolvePayout(), 2000);
+            return;
+        }
+
+        // No dealer BJ — insurance bets already deducted, just continue
+        if (Object.values(this.insuranceBets).some(v => v > 0)) {
+            this.systemMsg('No dealer blackjack — insurance bets lost');
+        }
+        this.insuranceBets = {};
+        this.broadcast('insurance_resolved', { dealerBJ: false });
+        this.resolveDealOutcomes();
+    }
+
+    resolveDealOutcomes() {
+        const bettors = this.seats.map((s, i) => s?.bet > 0 ? i : -1).filter(i => i !== -1);
+        const dealerBJ = isBlackjack(this.dealerCards);
+
+        let allDone = true;
+        for (const i of bettors) {
+            const seat = this.seats[i];
+            if (isBlackjack(seat.hands[0].cards)) {
+                seat.hands[0].status = dealerBJ ? 'push' : 'blackjack';
+                seat.status = 'done';
+            } else if (dealerBJ) {
+                seat.hands[0].status = 'lose';
+                seat.status = 'done';
+            } else {
+                allDone = false;
+            }
+        }
+
+        this.broadcastState();
+
+        if (dealerBJ) {
+            this.broadcast('dealer_blackjack', { cards: this.dealerCards });
+            setTimeout(() => this.resolvePayout(), 2000);
+            return;
+        }
+
+        if (allDone) {
+            setTimeout(() => this.dealerPlay(), 500);
+            return;
+        }
+
+        // Find first player who needs to act
+        const firstActive = this.seats.findIndex((s, i) =>
+            bettors.includes(i) && s && s.status === 'playing'
+        );
+        this.currentSeat = firstActive;
+        this.broadcastState();
+        this.startTurnTimer();
+    }
 
     handleHit(client) {
         const seatIdx = this.findSeat(client.sessionId);
@@ -595,7 +682,7 @@ class BlackjackRoom extends Room {
             await this.awardPoints(seat.userId, pts);
         }
 
-        setTimeout(() => this.resetHand(), 3500);
+        setTimeout(() => this.resetHand(), 5000);
     }
 
     async resetHand() {
@@ -873,7 +960,8 @@ class BlackjackRoom extends Room {
                     cutCardPos:   this.cutCardPos,
                     pctRemaining: Math.round((this.shoe.length / (NUM_DECKS * 52)) * 100),
                 },
-                cutPending: this.cutRequested,
+                cutPending:     this.cutRequested,
+                insuranceOpen:  this.insuranceOpen,
             });
         }
     }

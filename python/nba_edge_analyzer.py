@@ -3833,6 +3833,10 @@ def get_player_props_for_game(game_id: str) -> list:
         clean = _re.sub(r'_\d+_NBA$', '', clean, flags=_re.IGNORECASE)
         player_name = clean.replace("_", " ").title()
 
+        props.append({
+            "game_id":     game_id,
+            "player_id":   entity_id,
+            "player_name": player_name,
             "prop_type":   prop_type,
             "line_value":  float(line),
             "vendor":      "draftkings",

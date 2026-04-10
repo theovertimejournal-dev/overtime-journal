@@ -3724,18 +3724,23 @@ PROPS_MIN_SCORE = 55
 
 # SGO statID → our prop_type mapping
 SGO_STAT_TO_PROP = {
-    "points":          "points",
-    "rebounds":        "rebounds",
-    "assists":         "assists",
-    "blocks":          "blocks",
-    "steals":          "steals",
-    "turnovers":       "turnovers",
-    "threes":          "three_pointers_made",
-    "fg3m":            "three_pointers_made",
-    "pra":             "points_rebounds_assists",
-    "pr":              "points_rebounds",
-    "pa":              "points_assists",
-    "ra":              "rebounds_assists",
+    "points":                   "points",
+    "rebounds":                 "rebounds",
+    "assists":                  "assists",
+    "blocks":                   "blocks",
+    "steals":                   "steals",
+    "turnovers":                "turnovers",
+    "threes":                   "three_pointers_made",
+    "fg3m":                     "three_pointers_made",
+    "three_pointers_made":      "three_pointers_made",
+    "pra":                      "points_rebounds_assists",
+    "pointsreboundsassists":    "points_rebounds_assists",
+    "pr":                       "points_rebounds",
+    "pointsrebounds":           "points_rebounds",
+    "pa":                       "points_assists",
+    "pointsassists":            "points_assists",
+    "ra":                       "rebounds_assists",
+    "reboundsassists":          "rebounds_assists",
 }
 
 def get_player_props_for_game(game_id: str) -> list:
@@ -3743,19 +3748,17 @@ def get_player_props_for_game(game_id: str) -> list:
     if not SGO_KEY:
         return []
 
-    # SGO doesn't support /events/{id} — use list endpoint filtered by eventID
+    # Fetch this specific event with all odds including player props
     data = sgo_get("events", {
         "eventID": game_id,
-        "oddType": "player-prop",
-        "limit": 200,
+        "limit": 1,
     })
 
-    # If that doesn't work, try fetching all NBA props and filter
+    # Fallback: fetch all today's NBA events and find this one
     if not data.get("data"):
         data = sgo_get("events", {
             "leagueID": "NBA",
-            "oddType": "player-prop",
-            "limit": 200,
+            "limit": 20,
         })
 
     events = data.get("data", [])
@@ -3777,6 +3780,7 @@ def get_player_props_for_game(game_id: str) -> list:
 
     odds = event.get("odds", {})
     if not odds:
+        print(f"  SGO event {game_id}: no odds returned (keys: {list(event.keys())[:8]})", file=sys.stderr)
         return []
 
     # Debug: print a few sample odd IDs to understand the format
@@ -3790,15 +3794,17 @@ def get_player_props_for_game(game_id: str) -> list:
             continue
 
         # SGO oddID format: statID-statEntityID-periodID-betTypeID-sideID
+        # SGO oddID: statID-ENTITY-periodID-betTypeID-sideID
+        # Parse from ends to handle hyphens in names (DE-AARON_FOX)
         parts = odd_id.split("-")
         if len(parts) < 5:
             continue
 
         stat_id   = parts[0]
-        entity_id = parts[1]
-        period_id = parts[2]
-        bet_type  = parts[3]
-        side_id   = parts[4]
+        side_id   = parts[-1]
+        bet_type  = parts[-2]
+        period_id = parts[-3]
+        entity_id = "-".join(parts[1:-3])  # everything between stat and period
 
         if bet_type != "ou" or period_id != "game" or side_id != "over":
             continue
@@ -3807,8 +3813,11 @@ def get_player_props_for_game(game_id: str) -> list:
         if not prop_type:
             continue
 
-        if entity_id.lower() in ("home", "away", "all", ""):
+        # Skip team entities; player entities end with _1_NBA, _2_NBA etc
+        if entity_id.lower() in ("home", "away", "all", "") or not entity_id:
             continue
+        if "_NBA" not in entity_id.upper():
+            continue  # not a player prop
 
         line = odd_data.get("bookLine") or odd_data.get("fairLine")
         if not line:
@@ -3818,11 +3827,12 @@ def get_player_props_for_game(game_id: str) -> list:
         over_odds  = odd_data.get("bookOdds") or odd_data.get("fairOdds")
         under_odds = (odds.get(under_key) or {}).get("bookOdds") or (odds.get(under_key) or {}).get("fairOdds")
 
-        player_name = entity_id.replace("_", " ").title()
-        props.append({
-            "game_id":     game_id,
-            "player_id":   entity_id,
-            "player_name": player_name,
+        # Clean name: LEBRON_JAMES_1_NBA → LeBron James
+        clean = entity_id
+        import re as _re
+        clean = _re.sub(r'_\d+_NBA$', '', clean, flags=_re.IGNORECASE)
+        player_name = clean.replace("_", " ").title()
+
             "prop_type":   prop_type,
             "line_value":  float(line),
             "vendor":      "draftkings",

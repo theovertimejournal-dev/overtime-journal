@@ -18,7 +18,6 @@ Usage:
 import sys
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 from datetime import datetime, timedelta
 
@@ -45,36 +44,6 @@ warnings.filterwarnings("ignore")
 API_KEY = os.environ.get("BALLDONTLIE_API_KEY", "")
 BASE_URL = "https://api.balldontlie.io"
 HEADERS = {"Authorization": API_KEY}
-
-# SGO (SportsGameOdds) — primary odds + game schedule source
-SGO_KEY = os.environ.get("SPORTSGAMEODDS_API_KEY", "")
-SGO_BASE = "https://api.sportsgameodds.com/v2"
-SGO_HEADERS = {"X-Api-Key": SGO_KEY}
-
-# Cache of eventID → full event object (populated by get_todays_games)
-_SGO_EVENT_CACHE = {}
-
-def sgo_get(endpoint: str, params: dict = None) -> dict:
-    """Safe request to SGO API."""
-    if not SGO_KEY:
-        return {}
-    url = f"{SGO_BASE}/{endpoint}"
-    try:
-        resp = requests.get(url, params=params, headers=SGO_HEADERS, timeout=10)
-        if resp.status_code == 401:
-            print(f"  ❌ SGO API key invalid (401)", file=sys.stderr)
-            return {}
-        if resp.status_code == 429:
-            print(f"  ❌ SGO rate limit hit (429)", file=sys.stderr)
-            return {}
-        resp.raise_for_status()
-        return resp.json()
-    except requests.exceptions.Timeout:
-        print(f"  ⚠ SGO timeout ({endpoint})", file=sys.stderr)
-        return {}
-    except Exception as e:
-        print(f"  ⚠ SGO error ({endpoint}): {e}", file=sys.stderr)
-        return {}
 
 # NOTE: API key validation moved to main() so this file is safe to import
 # from other scripts without triggering sys.exit at module load time.
@@ -116,13 +85,13 @@ def bdl_get(endpoint: str, params: dict = None) -> dict:
     try:
         resp = requests.get(url, params=params, headers=HEADERS, timeout=8)
         if resp.status_code == 401:
-            print(f"  ❌ BDL API key invalid or expired (401)", file=sys.stderr)
-            return {}
-        if resp.status_code == 429:
-            print(f"  ❌ BDL rate limit hit (429) — monthly quota may be exhausted", file=sys.stderr)
+            print(f"  ❌ BDL 401 — API key invalid or expired", file=sys.stderr)
             return {}
         if resp.status_code == 402:
-            print(f"  ❌ BDL payment required (402) — subscription issue", file=sys.stderr)
+            print(f"  ❌ BDL 402 — subscription/payment issue", file=sys.stderr)
+            return {}
+        if resp.status_code == 429:
+            print(f"  ❌ BDL 429 — rate limit hit", file=sys.stderr)
             return {}
         resp.raise_for_status()
         return resp.json()
@@ -130,7 +99,7 @@ def bdl_get(endpoint: str, params: dict = None) -> dict:
         print(f"  ⚠ BDL timeout ({endpoint})", file=sys.stderr)
         return {}
     except Exception as e:
-        print(f"  ⚠ BDL API error ({endpoint}): {e}", file=sys.stderr)
+        print(f"  ⚠ BDL error ({endpoint}): {e}", file=sys.stderr)
         return {}
 
 
@@ -153,7 +122,7 @@ def espn_get_yesterday_teams(game_date: str) -> tuple:
         espn_date = yesterday_dt.strftime("%Y%m%d")
 
         url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={espn_date}"
-        resp = requests.get(url, timeout=8)
+        resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
 
@@ -183,74 +152,25 @@ def espn_get_yesterday_teams(game_date: str) -> tuple:
 
 
 
-# BDL team abbreviation → ID map (used when SGO is primary for games)
-BDL_ABBREV_TO_ID = {}
-
-def get_bdl_team_id_map() -> dict:
-    """Build abbrev→id map from BDL teams endpoint."""
-    global BDL_ABBREV_TO_ID
-    if BDL_ABBREV_TO_ID:
-        return BDL_ABBREV_TO_ID
-    data = bdl_get("v1/teams", {"per_page": 100})
-    for t in data.get("data", []):
-        abbr = t.get("abbreviation", "")
-        tid  = t.get("id")
-        if abbr and tid:
-            BDL_ABBREV_TO_ID[abbr] = tid
-    return BDL_ABBREV_TO_ID
-
 def get_todays_games(game_date: str) -> list:
-    """Get all NBA games for a given date. SGO primary, BDL fallback."""
+    """Get all NBA games for a given date."""
+    data = bdl_get("nba/v1/games", {"dates[]": game_date, "per_page": 100})
+    raw = data.get("data", [])
+    print(f"  BDL v1/games → {len(raw)} results (status={data.get('meta', {}).get('total_count', '?')})", file=sys.stderr)
+    if not raw:
+        # Try without dates[] to see if API is even responding
+        test = bdl_get("nba/v1/games", {"per_page": 1})
+        print(f"  BDL test (no date filter): {len(test.get('data', []))} results, keys={list(test.keys())}", file=sys.stderr)
     games = []
-
-    # ── Try SGO first ──
-    if SGO_KEY:
-        sgo_data = sgo_get("events", {
-            "leagueID": "NBA",
-            "startDate": game_date,
-            "endDate": game_date,
-            "limit": 20,
-        })
-        events = sgo_data.get("data", [])
-        if events:
-            abbrev_map = get_bdl_team_id_map()
-            for ev in events:
-                teams = ev.get("teams", {})
-                home  = teams.get("home", {})
-                away  = teams.get("away", {})
-                h_abbr = home.get("teamID", "").upper()
-                a_abbr = away.get("teamID", "").upper()
-                # SGO teamID format is like "NBA_BOS" — strip the prefix
-                h_abbr = h_abbr.replace("NBA_", "")
-                a_abbr = a_abbr.replace("NBA_", "")
-                ev_id = ev.get("eventID", ev.get("id", ""))
-                _SGO_EVENT_CACHE[ev_id] = ev  # cache full event with odds
-                games.append({
-                    "game_id":      ev_id,
-                    "sgo_event_id": ev_id,
-                    "status":       ev.get("status", ""),
-                    "home_team":    h_abbr,
-                    "away_team":    a_abbr,
-                    "home_team_id": abbrev_map.get(h_abbr, 0),
-                    "away_team_id": abbrev_map.get(a_abbr, 0),
-                    "game_time":    ev.get("startTime", ev.get("startDate", "TBD")),
-                })
-            print(f"  SGO: {len(games)} games found", file=sys.stderr)
-            return games
-
-    # ── BDL fallback ──
-    print(f"  SGO unavailable — falling back to BDL", file=sys.stderr)
-    data = bdl_get("v1/games", {"dates[]": game_date, "per_page": 100})
-    for g in data.get("data", []):
+    for g in raw:
         games.append({
-            "game_id":      g["id"],
-            "sgo_event_id": None,
-            "status":       g.get("status", ""),
-            "home_team":    g["home_team"]["abbreviation"],
-            "away_team":    g["visitor_team"]["abbreviation"],
+            "game_id": g["id"],
+            "status": g.get("status", ""),
+            "home_team": g["home_team"]["abbreviation"],
+            "away_team": g["visitor_team"]["abbreviation"],
             "home_team_id": g["home_team"]["id"],
             "away_team_id": g["visitor_team"]["id"],
-            "game_time":    g.get("datetime", g.get("status", "TBD")),
+            "game_time": g.get("datetime", g.get("status", "TBD")),
         })
     return games
 
@@ -544,72 +464,33 @@ def get_team_games(team_id: int, game_date: str, last_n: int = 10) -> list:
 
 
 def get_todays_odds(game_date: str) -> dict:
-    """Fetch betting odds for today's games via SGO. Falls back to BDL."""
-    odds_by_game = {}
-
-    # ── SGO primary ──
-    if SGO_KEY:
-        sgo_data = sgo_get("events", {
-            "leagueID": "NBA",
-            "startDate": game_date,
-            "endDate": game_date,
-            "oddsAvailable": "true",
-            "bookmakerID": "draftkings,fanduel,pinnacle",
-            "limit": 20,
-        })
-        for ev in sgo_data.get("data", []):
-            ev_id = ev.get("eventID", ev.get("id", ""))
-            teams = ev.get("teams", {})
-            h = teams.get("home", {}).get("teamID", "").replace("NBA_", "")
-            a = teams.get("away", {}).get("teamID", "").replace("NBA_", "")
-            odds = ev.get("odds", {})
-
-            # Spread
-            sp = odds.get("points-home-game-sp-home") or {}
-            total = odds.get("points-all-game-ou-over") or {}
-            ml_h = odds.get("points-home-game-ml-home") or {}
-            ml_a = odds.get("points-away-game-ml-away") or {}
-
-            odds_by_game[ev_id] = {
-                "vendor":           "draftkings",
-                "spread_home":      sp.get("bookSpread") or sp.get("fairSpread"),
-                "spread_away":      None,
-                "spread_home_odds": sp.get("bookOdds") or sp.get("fairOdds"),
-                "spread_away_odds": None,
-                "total":            total.get("bookLine") or total.get("fairLine"),
-                "total_over_odds":  total.get("bookOdds") or total.get("fairOdds"),
-                "total_under_odds": None,
-                "ml_home":          ml_h.get("bookOdds") or ml_h.get("fairOdds"),
-                "ml_away":          ml_a.get("bookOdds") or ml_a.get("fairOdds"),
-                "home_team":        h,
-                "away_team":        a,
-            }
-        if odds_by_game:
-            return odds_by_game
-
-    # ── BDL fallback ──
+    """Fetch betting odds for today's games. Returns dict keyed by game_id."""
     data = bdl_get("v2/odds", {"dates[]": game_date, "per_page": 100})
+    odds_by_game = {}
+    # Prefer DraftKings, fallback to FanDuel, then Caesars
     vendor_priority = ["draftkings", "fanduel", "caesars", "betmgm", "bet365"]
+
     for row in data.get("data", []):
         game_id = row.get("game_id")
         vendor = row.get("vendor", "")
         if game_id not in odds_by_game:
             odds_by_game[game_id] = {}
+        # Only overwrite if this vendor is higher priority
         current_vendor = odds_by_game[game_id].get("vendor", "")
         current_priority = vendor_priority.index(current_vendor) if current_vendor in vendor_priority else 99
         new_priority = vendor_priority.index(vendor) if vendor in vendor_priority else 99
         if new_priority < current_priority:
             odds_by_game[game_id] = {
-                "vendor":           vendor,
-                "spread_home":      row.get("spread_home_value"),
-                "spread_away":      row.get("spread_away_value"),
+                "vendor": vendor,
+                "spread_home": row.get("spread_home_value"),
+                "spread_away": row.get("spread_away_value"),
                 "spread_home_odds": row.get("spread_home_odds"),
                 "spread_away_odds": row.get("spread_away_odds"),
-                "total":            row.get("total_value"),
-                "total_over_odds":  row.get("total_over_odds"),
+                "total": row.get("total_value"),
+                "total_over_odds": row.get("total_over_odds"),
                 "total_under_odds": row.get("total_under_odds"),
-                "ml_home":          row.get("moneyline_home_odds"),
-                "ml_away":          row.get("moneyline_away_odds"),
+                "ml_home": row.get("moneyline_home_odds"),
+                "ml_away": row.get("moneyline_away_odds"),
             }
     return odds_by_game
 
@@ -933,7 +814,7 @@ def get_bdl_l10_three(team_id: int, game_date: str):
         return None
     params = [("per_page", 200)] + [("game_ids[]", gid) for gid in game_ids]
     try:
-        resp = requests.get(f"{BASE_URL}/nba/v1/game_stats", params=params, headers=HEADERS, timeout=8)
+        resp = requests.get(f"{BASE_URL}/nba/v1/game_stats", params=params, headers=HEADERS, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -3399,13 +3280,6 @@ def main():
         print(f"  📅 Date: {game_date}")
         print(f"  Fetching data...\n")
 
-    # Quick API health check before doing anything else
-    test = bdl_get("v1/games", {"dates[]": game_date, "per_page": 1})
-    if not test and not json_mode:
-        print("  ❌ BDL API not responding — check key/quota in GitHub Secrets")
-        print(f"     Key set: {'YES' if API_KEY else 'NO'}")
-        sys.exit(1)
-
     # Step 1: Get today's games
     games = get_todays_games(game_date)
     if not games:
@@ -3414,7 +3288,7 @@ def main():
             print(json.dumps({"error": msg, "date": game_date, "games": []}))
         else:
             print(f"  {msg}")
-        sys.exit(0)  # exit 0 so workflow doesn't fail on off-days
+        sys.exit(0)
 
     if team_filter:
         games = [g for g in games if team_filter in (g["home_team"], g["away_team"])]
@@ -3499,8 +3373,7 @@ def main():
     # Step 3: Build profiles and calculate edges
     all_results = []
 
-    # Build profiles in parallel — each game is independent
-    def process_game(game):
+    for game in games:
         home_abbrev = game["home_team"]
         away_abbrev = game["away_team"]
         home_id = game["home_team_id"]
@@ -3727,142 +3600,27 @@ PROP_TYPE_LABELS = {
 PROPS_MIN_SCORE = 55
 
 
-# SGO statID → our prop_type mapping
-SGO_STAT_TO_PROP = {
-    "points":                   "points",
-    "rebounds":                 "rebounds",
-    "assists":                  "assists",
-    "blocks":                   "blocks",
-    "steals":                   "steals",
-    "turnovers":                "turnovers",
-    "threes":                   "three_pointers_made",
-    "fg3m":                     "three_pointers_made",
-    "three_pointers_made":      "three_pointers_made",
-    "pra":                      "points_rebounds_assists",
-    "pointsreboundsassists":    "points_rebounds_assists",
-    "pr":                       "points_rebounds",
-    "pointsrebounds":           "points_rebounds",
-    "pa":                       "points_assists",
-    "pointsassists":            "points_assists",
-    "ra":                       "rebounds_assists",
-    "reboundsassists":          "rebounds_assists",
-}
-
-def get_player_props_for_game(game_id: str) -> list:
-    """Fetch player props from SGO for a given event ID."""
-    if not SGO_KEY:
-        return []
-
-    # Use cached event from get_todays_games (already has full odds)
-    event = _SGO_EVENT_CACHE.get(game_id)
-
-    if not event:
-        # Fallback: fetch directly
-        data = sgo_get("events", {"eventID": game_id, "limit": 1})
-        events = data.get("data", [])
-        event = events[0] if events else None
-
-    if not event:
-        return []
-
-    odds = event.get("odds", {})
-    if not odds:
-        print(f"  SGO event {game_id}: no odds returned (keys: {list(event.keys())[:8]})", file=sys.stderr)
-        return []
-
-    # Debug: print a few sample odd IDs to understand the format
-    sample_keys = list(odds.keys())[:5]
-    if sample_keys:
-        print(f"  SGO sample oddIDs: {sample_keys}", file=sys.stderr)
-
-    props = []
-    for odd_id, odd_data in odds.items():
-        if not isinstance(odd_data, dict):
-            continue
-
-        # SGO oddID format: statID-statEntityID-periodID-betTypeID-sideID
-        # SGO oddID: statID-ENTITY-periodID-betTypeID-sideID
-        # Parse from ends to handle hyphens in names (DE-AARON_FOX)
-        parts = odd_id.split("-")
-        if len(parts) < 5:
-            continue
-
-        stat_id   = parts[0]
-        side_id   = parts[-1]
-        bet_type  = parts[-2]
-        period_id = parts[-3]
-        entity_id = "-".join(parts[1:-3])  # everything between stat and period
-
-        if bet_type != "ou" or period_id != "game" or side_id != "over":
-            continue
-
-        prop_type = SGO_STAT_TO_PROP.get(stat_id.lower())
-        if not prop_type:
-            continue
-
-        # Skip team entities; player entities end with _1_NBA, _2_NBA etc
-        if entity_id.lower() in ("home", "away", "all", "") or not entity_id:
-            continue
-        if "_NBA" not in entity_id.upper():
-            continue  # not a player prop
-
-        line = odd_data.get("bookLine") or odd_data.get("fairLine")
-        if not line:
-            continue
-
-        under_key  = odd_id.replace("-over", "-under")
-        over_odds  = odd_data.get("bookOdds") or odd_data.get("fairOdds")
-        under_odds = (odds.get(under_key) or {}).get("bookOdds") or (odds.get(under_key) or {}).get("fairOdds")
-
-        # Clean name: LEBRON_JAMES_1_NBA → LeBron James
-        clean = entity_id
-        import re as _re
-        clean = _re.sub(r'_\d+_NBA$', '', clean, flags=_re.IGNORECASE)
-        player_name = clean.replace("_", " ").title()
-
-        props.append({
-            "game_id":     game_id,
-            "player_id":   entity_id,
-            "player_name": player_name,
-            "prop_type":   prop_type,
-            "line_value":  float(line),
-            "vendor":      "draftkings",
-            "market": {
-                "type":       "over_under",
-                "over_odds":  over_odds,
-                "under_odds": under_odds,
-            },
-        })
-
-    return props
+def get_player_props_for_game(game_id: int) -> list:
+    data = bdl_get("v2/odds/player_props", {"game_id": game_id})
+    return data.get("data", [])
 
 
 def get_player_season_averages(player_ids: list, season: int = 2025) -> dict:
-    """Fetch season averages. Handles both BDL int IDs and SGO entity IDs."""
+    """
+    Fetch season averages one player at a time using v1/season_averages.
+    BDL does not support bulk player_ids[] on this endpoint.
+    Only fetches starters/rotation players (skips bench/two-way IDs with no averages).
+    """
     if not player_ids:
         return {}
     averages = {}
     for pid in player_ids:
-        actual_pid = pid
-        # SGO entity ID (like LEBRON_JAMES) — resolve to BDL ID via name search
-        if isinstance(pid, str) and not str(pid).isdigit():
-            player_name = pid.replace("_", " ").title()
-            parts = player_name.split()
-            if len(parts) >= 2:
-                search = bdl_get("v1/players", {"search": parts[-1], "per_page": 10})
-                for p in search.get("data", []):
-                    full = f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()
-                    if player_name.lower() in full or parts[0].lower() in full:
-                        actual_pid = p["id"]
-                        break
-        if actual_pid == pid and isinstance(pid, str) and not str(pid).isdigit():
-            continue  # could not resolve
-        data = bdl_get("v1/season_averages", {"season": season, "player_id": actual_pid})
+        data = bdl_get("v1/season_averages", {"season": season, "player_id": pid})
         for row in data.get("data", []):
-            if row.get("player_id"):
-                averages[pid] = row  # key by original pid
+            row_pid = row.get("player_id")
+            if row_pid:
+                averages[row_pid] = row
     return averages
-
 
 
 def get_player_last10_stats(player_ids: list, season: int = 2025) -> dict:
@@ -3940,17 +3698,12 @@ def get_player_last10_stats(player_ids: list, season: int = 2025) -> dict:
 
 
 def get_player_info(player_ids: list) -> dict:
-    """Get player info. Handles both BDL int IDs and SGO entity IDs (LEBRON_JAMES)."""
     if not player_ids:
         return {}
     info = {}
-    bdl_ids = [p for p in player_ids if str(p).isdigit()]
-    sgo_ids = [p for p in player_ids if not str(p).isdigit()]
-
-    # BDL integer IDs
     chunk_size = 25
-    for i in range(0, len(bdl_ids), chunk_size):
-        chunk = bdl_ids[i:i + chunk_size]
+    for i in range(0, len(player_ids), chunk_size):
+        chunk = player_ids[i:i + chunk_size]
         params = [("per_page", 100)]
         for pid in chunk:
             params.append(("ids[]", pid))
@@ -3966,30 +3719,6 @@ def get_player_info(player_ids: list) -> dict:
                 "pos":     p.get("position", ""),
                 "team_id": team.get("id"),
             }
-
-    # SGO entity IDs — search BDL by name
-    for entity_id in sgo_ids:
-        player_name = entity_id.replace("_", " ").title()
-        parts = player_name.split()
-        found = None
-        if len(parts) >= 2:
-            search = bdl_get("v1/players", {"search": parts[-1], "per_page": 10})
-            for p in search.get("data", []):
-                full = f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()
-                if player_name.lower() in full or parts[0].lower() in full:
-                    found = p
-                    break
-        if found:
-            team = found.get("team", {})
-            info[entity_id] = {
-                "name":    f"{found.get('first_name','')} {found.get('last_name','')}".strip(),
-                "team":    team.get("abbreviation", ""),
-                "pos":     found.get("position", ""),
-                "team_id": team.get("id"),
-                "bdl_id":  found.get("id"),
-            }
-        else:
-            info[entity_id] = {"name": player_name, "team": "", "pos": "", "team_id": None}
     return info
 
 
@@ -4076,19 +3805,6 @@ def build_props_slate(games: list, all_stats: dict, todays_injuries: dict, game_
     from collections import defaultdict
 
     print(f"  Fetching props...", end=" ", flush=True)
-
-    # ── Populate SGO event cache if empty (push_to_supabase calls this fresh) ──
-    if SGO_KEY and not _SGO_EVENT_CACHE:
-        sgo_resp = sgo_get("events", {
-            "leagueID": "NBA",
-            "startDate": game_date,
-            "endDate":   game_date,
-            "limit":     20,
-        })
-        for ev in sgo_resp.get("data", []):
-            ev_id = ev.get("eventID", ev.get("id", ""))
-            if ev_id:
-                _SGO_EVENT_CACHE[ev_id] = ev
 
     all_raw_props = []
     game_map = {}

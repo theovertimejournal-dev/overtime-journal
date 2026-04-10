@@ -45,6 +45,20 @@ API_KEY = os.environ.get("BALLDONTLIE_API_KEY", "")
 BASE_URL = "https://api.balldontlie.io"
 HEADERS = {"Authorization": API_KEY}
 
+SGO_KEY     = os.environ.get("SPORTSGAMEODDS_API_KEY", "")
+SGO_BASE    = "https://api.sportsgameodds.com/v2"
+SGO_HEADERS = {"X-Api-Key": SGO_KEY}
+
+def sgo_get(endpoint, params=None):
+    if not SGO_KEY: return {}
+    try:
+        r = requests.get(f"{SGO_BASE}/{endpoint}", params=params, headers=SGO_HEADERS, timeout=10)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        print(f"  ⚠ SGO ({endpoint}): {e}", file=sys.stderr)
+        return {}
+
 # NOTE: API key validation moved to main() so this file is safe to import
 # from other scripts without triggering sys.exit at module load time.
 

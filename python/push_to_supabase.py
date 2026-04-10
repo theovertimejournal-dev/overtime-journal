@@ -285,8 +285,8 @@ if slate_id:
             "game_time": game.get("game_time", ""),
             "sport": SPORT,
             "date": game_date,
-            "away_team": game.get("away", {}).get("team", ""),
-            "home_team": game.get("home", {}).get("team", ""),
+            "away_team": game.get("away", {}).get("team", "").replace("_NBA",""),
+            "home_team": game.get("home", {}).get("team", "").replace("_NBA",""),
             "away_data": game.get("away", {}),
             "home_data": game.get("home", {}),
             "edge_data": game.get("edge", {}),
@@ -338,8 +338,10 @@ if slate_id:
 
 FINAL_STATUSES = {"final", "completed", "complete", "f", "ft", "game over", "official", "post"}
 
-def game_is_over(status: str) -> bool:
-    return bool(status) and status.strip().lower() in FINAL_STATUSES
+def game_is_over(status) -> bool:
+    if not status: return False
+    s = status if isinstance(status, str) else status.get("long", status.get("short", "")) if isinstance(status, dict) else str(status)
+    return s.strip().lower() in FINAL_STATUSES
 
 def log_odds_history(games: list, slate_id):
     print(f"\n⏳ Logging odds history...")

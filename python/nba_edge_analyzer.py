@@ -169,7 +169,7 @@ _SGO_ODDS_CACHE = {}
 def get_todays_games(game_date: str) -> list:
     global _SGO_ODDS_CACHE
     if SGO_KEY:
-        sgo = sgo_get("events", {"leagueID": "NBA", "startDate": game_date, "endDate": game_date, "limit": 20})
+        sgo = sgo_get("events", {"leagueID": "NBA", "startDate": game_date, "endDate": game_date, "limit": 30})
         events = sgo.get("data", [])
         if events:
             team_map = _get_bdl_team_map()
@@ -525,11 +525,20 @@ def get_todays_odds(game_date: str) -> dict:
     odds_by_game = {}
     for gid, sgo_odds in _SGO_ODDS_CACHE.items():
         if not sgo_odds: continue
-        sp   = sgo_odds.get("points-home-game-sp-home") or {}
-        tot  = sgo_odds.get("points-all-game-ou-over") or {}
-        ml_h = sgo_odds.get("points-home-game-ml-home") or {}
-        ml_a = sgo_odds.get("points-away-game-ml-away") or {}
+        # Try multiple oddID formats SGO uses
+        sp = (sgo_odds.get("points-home-game-sp-home") or
+              sgo_odds.get("points-home-reg-sp-home") or {})
+        tot = (sgo_odds.get("points-all-game-ou-over") or
+               sgo_odds.get("points-all-reg-ou-over") or {})
+        ml_h = (sgo_odds.get("points-home-game-ml-home") or
+                sgo_odds.get("points-home-reg-ml-home") or {})
+        ml_a = (sgo_odds.get("points-away-game-ml-away") or
+                sgo_odds.get("points-away-reg-ml-away") or {})
         sh = sp.get("bookSpread") or sp.get("fairSpread")
+        # Debug: if still no odds, show available keys
+        if not sh and sgo_odds:
+            sample = [k for k in list(sgo_odds.keys())[:6] if "sp" in k or "ml" in k]
+            print(f"  ⚠ No spread for {gid} — sample keys: {list(sgo_odds.keys())[:5]}", file=sys.stderr)
         odds_by_game[gid] = {
             "vendor": "draftkings",
             "spread_home": sh, "spread_away": -float(sh) if sh else None,

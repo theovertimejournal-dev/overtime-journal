@@ -85,10 +85,22 @@ def bdl_get(endpoint: str, params: dict = None) -> dict:
     url = f"{BASE_URL}/{endpoint}"
     try:
         resp = requests.get(url, params=params, headers=HEADERS, timeout=8)
+        if resp.status_code == 401:
+            print(f"  ❌ BDL API key invalid or expired (401)", file=sys.stderr)
+            return {}
+        if resp.status_code == 429:
+            print(f"  ❌ BDL rate limit hit (429) — monthly quota may be exhausted", file=sys.stderr)
+            return {}
+        if resp.status_code == 402:
+            print(f"  ❌ BDL payment required (402) — subscription issue", file=sys.stderr)
+            return {}
         resp.raise_for_status()
         return resp.json()
+    except requests.exceptions.Timeout:
+        print(f"  ⚠ BDL timeout ({endpoint})", file=sys.stderr)
+        return {}
     except Exception as e:
-        print(f"  ⚠ API error ({endpoint}): {e}", file=sys.stderr)
+        print(f"  ⚠ BDL API error ({endpoint}): {e}", file=sys.stderr)
         return {}
 
 
@@ -3262,6 +3274,13 @@ def main():
         print("=" * 60)
         print(f"  📅 Date: {game_date}")
         print(f"  Fetching data...\n")
+
+    # Quick API health check before doing anything else
+    test = bdl_get("v1/games", {"dates[]": game_date, "per_page": 1})
+    if not test and not json_mode:
+        print("  ❌ BDL API not responding — check key/quota in GitHub Secrets")
+        print(f"     Key set: {'YES' if API_KEY else 'NO'}")
+        sys.exit(1)
 
     # Step 1: Get today's games
     games = get_todays_games(game_date)

@@ -18,6 +18,7 @@ Usage:
 import sys
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 from datetime import datetime, timedelta
 
@@ -67,7 +68,7 @@ def tank01_get(endpoint: str, params: dict = None) -> dict:
         return {}
     url = f"{TANK01_BASE_URL}/{endpoint}"
     try:
-        resp = requests.get(url, params=params, headers=TANK01_HEADERS, timeout=20)
+        resp = requests.get(url, params=params, headers=TANK01_HEADERS, timeout=8)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
@@ -83,7 +84,7 @@ def bdl_get(endpoint: str, params: dict = None) -> dict:
     """Safe request to Balldontlie API."""
     url = f"{BASE_URL}/{endpoint}"
     try:
-        resp = requests.get(url, params=params, headers=HEADERS, timeout=20)
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=8)
         resp.raise_for_status()
         return resp.json()
     except Exception as e:
@@ -110,7 +111,7 @@ def espn_get_yesterday_teams(game_date: str) -> tuple:
         espn_date = yesterday_dt.strftime("%Y%m%d")
 
         url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={espn_date}"
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=8)
         resp.raise_for_status()
         data = resp.json()
 
@@ -259,7 +260,7 @@ def get_nba_fast_break_stats(season_str: str = "2025-26") -> dict:
             "SeasonType": "Regular Season",
             "LeagueID": "00",
         }
-        resp = _req.get(url, params=params, headers=headers, timeout=15)
+        resp = _req.get(url, params=params, headers=headers, timeout=8)
         resp.raise_for_status()
         data = resp.json()
         
@@ -296,7 +297,7 @@ def get_nba_fast_break_stats(season_str: str = "2025-26") -> dict:
             "LeagueID": "00",
         }
         try:
-            resp2 = _req.get(opp_url, params=opp_params2, headers=headers, timeout=15)
+            resp2 = _req.get(opp_url, params=opp_params2, headers=headers, timeout=8)
             resp2.raise_for_status()
             data2 = resp2.json()
             # This endpoint doesn't have FB pts allowed directly
@@ -308,7 +309,7 @@ def get_nba_fast_break_stats(season_str: str = "2025-26") -> dict:
         opp_resp = _req.get(url, params={
             **params,
             "MeasureType": "Scoring",
-        }, headers=headers, timeout=15)
+        }, headers=headers, timeout=8)
 
     except Exception as e:
         print(f"  ⚠ NBA fast break stats failed: {e} — using static fallback", file=__import__('sys').stderr)
@@ -485,7 +486,7 @@ def get_todays_injuries(game_date: str, team_ids: list) -> dict:
     params = [("per_page", 100)] + [("team_ids[]", tid) for tid in team_ids]
     injury_data = {}
     try:
-        resp = requests.get(f"{BASE_URL}/v1/player_injuries", params=params, headers=HEADERS, timeout=20)
+        resp = requests.get(f"{BASE_URL}/v1/player_injuries", params=params, headers=HEADERS, timeout=8)
         resp.raise_for_status()
         injury_data = resp.json()
     except Exception as e:
@@ -796,7 +797,7 @@ def get_bdl_l10_three(team_id: int, game_date: str):
         return None
     params = [("per_page", 200)] + [("game_ids[]", gid) for gid in game_ids]
     try:
-        resp = requests.get(f"{BASE_URL}/nba/v1/game_stats", params=params, headers=HEADERS, timeout=25)
+        resp = requests.get(f"{BASE_URL}/nba/v1/game_stats", params=params, headers=HEADERS, timeout=8)
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
@@ -3267,10 +3268,10 @@ def main():
     if not games:
         msg = f"No games found for {game_date}."
         if json_mode:
-            print(json.dumps({"error": msg, "date": game_date}))
+            print(json.dumps({"error": msg, "date": game_date, "games": []}))
         else:
             print(f"  {msg}")
-        return
+        sys.exit(0)  # exit 0 so workflow doesn't fail on off-days
 
     if team_filter:
         games = [g for g in games if team_filter in (g["home_team"], g["away_team"])]
@@ -3355,7 +3356,8 @@ def main():
     # Step 3: Build profiles and calculate edges
     all_results = []
 
-    for game in games:
+    # Build profiles in parallel — each game is independent
+    def process_game(game):
         home_abbrev = game["home_team"]
         away_abbrev = game["away_team"]
         home_id = game["home_team_id"]

@@ -174,10 +174,49 @@ def get_todays_games(game_date: str) -> list:
         if events:
             team_map = _get_bdl_team_map()
             games = []
+            seen = set()  # deduplicate
+
+            # SGO teamID → BDL abbreviation map
+            SGO_ABBREV = {
+                "ATLANTA_HAWKS_NBA": "ATL", "BOSTON_CELTICS_NBA": "BOS",
+                "BROOKLYN_NETS_NBA": "BKN", "CHARLOTTE_HORNETS_NBA": "CHA",
+                "CHICAGO_BULLS_NBA": "CHI", "CLEVELAND_CAVALIERS_NBA": "CLE",
+                "DALLAS_MAVERICKS_NBA": "DAL", "DENVER_NUGGETS_NBA": "DEN",
+                "DETROIT_PISTONS_NBA": "DET", "GOLDEN_STATE_WARRIORS_NBA": "GSW",
+                "HOUSTON_ROCKETS_NBA": "HOU", "INDIANA_PACERS_NBA": "IND",
+                "LA_CLIPPERS_NBA": "LAC", "LOS_ANGELES_LAKERS_NBA": "LAL",
+                "MEMPHIS_GRIZZLIES_NBA": "MEM", "MIAMI_HEAT_NBA": "MIA",
+                "MILWAUKEE_BUCKS_NBA": "MIL", "MINNESOTA_TIMBERWOLVES_NBA": "MIN",
+                "NEW_ORLEANS_PELICANS_NBA": "NOP", "NEW_YORK_KNICKS_NBA": "NYK",
+                "OKLAHOMA_CITY_THUNDER_NBA": "OKC", "ORLANDO_MAGIC_NBA": "ORL",
+                "PHILADELPHIA_76ERS_NBA": "PHI", "PHOENIX_SUNS_NBA": "PHX",
+                "PORTLAND_TRAIL_BLAZERS_NBA": "POR", "SACRAMENTO_KINGS_NBA": "SAC",
+                "SAN_ANTONIO_SPURS_NBA": "SAS", "TORONTO_RAPTORS_NBA": "TOR",
+                "UTAH_JAZZ_NBA": "UTA", "WASHINGTON_WIZARDS_NBA": "WAS",
+            }
+
+            def clean_abbr(raw):
+                # Try direct map first
+                if raw in SGO_ABBREV:
+                    return SGO_ABBREV[raw]
+                # Strip NBA_ prefix (NBA_BOS → BOS)
+                if raw.startswith("NBA_"):
+                    return raw[4:]
+                # Strip _NBA suffix (BOS_NBA → BOS)
+                if raw.endswith("_NBA"):
+                    return raw[:-4]
+                return raw
+
             for ev in events:
                 teams = ev.get("teams", {})
-                h = teams.get("home", {}).get("teamID", "").replace("NBA_", "")
-                a = teams.get("away", {}).get("teamID", "").replace("NBA_", "")
+                h_raw = teams.get("home", {}).get("teamID", "")
+                a_raw = teams.get("away", {}).get("teamID", "")
+                h = clean_abbr(h_raw)
+                a = clean_abbr(a_raw)
+                matchup_key = f"{a}@{h}"
+                if matchup_key in seen:
+                    continue  # skip duplicate
+                seen.add(matchup_key)
                 ev_id = ev.get("eventID", ev.get("id", ""))
                 _SGO_ODDS_CACHE[ev_id] = ev.get("odds", {})
                 games.append({
@@ -3593,9 +3632,10 @@ PROP_TYPE_LABELS = {
 PROPS_MIN_SCORE = 55
 
 
-def get_player_props_for_game(game_id: int) -> list:
-    data = bdl_get("v2/odds/player_props", {"game_id": game_id})
-    return data.get("data", [])
+def get_player_props_for_game(game_id) -> list:
+    # SGO game IDs are strings — BDL props need integer IDs
+    # Props via SGO to be implemented separately
+    return []
 
 
 def get_player_season_averages(player_ids: list, season: int = 2025) -> dict:

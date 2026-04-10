@@ -51,6 +51,9 @@ SGO_KEY = os.environ.get("SPORTSGAMEODDS_API_KEY", "")
 SGO_BASE = "https://api.sportsgameodds.com/v2"
 SGO_HEADERS = {"X-Api-Key": SGO_KEY}
 
+# Cache of eventID → full event object (populated by get_todays_games)
+_SGO_EVENT_CACHE = {}
+
 def sgo_get(endpoint: str, params: dict = None) -> dict:
     """Safe request to SGO API."""
     if not SGO_KEY:
@@ -220,9 +223,11 @@ def get_todays_games(game_date: str) -> list:
                 # SGO teamID format is like "NBA_BOS" — strip the prefix
                 h_abbr = h_abbr.replace("NBA_", "")
                 a_abbr = a_abbr.replace("NBA_", "")
+                ev_id = ev.get("eventID", ev.get("id", ""))
+                _SGO_EVENT_CACHE[ev_id] = ev  # cache full event with odds
                 games.append({
-                    "game_id":      ev.get("eventID", ev.get("id", "")),
-                    "sgo_event_id": ev.get("eventID", ev.get("id", "")),
+                    "game_id":      ev_id,
+                    "sgo_event_id": ev_id,
                     "status":       ev.get("status", ""),
                     "home_team":    h_abbr,
                     "away_team":    a_abbr,
@@ -3748,32 +3753,14 @@ def get_player_props_for_game(game_id: str) -> list:
     if not SGO_KEY:
         return []
 
-    # Fetch this specific event with all odds including player props
-    data = sgo_get("events", {
-        "eventID": game_id,
-        "limit": 1,
-    })
+    # Use cached event from get_todays_games (already has full odds)
+    event = _SGO_EVENT_CACHE.get(game_id)
 
-    # Fallback: fetch all today's NBA events and find this one
-    if not data.get("data"):
-        data = sgo_get("events", {
-            "leagueID": "NBA",
-            "limit": 20,
-        })
-
-    events = data.get("data", [])
-    if not events:
-        return []
-
-    # Find our specific event
-    event = None
-    for ev in events:
-        if ev.get("eventID") == game_id or ev.get("id") == game_id:
-            event = ev
-            break
-
-    if not event and len(events) == 1:
-        event = events[0]
+    if not event:
+        # Fallback: fetch directly
+        data = sgo_get("events", {"eventID": game_id, "limit": 1})
+        events = data.get("data", [])
+        event = events[0] if events else None
 
     if not event:
         return []

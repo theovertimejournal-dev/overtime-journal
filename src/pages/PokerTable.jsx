@@ -84,7 +84,7 @@ function Card({ card, faceDown = false, small = false }) {
               🪙 ADD CHIPS
             </div>
             <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
-              Current stack: {(myPlayer?.chips || 0).toLocaleString()} OTJ
+              Current stack: {(seats?.[mySeat]?.chips || 0).toLocaleString()} OTJ
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -797,7 +797,9 @@ export default function PokerTable() {
           </div>
         </div>
         {/* Rebuy button — show when seated and chips are low */}
-        {myPlayer && myPlayer.chips < (gameState?.blinds?.[1] || 10) * 10 && (
+        {(() => {
+          const _myPlayer = mySeat != null ? seats?.[mySeat] : null;
+          return _myPlayer && _myPlayer.chips < (gameState?.blinds?.[1] || 10) * 10 && (
           <button
             onClick={() => { setRebuyAmount(buyIn || 1000); setShowRebuy(true); }}
             style={{
@@ -810,7 +812,8 @@ export default function PokerTable() {
           >
             + REBUY
           </button>
-        )}
+          );
+        })()}
 
         <button onClick={handleLeaveTable} style={{
           padding: '6px 14px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.3)',

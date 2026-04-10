@@ -71,7 +71,7 @@ print("⏳ Running NBA edge analyzer...")
 try:
     result = subprocess.run(
         [sys.executable, str(ANALYZER_SCRIPT), "--json", f"--date={game_date}"],
-        capture_output=True, text=True, timeout=120
+        capture_output=True, text=True, timeout=300
     )
     if result.returncode != 0:
         print(f"❌ Analyzer error:\n{result.stderr}")
@@ -447,4 +447,3 @@ print(f"\n{'=' * 60}")
 print(f"  ✅ OTJ push complete for {game_date}")
 print(f"  Live at: overtimejournal.com/nba")
 print(f"{'=' * 60}\n")
-

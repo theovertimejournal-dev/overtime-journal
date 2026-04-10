@@ -132,11 +132,11 @@ function Hand({ hand, isActive, small = false }) {
 // ── Seat positions (arc along bottom) ────────────────────────────────────────
 
 const SEAT_POSITIONS = [
-  { bottom: '8%', left: '8%'  },
-  { bottom: '8%', left: '27%' },
+  { bottom: '8%', left: '10%' },
+  { bottom: '8%', left: '30%' },
   { bottom: '8%', left: '50%' },
-  { bottom: '8%', left: '73%' },
-  { bottom: '8%', left: '92%' },
+  { bottom: '8%', left: '70%' },
+  { bottom: '8%', left: '90%' },
 ];
 
 // ── Chip selector ─────────────────────────────────────────────────────────────
@@ -1277,6 +1277,70 @@ function HandHistoryPanel({ history, onClose }) {
   );
 }
 
+
+// ── Insurance Modal ───────────────────────────────────────────────────────────
+
+function InsuranceModal({ myBet, timer, timeLimit, onTake, onDecline }) {
+  const maxInsurance = Math.floor((myBet || 0) / 2);
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 280 }} />
+      <div style={{
+        position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
+        zIndex: 281, background: '#0a0e14',
+        border: `1px solid ${GOLD}55`, borderRadius: 16,
+        padding: '22px 24px', width: 300, fontFamily: FONT,
+        boxShadow: `0 20px 60px rgba(0,0,0,0.9)`,
+        textAlign: 'center',
+      }}>
+        {/* Ace icon */}
+        <div style={{ fontSize: 36, marginBottom: 8 }}>🂡</div>
+
+        <div style={{ fontSize: 13, fontWeight: 800, color: '#f1f5f9', letterSpacing: '0.05em', marginBottom: 4 }}>
+          INSURANCE?
+        </div>
+        <div style={{ fontSize: 9, color: '#4a5568', fontFamily: FONT, marginBottom: 16, lineHeight: 1.6 }}>
+          Dealer shows an Ace. Pay {maxInsurance.toLocaleString()} OTJ<br/>
+          to insure against dealer blackjack.<br/>
+          Pays <span style={{ color: GOLD, fontWeight: 700 }}>2 to 1</span> if dealer has blackjack.
+        </div>
+
+        {/* Timer bar */}
+        <div style={{ height: 3, background: 'rgba(255,255,255,0.06)', borderRadius: 2, marginBottom: 16, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: 2,
+            background: timer <= 3 ? '#ef4444' : GOLD,
+            width: `${(timer / timeLimit) * 100}%`,
+            transition: 'width 1s linear, background 0.3s',
+          }} />
+        </div>
+        <div style={{ fontSize: 9, color: timer <= 3 ? '#ef4444' : '#4a5568', fontFamily: FONT, marginBottom: 16 }}>
+          {timer}s to decide
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onDecline} style={{
+            flex: 1, padding: '11px', borderRadius: 8, cursor: 'pointer',
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+            color: '#6b7280', fontSize: 11, fontWeight: 700, fontFamily: FONT,
+          }}>
+            NO THANKS
+          </button>
+          <button onClick={() => onTake(maxInsurance)} style={{
+            flex: 1, padding: '11px', borderRadius: 8, cursor: 'pointer',
+            background: `linear-gradient(135deg, ${GOLD}, #a07828)`,
+            border: 'none', color: '#000', fontSize: 11, fontWeight: 900, fontFamily: FONT,
+            boxShadow: `0 4px 16px ${GOLD}44`,
+          }}>
+            INSURE {maxInsurance.toLocaleString()}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function BlackjackTable() {
@@ -1298,7 +1362,9 @@ export default function BlackjackTable() {
   const [betLocked, setBetLocked]       = useState(false);
   const [payoutResults, setPayoutResults] = useState(null);
   const [emojiTarget, setEmojiTarget]   = useState(null);
-  const [cutCardUI, setCutCardUI]       = useState(null); // { deckSize, minCut, maxCut, timeLimit, cutterName }
+  const [cutCardUI, setCutCardUI]       = useState(null);
+  const [insuranceUI, setInsuranceUI]   = useState(null); // { timeLimit, dealerUpCard, timer }
+  const [insuranceTimer, setInsuranceTimer] = useState(0); // { deckSize, minCut, maxCut, timeLimit, cutterName }
   const [cutPosition, setCutPosition]   = useState(0);
   const [cutTimer, setCutTimer]         = useState(0);
   const [cutPending, setCutPending]     = useState(null); // { cutterName } for spectators
@@ -1388,7 +1454,7 @@ export default function BlackjackTable() {
         room.onMessage('bet_timer',       ({ timeLeft }) => mounted && setBetTimer(timeLeft));
         room.onMessage('turn_change',     ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
         room.onMessage('turn_timer',      ({ timeLeft }) => mounted && setTurnTimer(timeLeft));
-        room.onMessage('new_round', () => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([]), setCutPending(null), setZoomReaction(null)));
+        room.onMessage('new_round', () => mounted && (setCurrentBet(0), setBetLocked(false), setTurnTimer(null), setBetTimer(20), setPayoutResults(null), setDealerMood('idle'), setCardProjectiles([]), setCutPending(null), setZoomReaction(null), setInsuranceUI(null)));
         // payout_results handled above with dealer mood
         room.onMessage('chat_message',    msg => mounted && setChatMessages(p => [...p.slice(-99), msg]));
         room.onMessage('emoji_reaction',  ({ fromSeat, toSeat, emoji }) => {
@@ -1477,6 +1543,21 @@ export default function BlackjackTable() {
               return t - 1;
             });
           }, 1000);
+        });
+
+        room.onMessage('insurance_offered', ({ timeLimit, dealerUpCard }) => {
+          if (!mounted) return;
+          setInsuranceUI({ timeLimit, dealerUpCard });
+          setInsuranceTimer(timeLimit);
+          const iv = setInterval(() => {
+            setInsuranceTimer(t => {
+              if (t <= 1) { clearInterval(iv); setInsuranceUI(null); return 0; }
+              return t - 1;
+            });
+          }, 1000);
+        });
+        room.onMessage('insurance_resolved', () => {
+          if (mounted) setInsuranceUI(null);
         });
 
         room.onMessage('cut_card_pending', ({ cutterName }) => {
@@ -1689,20 +1770,6 @@ export default function BlackjackTable() {
           </div>
         )}
 
-        {/* MY hand — always centered on table regardless of seat position */}
-        {me?.hands?.length > 0 && (
-          <div style={{
-            position: 'absolute', bottom: '22%', left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-            zIndex: 5, pointerEvents: 'none',
-          }}>
-            {me.hands.map((hand, hi) => (
-              <Hand key={hi} hand={hand} isActive={isMyTurn && hi === me.activeHand} />
-            ))}
-          </div>
-        )}
-
         {/* Phase label */}
         {phase && phase !== 'betting' && (
           <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translateX(-50%)', fontSize: 9, color: `${GOLD}55`, letterSpacing: '0.2em', fontFamily: FONT }}>
@@ -1710,11 +1777,12 @@ export default function BlackjackTable() {
           </div>
         )}
 
-        {/* Player seats */}
+        {/* Player seats — each gets a dedicated 20% column */}
         {seats?.map((seat, i) => {
-          const pos    = SEAT_POSITIONS[i];
           const isMe   = mySeat !== -1 && i === mySeat;
           const myTurn = i === currentSeat && phase === 'player_turn';
+          const someonesTurn = phase === 'player_turn' && currentSeat !== -1;
+          const dimmed = someonesTurn && !myTurn && seat;
           return (
             <div key={i}
               onClick={() => {
@@ -1722,11 +1790,14 @@ export default function BlackjackTable() {
                 else if (i !== mySeat) { setEmojiTarget(i); }
               }}
               style={{
-                position: 'absolute', bottom: pos.bottom, left: pos.left,
-                transform: 'translateX(-50%)',
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                position: 'absolute',
+                bottom: 0, left: `${i * 20}%`, width: '20%', height: '90%',
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                justifyContent: 'flex-end', paddingBottom: '6%', gap: 3,
                 cursor: (!seat && !isSeated) || (seat && i !== mySeat) ? 'pointer' : 'default',
                 zIndex: myTurn ? 6 : 3,
+                opacity: dimmed ? 0.45 : 1,
+                transition: 'opacity 0.3s ease',
               }}
             >
               {!seat ? (
@@ -1737,15 +1808,19 @@ export default function BlackjackTable() {
                 >SIT</div>
               ) : (
                 <>
-                  {/* Hands — MY hands render centered via absolute overlay, others small at seat */}
-                  {seat.hands?.length > 0 && !isMe && (
+                  {/* Hands — contained in seat column, mine full size others scaled */}
+                  {seat.hands?.length > 0 && (
                     <div style={{
                       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
-                      marginBottom: 3, maxWidth: 100,
+                      marginBottom: 4, width: '100%',
                     }}>
                       {seat.hands.map((hand, hi) => (
-                        <div key={hi} style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                          <Hand hand={hand} isActive={myTurn && hi === seat.activeHand} small />
+                        <div key={hi} style={{
+                          display: 'flex', gap: 2, justifyContent: 'center', width: '100%',
+                          transform: isMe ? 'scale(0.95)' : 'scale(0.65)',
+                          transformOrigin: 'bottom center',
+                        }}>
+                          <Hand hand={hand} isActive={(isMe ? isMyTurn : myTurn) && hi === seat.activeHand} small={!isMe} />
                         </div>
                       ))}
                     </div>
@@ -1832,6 +1907,23 @@ export default function BlackjackTable() {
       )}
 
 
+
+      {/* Insurance modal */}
+      {insuranceUI && isSeated && (
+        <InsuranceModal
+          myBet={me?.bet || 0}
+          timer={insuranceTimer}
+          timeLimit={insuranceUI.timeLimit}
+          onTake={(amount) => {
+            send('insurance', { amount });
+            setInsuranceUI(null);
+          }}
+          onDecline={() => {
+            send('insurance', { amount: 0 });
+            setInsuranceUI(null);
+          }}
+        />
+      )}
 
       {/* Hand history panel */}
       {showHistory && (

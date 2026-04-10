@@ -3722,27 +3722,137 @@ PROP_TYPE_LABELS = {
 PROPS_MIN_SCORE = 55
 
 
-def get_player_props_for_game(game_id: int) -> list:
-    data = bdl_get("v2/odds/player_props", {"game_id": game_id})
-    return data.get("data", [])
+# SGO statID → our prop_type mapping
+SGO_STAT_TO_PROP = {
+    "points":          "points",
+    "rebounds":        "rebounds",
+    "assists":         "assists",
+    "blocks":          "blocks",
+    "steals":          "steals",
+    "turnovers":       "turnovers",
+    "threes":          "three_pointers_made",
+    "fg3m":            "three_pointers_made",
+    "pra":             "points_rebounds_assists",
+    "pr":              "points_rebounds",
+    "pa":              "points_assists",
+    "ra":              "rebounds_assists",
+}
+
+def get_player_props_for_game(game_id: str) -> list:
+    """Fetch player props from SGO for a given event ID."""
+    if not SGO_KEY:
+        return []
+
+    data = sgo_get(f"events/{game_id}", {
+        "includePlayerProps": "true",
+    })
+
+    if not data or not data.get("success"):
+        # Try alternate endpoint format
+        data = sgo_get("events", {
+            "eventID": game_id,
+            "includePlayerProps": "true",
+        })
+
+    events = data.get("data", [])
+    if isinstance(events, list) and len(events) > 0:
+        event = events[0]
+    elif isinstance(events, dict):
+        event = events
+    else:
+        event = data  # maybe the response IS the event directly
+
+    odds = event.get("odds", {})
+    if not odds:
+        return []
+
+    props = []
+    for odd_id, odd_data in odds.items():
+        if not isinstance(odd_data, dict):
+            continue
+
+        # SGO oddID format: statID-statEntityID-periodID-betTypeID-sideID
+        # Player props look like: points-LEBRON_JAMES-game-ou-over
+        parts = odd_id.split("-")
+        if len(parts) < 5:
+            continue
+
+        stat_id   = parts[0]
+        entity_id = parts[1]   # player name like LEBRON_JAMES
+        period_id = parts[2]   # should be 'game'
+        bet_type  = parts[3]   # should be 'ou'
+        side_id   = parts[4]   # 'over' or 'under'
+
+        if bet_type != "ou" or period_id != "game":
+            continue
+        if side_id != "over":
+            continue  # only need one side to get the line
+
+        prop_type = SGO_STAT_TO_PROP.get(stat_id.lower())
+        if not prop_type:
+            continue
+
+        # Entity must be a player name (not 'home', 'away', 'all')
+        if entity_id.lower() in ("home", "away", "all", ""):
+            continue
+
+        player_name = entity_id.replace("_", " ").title()
+        line = odd_data.get("bookLine") or odd_data.get("fairLine")
+        if not line:
+            continue
+
+        # Get over/under odds
+        over_key  = odd_id
+        under_key = odd_id.replace("-over", "-under")
+        over_data  = odds.get(over_key, {})
+        under_data = odds.get(under_key, {})
+        over_odds  = over_data.get("bookOdds") or over_data.get("fairOdds")
+        under_odds = under_data.get("bookOdds") or under_data.get("fairOdds")
+
+        # Use entity as player_id (we'll resolve name→stats later)
+        props.append({
+            "game_id":    game_id,
+            "player_id":  entity_id,        # SGO entity ID
+            "player_name": player_name,
+            "prop_type":  prop_type,
+            "line_value": float(line),
+            "vendor":     "draftkings",
+            "market": {
+                "type":       "over_under",
+                "over_odds":  over_odds,
+                "under_odds": under_odds,
+            },
+        })
+
+    return props
 
 
 def get_player_season_averages(player_ids: list, season: int = 2025) -> dict:
-    """
-    Fetch season averages one player at a time using v1/season_averages.
-    BDL does not support bulk player_ids[] on this endpoint.
-    Only fetches starters/rotation players (skips bench/two-way IDs with no averages).
-    """
+    """Fetch season averages. Handles both BDL int IDs and SGO entity IDs."""
     if not player_ids:
         return {}
     averages = {}
     for pid in player_ids:
-        data = bdl_get("v1/season_averages", {"season": season, "player_id": pid})
+        actual_pid = pid
+        # SGO entity ID (like LEBRON_JAMES) — resolve to BDL ID via name search
+        if isinstance(pid, str) and not str(pid).isdigit():
+            player_name = pid.replace("_", " ").title()
+            parts = player_name.split()
+            if len(parts) >= 2:
+                search = bdl_get("v1/players", {"search": parts[-1], "per_page": 10})
+                for p in search.get("data", []):
+                    full = f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()
+                    if player_name.lower() in full or parts[0].lower() in full:
+                        actual_pid = p["id"]
+                        break
+        if actual_pid == pid and isinstance(pid, str) and not str(pid).isdigit():
+            continue  # could not resolve
+        data = bdl_get("v1/season_averages", {"season": season, "player_id": actual_pid})
         for row in data.get("data", []):
-            row_pid = row.get("player_id")
-            if row_pid:
-                averages[row_pid] = row
+            if row.get("player_id"):
+                averages[pid] = row  # key by original pid
     return averages
+
 
 
 def get_player_last10_stats(player_ids: list, season: int = 2025) -> dict:
@@ -3820,12 +3930,17 @@ def get_player_last10_stats(player_ids: list, season: int = 2025) -> dict:
 
 
 def get_player_info(player_ids: list) -> dict:
+    """Get player info. Handles both BDL int IDs and SGO entity IDs (LEBRON_JAMES)."""
     if not player_ids:
         return {}
     info = {}
+    bdl_ids = [p for p in player_ids if str(p).isdigit()]
+    sgo_ids = [p for p in player_ids if not str(p).isdigit()]
+
+    # BDL integer IDs
     chunk_size = 25
-    for i in range(0, len(player_ids), chunk_size):
-        chunk = player_ids[i:i + chunk_size]
+    for i in range(0, len(bdl_ids), chunk_size):
+        chunk = bdl_ids[i:i + chunk_size]
         params = [("per_page", 100)]
         for pid in chunk:
             params.append(("ids[]", pid))
@@ -3841,6 +3956,30 @@ def get_player_info(player_ids: list) -> dict:
                 "pos":     p.get("position", ""),
                 "team_id": team.get("id"),
             }
+
+    # SGO entity IDs — search BDL by name
+    for entity_id in sgo_ids:
+        player_name = entity_id.replace("_", " ").title()
+        parts = player_name.split()
+        found = None
+        if len(parts) >= 2:
+            search = bdl_get("v1/players", {"search": parts[-1], "per_page": 10})
+            for p in search.get("data", []):
+                full = f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()
+                if player_name.lower() in full or parts[0].lower() in full:
+                    found = p
+                    break
+        if found:
+            team = found.get("team", {})
+            info[entity_id] = {
+                "name":    f"{found.get('first_name','')} {found.get('last_name','')}".strip(),
+                "team":    team.get("abbreviation", ""),
+                "pos":     found.get("position", ""),
+                "team_id": team.get("id"),
+                "bdl_id":  found.get("id"),
+            }
+        else:
+            info[entity_id] = {"name": player_name, "team": "", "pos": "", "team_id": None}
     return info
 
 

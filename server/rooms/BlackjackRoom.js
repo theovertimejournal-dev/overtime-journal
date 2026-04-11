@@ -767,20 +767,21 @@ class BlackjackRoom extends Room {
     // ── House bank ────────────────────────────────────────────────────────────
 
     async creditHouseBank(amount) {
-        if (amount <= 0) return;
+        if (amount === 0) return;
         try {
-            const { data } = await supabase.from('house_bank').select('id,balance,total_raked').eq('id', 1).single();
+            const { data } = await supabase.from('house_bank').select('id,balance,total_raked,total_paid_out').eq('id', 1).single();
             if (data) {
                 await supabase.from('house_bank').update({
-                    balance:     data.balance + amount,
-                    total_raked: data.total_raked + amount,
-                    updated_at:  new Date().toISOString(),
+                    balance:        data.balance + amount,
+                    total_raked:    amount > 0 ? data.total_raked + amount : data.total_raked,
+                    total_paid_out: amount < 0 ? data.total_paid_out + Math.abs(amount) : data.total_paid_out,
+                    updated_at:     new Date().toISOString(),
                 }).eq('id', 1);
             } else {
-                await supabase.from('house_bank').insert({ id: 1, balance: amount, total_raked: amount, total_paid_out: 0 });
+                await supabase.from('house_bank').insert({ id: 1, balance: amount, total_raked: Math.max(0,amount), total_paid_out: Math.max(0,-amount) });
             }
             await supabase.from('house_bank_ledger').insert({
-                type: 'bj_net', amount,
+                type: amount >= 0 ? 'bj_profit' : 'bj_payout', amount,
                 note: `BJ net — ${this.tier} — hand #${this.handNumber} (${amount >= 0 ? 'house profit' : 'house loss'})`,
             });
         } catch (err) {

@@ -670,7 +670,7 @@ class BlackjackRoom extends Room {
         this.broadcast('payout_results', { results, dealerCards: this.dealerCards, dealerTotal });
         this.broadcastState();
 
-        if (totalRake > 0) await this.creditHouseBank(totalRake);
+        if (totalRake !== 0) await this.creditHouseBank(totalRake);
 
         // Award OTJ points per result
         for (const r of results) {

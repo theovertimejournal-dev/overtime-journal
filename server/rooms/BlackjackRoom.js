@@ -21,7 +21,7 @@ const TIERS = {
     high: { minBet: 500, maxBet: 5000, label: "High Roller" },
 };
 
-const RAKE_PCT     = 0.02;
+const RAKE_PCT     = 1.0; // 100% of losses go to house, wins come from house
 const BJ_PAYOUT    = 1.5;   // 3:2
 const MAX_SEATS    = 5;
 const TURN_TIME    = 30;
@@ -334,7 +334,7 @@ class BlackjackRoom extends Room {
         this.broadcastState();
 
         // ── Insurance window: dealer shows Ace ──
-        const dealerUpCard = this.dealerCards[1]; // second card is face-up
+        const dealerUpCard = this.dealerCards[0]; // first card is face-up (dealt face-up in round 1)
         if (dealerUpCard && dealerUpCard[0] === 'A') {
             this.insuranceBets  = {};
             this.insuranceOpen  = true;
@@ -602,7 +602,7 @@ class BlackjackRoom extends Room {
         const dealerBust  = isBust(this.dealerCards);
         const dealerBJ    = isBlackjack(this.dealerCards);
         const results     = [];
-        let   totalRake   = 0;
+        let   totalRake   = 0; // net house profit/loss this hand
 
         for (let i = 0; i < MAX_SEATS; i++) {
             const seat = this.seats[i];
@@ -620,30 +620,33 @@ class BlackjackRoom extends Room {
                 if (pBust) {
                     outcome = 'bust';
                     payout  = 0;
-                    totalRake += Math.floor(hand.bet * RAKE_PCT);
+                    totalRake += hand.bet; // full loss to house
                 } else if (pBJ && !dealerBJ) {
                     outcome = 'blackjack';
                     payout  = Math.floor(hand.bet * (1 + BJ_PAYOUT));
+                    totalRake -= Math.floor(hand.bet * BJ_PAYOUT); // house pays the bonus
                 } else if (dealerBJ && !pBJ) {
                     outcome = 'lose';
                     payout  = 0;
-                    totalRake += Math.floor(hand.bet * RAKE_PCT);
+                    totalRake += hand.bet; // full loss to house
                 } else if (pBJ && dealerBJ) {
                     outcome = 'push';
-                    payout  = hand.bet;
+                    payout  = hand.bet; // no change
                 } else if (dealerBust) {
                     outcome = 'win';
                     payout  = hand.bet * 2;
+                    totalRake -= hand.bet; // house pays winnings
                 } else if (pTotal > dealerTotal) {
                     outcome = 'win';
                     payout  = hand.bet * 2;
+                    totalRake -= hand.bet; // house pays winnings
                 } else if (pTotal === dealerTotal) {
                     outcome = 'push';
-                    payout  = hand.bet;
+                    payout  = hand.bet; // no change
                 } else {
                     outcome = 'lose';
                     payout  = 0;
-                    totalRake += Math.floor(hand.bet * RAKE_PCT);
+                    totalRake += hand.bet; // full loss to house
                 }
 
                 hand.status = outcome;
@@ -777,8 +780,8 @@ class BlackjackRoom extends Room {
                 await supabase.from('house_bank').insert({ id: 1, balance: amount, total_raked: amount, total_paid_out: 0 });
             }
             await supabase.from('house_bank_ledger').insert({
-                type: 'rake_bj', amount,
-                note: `BJ rake — ${this.tier} — hand #${this.handNumber}`,
+                type: 'bj_net', amount,
+                note: `BJ net — ${this.tier} — hand #${this.handNumber} (${amount >= 0 ? 'house profit' : 'house loss'})`,
             });
         } catch (err) {
             console.error('[BJ] house bank error:', err.message);

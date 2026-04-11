@@ -62,8 +62,8 @@ export function LoginModal({ onClose }) {
     if (password !== confirmPassword) { setMessage("Passwords don't match."); return; }
     setLoading(true); setMessage('');
     if (wantsEmail && email) await subscribeEmail(email, 'login_modal_signup');
-    const { error } = await supabase.auth.signUp({ email, password });
-    if (error) setMessage(error.message);
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error && !data?.user) setMessage(error.message);
     else setMessage('Check your email to confirm your account!');
     setLoading(false);
   };

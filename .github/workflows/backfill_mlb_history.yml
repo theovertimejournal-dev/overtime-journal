@@ -1,0 +1,58 @@
+name: Backfill MLB History
+
+on:
+  workflow_dispatch:
+    inputs:
+      season:
+        description: "Season to backfill (leave blank for both 2024 & 2025)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - "2024"
+          - "2025"
+      dry_run:
+        description: "Dry run (3 days only, for testing)"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests pandas pyarrow
+
+      - name: Run backfill
+        env:
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.season }}" ]; then
+            ARGS="$ARGS --season ${{ inputs.season }}"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python python/backfill_mlb_history.py $ARGS
+
+      - name: Upload parquet + preview + sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-historical-data
+          path: |
+            data/*.parquet
+            data/*.csv
+            data/_sample_event.json
+          retention-days: 14

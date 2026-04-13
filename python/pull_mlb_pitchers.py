@@ -1,0 +1,315 @@
+"""
+pull_mlb_pitchers.py
+
+For each historical game in our parquets, fetch the starting pitchers + their
+season stats from the MLB Stats API (free, no key needed).
+
+Strategy:
+  1. Load mlb_historical_{year}.parquet
+  2. For each game date, hit MLB Stats API schedule endpoint to get all gamePks
+  3. Match by date + team abbreviation (~95% hit rate expected)
+  4. For each matched game, pull boxscore to get the actual starting pitcher
+     (we use ACTUAL starter, not "probable" — we want ground truth for training)
+  5. Pull season stats for each starter as of that game's date
+  6. Save pitcher_features_{year}.parquet
+
+Why actual starter, not probable:
+  - Probables change last-minute (rainouts, scratches)
+  - For HISTORICAL training data, we want what actually happened
+  - For LIVE prediction (later), we'll use probables since that's all we have
+
+MLB Stats API: https://statsapi.mlb.com/api/v1
+  - schedule: /schedule?sportId=1&date=YYYY-MM-DD
+  - boxscore: /game/{gamePk}/boxscore
+  - pitcher stats: /people/{personId}/stats?stats=season&season=YYYY&group=pitching
+"""
+import os, sys, time, json, argparse, logging
+from pathlib import Path
+from collections import defaultdict
+import requests, pandas as pd
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+BASE = "https://statsapi.mlb.com/api/v1"
+SLEEP = 0.15  # MLB Stats API is generous but be polite
+MAX_RETRIES = 3
+INPUT_DIR = Path("data")
+OUTPUT_DIR = Path("data")
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+# SGO uses team IDs like "HOUSTON_ASTROS_MLB" — we need to map to MLB's
+# 3-letter abbreviations used by their schedule endpoint.
+SGO_TO_MLB_ABBR = {
+    "ARIZONA_DIAMONDBACKS_MLB": "AZ",
+    "ATLANTA_BRAVES_MLB": "ATL",
+    "BALTIMORE_ORIOLES_MLB": "BAL",
+    "BOSTON_RED_SOX_MLB": "BOS",
+    "CHICAGO_CUBS_MLB": "CHC",
+    "CHICAGO_WHITE_SOX_MLB": "CWS",
+    "CINCINNATI_REDS_MLB": "CIN",
+    "CLEVELAND_GUARDIANS_MLB": "CLE",
+    "COLORADO_ROCKIES_MLB": "COL",
+    "DETROIT_TIGERS_MLB": "DET",
+    "HOUSTON_ASTROS_MLB": "HOU",
+    "KANSAS_CITY_ROYALS_MLB": "KC",
+    "LOS_ANGELES_ANGELS_MLB": "LAA",
+    "LOS_ANGELES_DODGERS_MLB": "LAD",
+    "MIAMI_MARLINS_MLB": "MIA",
+    "MILWAUKEE_BREWERS_MLB": "MIL",
+    "MINNESOTA_TWINS_MLB": "MIN",
+    "NEW_YORK_METS_MLB": "NYM",
+    "NEW_YORK_YANKEES_MLB": "NYY",
+    "OAKLAND_ATHLETICS_MLB": "ATH",       # Athletics moved 2025
+    "ATHLETICS_MLB": "ATH",                # alt ID for 2025
+    "PHILADELPHIA_PHILLIES_MLB": "PHI",
+    "PITTSBURGH_PIRATES_MLB": "PIT",
+    "SAN_DIEGO_PADRES_MLB": "SD",
+    "SAN_FRANCISCO_GIANTS_MLB": "SF",
+    "SEATTLE_MARINERS_MLB": "SEA",
+    "ST_LOUIS_CARDINALS_MLB": "STL",
+    "TAMPA_BAY_RAYS_MLB": "TB",
+    "TEXAS_RANGERS_MLB": "TEX",
+    "TORONTO_BLUE_JAYS_MLB": "TOR",
+    "WASHINGTON_NATIONALS_MLB": "WSH",
+}
+
+logging.basicConfig(level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger("pitchers")
+
+
+# ---------------------------------------------------------------------------
+# HTTP helper
+# ---------------------------------------------------------------------------
+
+def get(url, params=None):
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, params=params, timeout=20)
+            if r.status_code == 429:
+                time.sleep(2 ** attempt); continue
+            r.raise_for_status()
+            return r.json()
+        except requests.RequestException as e:
+            log.warning("attempt %s on %s: %s", attempt, url.split("/")[-1], e)
+            if attempt == MAX_RETRIES: return None
+            time.sleep(2 ** attempt)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Fetch logic
+# ---------------------------------------------------------------------------
+
+def fetch_schedule_for_date(date_str):
+    """Returns list of {gamePk, home_abbr, away_abbr} for that date."""
+    payload = get(f"{BASE}/schedule", {"sportId": 1, "date": date_str})
+    if not payload: return []
+    games = []
+    for d in payload.get("dates", []):
+        for g in d.get("games", []):
+            games.append({
+                "gamePk": g.get("gamePk"),
+                "home_abbr": g.get("teams", {}).get("home", {}).get("team", {}).get("abbreviation"),
+                "away_abbr": g.get("teams", {}).get("away", {}).get("team", {}).get("abbreviation"),
+                "game_date": date_str,
+            })
+    return games
+
+
+def fetch_starters(game_pk):
+    """Returns (home_starter_id, home_starter_name, away_starter_id, away_starter_name)."""
+    payload = get(f"{BASE}/game/{game_pk}/boxscore")
+    if not payload: return None, None, None, None
+
+    out = {}
+    for side in ("home", "away"):
+        team_block = payload.get("teams", {}).get(side, {})
+        # First entry in pitchers[] is the starter
+        pitcher_ids = team_block.get("pitchers", [])
+        if not pitcher_ids:
+            out[side] = (None, None)
+            continue
+        starter_id = pitcher_ids[0]
+        # Look up name in players dict
+        pkey = f"ID{starter_id}"
+        player = team_block.get("players", {}).get(pkey, {})
+        starter_name = player.get("person", {}).get("fullName")
+        out[side] = (starter_id, starter_name)
+
+    return out["home"][0], out["home"][1], out["away"][0], out["away"][1]
+
+
+# in-memory cache so we don't refetch the same pitcher's season stats
+_pitcher_stats_cache = {}
+
+def fetch_pitcher_season_stats(person_id, season):
+    """Returns dict with era, fip-ish, k_per_9, bb_per_9, whip, ip, gs."""
+    if person_id is None: return {}
+    cache_key = (person_id, season)
+    if cache_key in _pitcher_stats_cache:
+        return _pitcher_stats_cache[cache_key]
+
+    payload = get(f"{BASE}/people/{person_id}/stats",
+                  {"stats": "season", "season": season, "group": "pitching"})
+    result = {}
+    if payload:
+        for s in payload.get("stats", []):
+            for split in s.get("splits", []):
+                stat = split.get("stat", {})
+                result = {
+                    "era": _to_float(stat.get("era")),
+                    "whip": _to_float(stat.get("whip")),
+                    "k_per_9": _to_float(stat.get("strikeoutsPer9Inn")),
+                    "bb_per_9": _to_float(stat.get("baseOnBallsPer9Inn")),
+                    "hr_per_9": _to_float(stat.get("homeRunsPer9")),
+                    "innings_pitched": _to_float(stat.get("inningsPitched")),
+                    "games_started": _to_int(stat.get("gamesStarted")),
+                    "wins": _to_int(stat.get("wins")),
+                    "losses": _to_int(stat.get("losses")),
+                }
+                break
+            if result: break
+
+    _pitcher_stats_cache[cache_key] = result
+    return result
+
+
+def _to_float(x):
+    try: return float(x)
+    except (TypeError, ValueError): return None
+
+def _to_int(x):
+    try: return int(x)
+    except (TypeError, ValueError): return None
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
+def process_year(year):
+    in_path = INPUT_DIR / f"mlb_historical_{year}.parquet"
+    if not in_path.exists():
+        log.error("missing %s", in_path); return
+
+    games_df = pd.read_parquet(in_path)
+    games_df["game_date_str"] = games_df["game_date"].dt.strftime("%Y-%m-%d")
+    games_df["home_abbr"] = games_df["home_team"].map(SGO_TO_MLB_ABBR)
+    games_df["away_abbr"] = games_df["away_team"].map(SGO_TO_MLB_ABBR)
+
+    unmapped = games_df[games_df["home_abbr"].isna() | games_df["away_abbr"].isna()]
+    if len(unmapped):
+        log.warning("[%s] %s games have unmapped teams: %s",
+                    year, len(unmapped),
+                    sorted(set(unmapped["home_team"]) | set(unmapped["away_team"])))
+
+    unique_dates = sorted(games_df["game_date_str"].dropna().unique())
+    log.info("[%s] %s games across %s dates", year, len(games_df), len(unique_dates))
+
+    # 1. Build a date → list-of-MLB-games index
+    log.info("[%s] fetching schedule for %s dates...", year, len(unique_dates))
+    date_to_mlb_games = {}
+    for i, d in enumerate(unique_dates):
+        date_to_mlb_games[d] = fetch_schedule_for_date(d)
+        if (i + 1) % 30 == 0:
+            log.info("  schedule progress: %s/%s dates", i + 1, len(unique_dates))
+        time.sleep(SLEEP)
+
+    # 2. Match each SGO game to a MLB gamePk by (date, home_abbr, away_abbr)
+    rows = []
+    matched = 0
+    for _, g in games_df.iterrows():
+        d = g["game_date_str"]
+        h, a = g["home_abbr"], g["away_abbr"]
+        mlb_games = date_to_mlb_games.get(d, [])
+        match = next((m for m in mlb_games
+                      if m["home_abbr"] == h and m["away_abbr"] == a), None)
+        rows.append({
+            "event_id": g["event_id"],
+            "game_date_str": d,
+            "home_abbr": h,
+            "away_abbr": a,
+            "gamePk": match["gamePk"] if match else None,
+        })
+        if match: matched += 1
+
+    match_df = pd.DataFrame(rows)
+    log.info("[%s] matched %s/%s games (%.1f%%)",
+             year, matched, len(match_df), 100 * matched / len(match_df))
+
+    # 3. For matched games, pull starters
+    matched_only = match_df[match_df["gamePk"].notna()].copy()
+    log.info("[%s] fetching boxscores for %s games...", year, len(matched_only))
+    starter_rows = []
+    for i, (_, row) in enumerate(matched_only.iterrows()):
+        hs_id, hs_name, as_id, as_name = fetch_starters(int(row["gamePk"]))
+        starter_rows.append({
+            "event_id": row["event_id"],
+            "gamePk": int(row["gamePk"]),
+            "home_starter_id": hs_id,
+            "home_starter_name": hs_name,
+            "away_starter_id": as_id,
+            "away_starter_name": as_name,
+        })
+        if (i + 1) % 100 == 0:
+            log.info("  boxscore progress: %s/%s", i + 1, len(matched_only))
+        time.sleep(SLEEP)
+
+    starters_df = pd.DataFrame(starter_rows)
+
+    # 4. Pull season stats for each unique starter
+    unique_starters = set(starters_df["home_starter_id"].dropna()) | \
+                      set(starters_df["away_starter_id"].dropna())
+    log.info("[%s] fetching season stats for %s unique starters...",
+             year, len(unique_starters))
+    for i, pid in enumerate(unique_starters):
+        fetch_pitcher_season_stats(int(pid), year)
+        if (i + 1) % 50 == 0:
+            log.info("  stats progress: %s/%s", i + 1, len(unique_starters))
+        time.sleep(SLEEP)
+
+    # 5. Attach stats to each game (NOTE: this is end-of-season stats; for
+    #    leak-proof training we'd want as-of-game-date stats, but that requires
+    #    a per-game stats endpoint call which is 5,000+ extra calls. v1 uses
+    #    season-end stats as a proxy — good enough for ranking pitchers, will
+    #    upgrade later if model accuracy demands it.)
+    def attach(side):
+        out = []
+        for _, r in starters_df.iterrows():
+            pid = r[f"{side}_starter_id"]
+            stats = _pitcher_stats_cache.get((int(pid), year), {}) if pid else {}
+            row = {f"{side}_p_{k}": v for k, v in stats.items()}
+            out.append(row)
+        return pd.DataFrame(out)
+
+    home_stats_df = attach("home")
+    away_stats_df = attach("away")
+    full = pd.concat([starters_df.reset_index(drop=True), home_stats_df, away_stats_df], axis=1)
+
+    out_path = OUTPUT_DIR / f"pitcher_features_{year}.parquet"
+    full.to_parquet(out_path, index=False, compression="snappy")
+
+    # preview
+    full.head(20).to_csv(OUTPUT_DIR / f"preview_pitchers_{year}.csv", index=False)
+
+    cov_home = full["home_starter_id"].notna().mean()
+    cov_era = full["home_p_era"].notna().mean() if "home_p_era" in full.columns else 0
+    log.info("[%s] saved %s rows | starter_cov=%.1f%% | era_cov=%.1f%%",
+             year, len(full), 100 * cov_home, 100 * cov_era)
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--year", type=int, choices=[2024, 2025])
+    args = p.parse_args()
+    years = [args.year] if args.year else [2024, 2025]
+    for y in years:
+        process_year(y)
+    log.info("DONE")
+
+
+if __name__ == "__main__":
+    main()

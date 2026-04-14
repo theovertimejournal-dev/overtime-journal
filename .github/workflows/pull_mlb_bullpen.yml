@@ -1,0 +1,59 @@
+name: Pull MLB Bullpen
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Year (blank = both 2024 & 2025)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - "2024"
+          - "2025"
+      backfill_run_id:
+        description: "Run ID of Backfill MLB History workflow"
+        required: true
+        type: string
+
+jobs:
+  bullpen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240   # 4 hours max — bullpen pull is the long one
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests pandas pyarrow
+
+      - name: Download historical parquets
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-historical-data
+          path: data/
+          run-id: ${{ inputs.backfill_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run bullpen pull
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="--year ${{ inputs.year }}"
+          fi
+          python python/pull_mlb_bullpen.py $ARGS
+
+      - name: Upload bullpen parquets
+        if: always()   # upload partial results even if timed out
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-bullpen-data
+          path: |
+            data/bullpen_features_*.parquet
+            data/preview_bullpen_*.csv
+          retention-days: 14

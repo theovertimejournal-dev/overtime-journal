@@ -7,6 +7,14 @@ on:
         description: "Train MLB Ensemble run ID (source of trained models)"
         required: true
         type: string
+      arsenal_run_id:
+        description: "Pull Pitcher Arsenal run ID (cached arsenal data)"
+        required: true
+        type: string
+      hitter_splits_run_id:
+        description: "Pull Hitter Pitch Splits run ID (cached hitter data)"
+        required: true
+        type: string
       game_date:
         description: "Game date (YYYY-MM-DD, blank = today)"
         required: false
@@ -42,8 +50,24 @@ jobs:
           run-id: ${{ inputs.trained_models_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List models
-        run: ls -la models/ && ls -la models/full_no_line/ || true
+      - name: Download arsenal cache
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-arsenal-data
+          path: data/
+          run-id: ${{ inputs.arsenal_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download hitter splits cache
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-hitter-splits-data
+          path: data/
+          run-id: ${{ inputs.hitter_splits_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List models + data
+        run: ls -la models/ && ls -la data/ || true
 
       - name: Run predictions
         env:

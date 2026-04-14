@@ -1,16 +1,17 @@
 """
-build_features.py - v4
+build_features.py - v5
 
-Full feature engineering for MLB ML model. Adds THE killer feature:
+Full feature engineering including umpire tendencies + weather.
 
-  lineup_arsenal_match_woba = weighted average of each batter's wOBA vs each
-  pitch type, weighted by the OPPOSING pitcher's actual pitch mix.
-
-  Example: Pitcher throws 55% FB, 30% BR, 15% OS.
-  For each batter: expected_woba = 0.55*vs_FB + 0.30*vs_BR + 0.15*vs_OS
-  Lineup arsenal match = avg of expected_woba across qualifying batters.
-
-This is the MLB The Show matchup view in betting-model form.
+Sources joined:
+  1. games (backfill)              -> base events + outcomes + odds
+  2. pitchers                      -> starter season stats
+  3. bullpen                       -> 7-day rolling bullpen per team
+  4. lineups (w/ batter_ids)       -> aggregate + individual batter IDs
+  5. pitcher_arsenal               -> pitch mix per starter
+  6. hitter_pitch_splits           -> per-batter pitch-type wOBA
+  7. umpire_features               -> home plate umpire tendencies
+  8. weather_features              -> temp/wind/humidity at game time
 
 Outputs 4 training files (F5/Full x with_line/no_line).
 """
@@ -77,66 +78,56 @@ def american_to_implied_prob(odds):
 
 
 def load_all(years):
-    games_dfs, pitcher_dfs, bullpen_dfs = [], [], []
-    lineup_dfs, arsenal_dfs, hitter_dfs = [], [], []
+    srcs = {"mlb_historical": [], "pitcher_features": [], "bullpen_features": [],
+            "lineup_features": [], "pitcher_arsenal": [], "hitter_pitch_splits": [],
+            "umpire_features": [], "weather_features": []}
     for y in years:
-        for store, name in [(games_dfs, "mlb_historical"),
-                            (pitcher_dfs, "pitcher_features"),
-                            (bullpen_dfs, "bullpen_features"),
-                            (lineup_dfs, "lineup_features"),
-                            (arsenal_dfs, "pitcher_arsenal"),
-                            (hitter_dfs, "hitter_pitch_splits")]:
+        for name in srcs:
             p = INPUT_DIR / f"{name}_{y}.parquet"
             if p.exists():
-                store.append(pd.read_parquet(p))
+                srcs[name].append(pd.read_parquet(p))
             else:
                 log.warning("missing %s", p)
 
-    games = pd.concat(games_dfs, ignore_index=True) if games_dfs else pd.DataFrame()
-    pitchers = pd.concat(pitcher_dfs, ignore_index=True) if pitcher_dfs else pd.DataFrame()
-    bullpen = pd.concat(bullpen_dfs, ignore_index=True) if bullpen_dfs else pd.DataFrame()
-    lineups = pd.concat(lineup_dfs, ignore_index=True) if lineup_dfs else pd.DataFrame()
-    arsenal = pd.concat(arsenal_dfs, ignore_index=True) if arsenal_dfs else pd.DataFrame()
-    hitters = pd.concat(hitter_dfs, ignore_index=True) if hitter_dfs else pd.DataFrame()
+    def concat(key):
+        return pd.concat(srcs[key], ignore_index=True) if srcs[key] else pd.DataFrame()
 
-    log.info("loaded: games=%s, pitchers=%s, bullpen=%s, lineups=%s, arsenal=%s, hitters=%s",
-             len(games), len(pitchers), len(bullpen),
-             len(lineups), len(arsenal), len(hitters))
+    games = concat("mlb_historical")
+    pitchers = concat("pitcher_features")
+    bullpen = concat("bullpen_features")
+    lineups = concat("lineup_features")
+    arsenal = concat("pitcher_arsenal")
+    hitters = concat("hitter_pitch_splits")
+    umpires = concat("umpire_features")
+    weather = concat("weather_features")
+
+    log.info("loaded: games=%s, pitchers=%s, bullpen=%s, lineups=%s, "
+             "arsenal=%s, hitters=%s, umpires=%s, weather=%s",
+             len(games), len(pitchers), len(bullpen), len(lineups),
+             len(arsenal), len(hitters), len(umpires), len(weather))
 
     df = games.merge(pitchers, on="event_id", how="inner")
     log.info("after pitcher merge: %s", len(df))
 
-    # Lineups
     if len(lineups):
         lineup_cols = [c for c in lineups.columns if c not in ("event_id", "gamePk")]
         df = df.merge(lineups[["event_id"] + lineup_cols], on="event_id", how="left")
 
-    # Arsenal — we need HOME pitcher's arsenal and AWAY pitcher's arsenal.
-    # Home's arsenal is what AWAY lineup faces; away's arsenal is what HOME lineup faces.
     if len(arsenal):
-        # Rename arsenal cols with prefixes so home and away versions don't collide
-        arsenal_home = arsenal.rename(columns={"pitcher_id": "home_starter_id"})
-        arsenal_home_renamed = {c: f"home_{c}" for c in arsenal_home.columns
-                                 if c not in ("home_starter_id", "season")}
-        arsenal_home = arsenal_home.rename(columns=arsenal_home_renamed)
-
-        arsenal_away = arsenal.rename(columns={"pitcher_id": "away_starter_id"})
-        arsenal_away_renamed = {c: f"away_{c}" for c in arsenal_away.columns
-                                 if c not in ("away_starter_id", "season")}
-        arsenal_away = arsenal_away.rename(columns=arsenal_away_renamed)
-
+        ah = arsenal.rename(columns={"pitcher_id": "home_starter_id"})
+        ah = ah.rename(columns={c: f"home_{c}" for c in ah.columns
+                                  if c not in ("home_starter_id", "season")})
+        aa = arsenal.rename(columns={"pitcher_id": "away_starter_id"})
+        aa = aa.rename(columns={c: f"away_{c}" for c in aa.columns
+                                  if c not in ("away_starter_id", "season")})
         df["season_int"] = df["game_date"].dt.year
-        arsenal_home["season_int"] = arsenal_home["season"]
-        arsenal_away["season_int"] = arsenal_away["season"]
+        ah["season_int"] = ah["season"]
+        aa["season_int"] = aa["season"]
+        df = df.merge(ah.drop(columns=["season"]),
+                      on=["home_starter_id", "season_int"], how="left")
+        df = df.merge(aa.drop(columns=["season"]),
+                      on=["away_starter_id", "season_int"], how="left")
 
-        df = df.merge(
-            arsenal_home.drop(columns=["season"]),
-            on=["home_starter_id", "season_int"], how="left")
-        df = df.merge(
-            arsenal_away.drop(columns=["season"]),
-            on=["away_starter_id", "season_int"], how="left")
-
-    # Team IDs + date string for bullpen join
     df["home_team_id"] = df["home_team_name"].apply(
         lambda n: TEAM_NAME_TO_ID.get(normalize_name(n)))
     df["away_team_id"] = df["away_team_name"].apply(
@@ -148,19 +139,27 @@ def load_all(years):
                "bp_ip_7d", "bp_reliever_count_7d"]
     if len(bullpen):
         bp_subset = bullpen[["team_id", "game_date_str"] + bp_cols]
-        home_bp = bp_subset.rename(columns={
-            "team_id": "home_team_id",
+        home_bp = bp_subset.rename(columns={"team_id": "home_team_id",
             **{c: f"home_{c}" for c in bp_cols}})
-        away_bp = bp_subset.rename(columns={
-            "team_id": "away_team_id",
+        away_bp = bp_subset.rename(columns={"team_id": "away_team_id",
             **{c: f"away_{c}" for c in bp_cols}})
         df = df.merge(home_bp, on=["home_team_id", "game_date_str"], how="left")
         df = df.merge(away_bp, on=["away_team_id", "game_date_str"], how="left")
-        log.info("after bullpen merge: %s", len(df))
+
+    # Umpire merge
+    if len(umpires):
+        ump_cols = ["event_id", "ump_season_k_rate", "ump_season_bb_rate",
+                    "ump_season_runs_per_game", "ump_games_worked"]
+        df = df.merge(umpires[ump_cols], on="event_id", how="left")
+
+    # Weather merge
+    if len(weather):
+        wx_cols = [c for c in weather.columns if c != "event_id"]
+        df = df.merge(weather[["event_id"] + wx_cols], on="event_id", how="left")
 
     df = df.sort_values("game_date").reset_index(drop=True)
 
-    # Build hitter splits lookup: (batter_id, season) -> dict of woba values
+    # Hitter splits lookup
     hitter_lookup = {}
     if len(hitters):
         for _, h in hitters.iterrows():
@@ -171,7 +170,7 @@ def load_all(years):
                 "vs_os_woba": h.get("vs_offspeed_woba"),
                 "pitches_seen": h.get("total_pitches_seen", 0),
             }
-        log.info("hitter_lookup built: %s (batter, season) entries", len(hitter_lookup))
+        log.info("hitter_lookup: %s entries", len(hitter_lookup))
 
     return df, hitter_lookup
 
@@ -218,8 +217,7 @@ def add_pitcher_features(df):
 
 
 def add_bullpen_features(df):
-    if "home_bp_era_7d" not in df.columns:
-        return df
+    if "home_bp_era_7d" not in df.columns: return df
     df["bp_era_edge"] = df["home_bp_era_7d"] - df["away_bp_era_7d"]
     df["bp_whip_edge"] = df["home_bp_whip_7d"] - df["away_bp_whip_7d"]
     df["bp_k9_edge"] = df["home_bp_k_per_9_7d"] - df["away_bp_k_per_9_7d"]
@@ -230,9 +228,7 @@ def add_bullpen_features(df):
 
 
 def add_lineup_features(df):
-    if "home_lineup_avg_ops" not in df.columns:
-        log.warning("lineup data missing — skipping lineup features")
-        return df
+    if "home_lineup_avg_ops" not in df.columns: return df
     df["lineup_ops_edge"] = df["home_lineup_avg_ops"] - df["away_lineup_avg_ops"]
     df["lineup_obp_edge"] = df["home_lineup_avg_obp"] - df["away_lineup_avg_obp"]
     df["lineup_slg_edge"] = df["home_lineup_avg_slg"] - df["away_lineup_avg_slg"]
@@ -245,10 +241,7 @@ def add_lineup_features(df):
 
 
 def add_arsenal_features(df):
-    """Pitcher arsenal diversity + effectiveness edge."""
-    if "home_arsenal_fastball_pct" not in df.columns:
-        log.warning("arsenal data missing — skipping arsenal features")
-        return df
+    if "home_arsenal_fastball_pct" not in df.columns: return df
     df["arsenal_overall_xwoba_edge"] = (df["away_arsenal_overall_xwoba"]
                                          - df["home_arsenal_overall_xwoba"])
     df["arsenal_fb_velo_edge"] = df["home_arsenal_fb_velo"] - df["away_arsenal_fb_velo"]
@@ -258,88 +251,84 @@ def add_arsenal_features(df):
 
 
 def add_arsenal_match_features(df, hitter_lookup):
-    """
-    THE killer feature: lineup_arsenal_match_woba.
+    if "home_batter_ids" not in df.columns: return df
 
-    For each batter in each team's lineup, compute their expected wOBA against
-    the opposing pitcher's actual pitch mix:
-
-      expected_woba = (vs_FB_woba * pitcher_FB%)
-                    + (vs_BR_woba * pitcher_BR%)
-                    + (vs_OS_woba * pitcher_OS%)
-
-    Then average across lineup (ignoring batters with <200 pitches seen, too
-    small sample).
-
-    Home lineup faces AWAY pitcher's arsenal. Away lineup faces HOME pitcher's.
-    """
-    if "home_batter_ids" not in df.columns:
-        log.warning("no batter_ids — skipping arsenal match features")
-        return df
-
-    def compute_match(batter_ids_str, pitcher_fb, pitcher_br, pitcher_os, season):
-        """Compute weighted expected wOBA for a lineup vs a pitcher's arsenal."""
-        if pd.isna(batter_ids_str) or pd.isna(pitcher_fb):
+    def compute_match(bid_str, p_fb, p_br, p_os, season):
+        if pd.isna(bid_str) or pd.isna(p_fb):
             return np.nan
-        # Normalize pitcher percentages (drop the "other" bucket)
-        total = (pitcher_fb or 0) + (pitcher_br or 0) + (pitcher_os or 0)
-        if total <= 0:
-            return np.nan
-        w_fb = pitcher_fb / total
-        w_br = pitcher_br / total
-        w_os = pitcher_os / total
+        total = (p_fb or 0) + (p_br or 0) + (p_os or 0)
+        if total <= 0: return np.nan
+        w_fb, w_br, w_os = p_fb / total, p_br / total, p_os / total
 
-        batter_ids = [int(x) for x in str(batter_ids_str).split(",") if x.strip()]
-        expected_wobas = []
-        for bid in batter_ids:
-            splits = hitter_lookup.get((bid, int(season)))
-            if not splits:
-                continue
-            if splits["pitches_seen"] < 200:
-                continue  # too small sample, skip
-            vs_fb = splits["vs_fb_woba"]
-            vs_br = splits["vs_br_woba"]
-            vs_os = splits["vs_os_woba"]
-            if None in (vs_fb, vs_br, vs_os):
-                continue
-            ew = w_fb * vs_fb + w_br * vs_br + w_os * vs_os
-            expected_wobas.append(ew)
+        bids = [int(x) for x in str(bid_str).split(",") if x.strip()]
+        vals = []
+        for bid in bids:
+            s = hitter_lookup.get((bid, int(season)))
+            if not s or s["pitches_seen"] < 200: continue
+            if None in (s["vs_fb_woba"], s["vs_br_woba"], s["vs_os_woba"]): continue
+            vals.append(w_fb * s["vs_fb_woba"] + w_br * s["vs_br_woba"] + w_os * s["vs_os_woba"])
+        return sum(vals) / len(vals) if vals else np.nan
 
-        if not expected_wobas:
-            return np.nan
-        return sum(expected_wobas) / len(expected_wobas)
-
-    log.info("computing arsenal match for %s games...", len(df))
-
-    # Home lineup faces away pitcher's arsenal
     df["home_arsenal_match_woba"] = df.apply(
-        lambda r: compute_match(
-            r.get("home_batter_ids"),
-            r.get("away_arsenal_fastball_pct"),
-            r.get("away_arsenal_breaking_pct"),
-            r.get("away_arsenal_offspeed_pct"),
-            r["season_int"],
-        ), axis=1)
-
-    # Away lineup faces home pitcher's arsenal
+        lambda r: compute_match(r.get("home_batter_ids"),
+                                 r.get("away_arsenal_fastball_pct"),
+                                 r.get("away_arsenal_breaking_pct"),
+                                 r.get("away_arsenal_offspeed_pct"),
+                                 r["season_int"]), axis=1)
     df["away_arsenal_match_woba"] = df.apply(
-        lambda r: compute_match(
-            r.get("away_batter_ids"),
-            r.get("home_arsenal_fastball_pct"),
-            r.get("home_arsenal_breaking_pct"),
-            r.get("home_arsenal_offspeed_pct"),
-            r["season_int"],
-        ), axis=1)
-
+        lambda r: compute_match(r.get("away_batter_ids"),
+                                 r.get("home_arsenal_fastball_pct"),
+                                 r.get("home_arsenal_breaking_pct"),
+                                 r.get("home_arsenal_offspeed_pct"),
+                                 r["season_int"]), axis=1)
     df["arsenal_match_edge"] = df["home_arsenal_match_woba"] - df["away_arsenal_match_woba"]
-    cov = df["arsenal_match_edge"].notna().mean()
-    log.info("arsenal match coverage: %.1f%%", 100 * cov)
     return df
 
 
 def add_park_features(df):
     df["park_factor"] = df["home_team"].map(PARK_FACTORS_BY_TEAM).fillna(100)
     df["park_pitcher_friendly"] = (100 - df["park_factor"]).clip(lower=0)
+    return df
+
+
+def add_umpire_features(df):
+    if "ump_season_k_rate" not in df.columns: return df
+    # League average K rate ~22%, BB rate ~8%
+    df["ump_k_edge"] = df["ump_season_k_rate"] - 0.22  # positive = tight zone (more Ks)
+    df["ump_bb_edge"] = df["ump_season_bb_rate"] - 0.08  # positive = wide zone (more walks)
+    df["ump_runs_edge"] = df["ump_season_runs_per_game"] - 8.7  # league avg ~8.7 r/g
+
+    # Interactions: tight ump + high-K pitcher matchup = amplified
+    df["ump_k_pitcher_interact"] = df["ump_k_edge"] * (
+        (df["home_p_k_per_9"].fillna(8.5) + df["away_p_k_per_9"].fillna(8.5)) / 2 - 8.5)
+    return df
+
+
+def add_weather_features(df):
+    if "wx_temp_f" not in df.columns: return df
+
+    # Indoor/dome games don't have weather effect — zero out
+    indoor_mask = df["wx_roof"] == "dome"
+    for c in ["wx_temp_f", "wx_humidity", "wx_wind_mph", "wx_wind_out", "wx_precip"]:
+        if c in df.columns:
+            df.loc[indoor_mask, c] = np.nan
+
+    # HR-favorability composite: warm + wind out + low humidity
+    # Scale around league-average conditions (70F, 50% humidity, 0 wind_out)
+    temp_hr = (df["wx_temp_f"].fillna(70) - 70) * 0.01  # +1% HR per 10°F
+    wind_hr = df["wx_wind_out"].fillna(0) * 0.02        # scales with mph out
+    humid_hr = (50 - df["wx_humidity"].fillna(50)) * 0.005  # drier = more HR
+    df["wx_hr_factor"] = temp_hr + wind_hr + humid_hr
+
+    # Precip flag (wet = fewer HR, more pitcher edge)
+    df["wx_has_precip"] = (df["wx_precip"].fillna(0) > 0.01).astype(int)
+    # Cold game flag (under 50F)
+    df["wx_is_cold"] = (df["wx_temp_f"].fillna(70) < 50).astype(int)
+    # Hot game flag (over 90F)
+    df["wx_is_hot"] = (df["wx_temp_f"].fillna(70) > 90).astype(int)
+    # Indoor game flag (weather doesn't matter)
+    df["wx_is_indoor"] = indoor_mask.astype(int) if "wx_roof" in df.columns else 0
+
     return df
 
 
@@ -376,27 +365,19 @@ def add_team_form_features(df):
     long["streak"] = g["won"].apply(streak)
 
     home_form = long.rename(columns={
-        "team": "home_team",
-        "winpct_l10": "home_winpct_l10",
-        "run_diff_l10": "home_run_diff_l10",
-        "runs_for_l30": "home_runs_for_l30",
-        "runs_against_l30": "home_runs_against_l30",
-        "runs_for_l7": "home_runs_for_l7",
-        "runs_against_l7": "home_runs_against_l7",
-        "streak": "home_streak",
+        "team": "home_team", "winpct_l10": "home_winpct_l10",
+        "run_diff_l10": "home_run_diff_l10", "runs_for_l30": "home_runs_for_l30",
+        "runs_against_l30": "home_runs_against_l30", "runs_for_l7": "home_runs_for_l7",
+        "runs_against_l7": "home_runs_against_l7", "streak": "home_streak",
     })[["game_date", "home_team", "home_winpct_l10", "home_run_diff_l10",
         "home_runs_for_l30", "home_runs_against_l30",
         "home_runs_for_l7", "home_runs_against_l7", "home_streak"]]
 
     away_form = long.rename(columns={
-        "team": "away_team",
-        "winpct_l10": "away_winpct_l10",
-        "run_diff_l10": "away_run_diff_l10",
-        "runs_for_l30": "away_runs_for_l30",
-        "runs_against_l30": "away_runs_against_l30",
-        "runs_for_l7": "away_runs_for_l7",
-        "runs_against_l7": "away_runs_against_l7",
-        "streak": "away_streak",
+        "team": "away_team", "winpct_l10": "away_winpct_l10",
+        "run_diff_l10": "away_run_diff_l10", "runs_for_l30": "away_runs_for_l30",
+        "runs_against_l30": "away_runs_against_l30", "runs_for_l7": "away_runs_for_l7",
+        "runs_against_l7": "away_runs_against_l7", "streak": "away_streak",
     })[["game_date", "away_team", "away_winpct_l10", "away_run_diff_l10",
         "away_runs_for_l30", "away_runs_against_l30",
         "away_runs_for_l7", "away_runs_against_l7", "away_streak"]]
@@ -485,6 +466,18 @@ ARSENAL_MATCH_FEATURES = [
     "arsenal_match_edge",
 ]
 
+UMPIRE_FEATURES = [
+    "ump_season_k_rate", "ump_season_bb_rate", "ump_season_runs_per_game",
+    "ump_k_edge", "ump_bb_edge", "ump_runs_edge",
+    "ump_k_pitcher_interact",
+]
+
+WEATHER_FEATURES = [
+    "wx_temp_f", "wx_humidity", "wx_wind_mph", "wx_wind_out",
+    "wx_precip", "wx_cloud_cover",
+    "wx_hr_factor", "wx_has_precip", "wx_is_cold", "wx_is_hot", "wx_is_indoor",
+]
+
 PARK_FEATURES = ["park_factor", "park_pitcher_friendly"]
 
 FORM_FEATURES = [
@@ -533,11 +526,14 @@ def main():
     df = add_arsenal_features(df)
     df = add_arsenal_match_features(df, hitter_lookup)
     df = add_park_features(df)
+    df = add_umpire_features(df)
+    df = add_weather_features(df)
     df = add_team_form_features(df)
     df = add_situational_features(df)
 
     fundamentals = (PITCHER_FEATURES + BULLPEN_FEATURES + LINEUP_FEATURES
                     + ARSENAL_FEATURES + ARSENAL_MATCH_FEATURES
+                    + UMPIRE_FEATURES + WEATHER_FEATURES
                     + PARK_FEATURES + FORM_FEATURES + SITUATIONAL_FEATURES)
 
     # FULL GAME
@@ -573,7 +569,6 @@ def main():
     f5_clean[f5_with_line_cols].head(50).to_csv(
         OUTPUT_DIR / "preview_features_f5_with_line.csv", index=False)
 
-    # Summary + correlations
     log.info("=" * 60)
     log.info("FULL GAME: %s rows | %s feats (with_line) | %s feats (no_line)",
              len(full_clean),
@@ -592,6 +587,8 @@ def main():
                 "lineup_ops_edge", "lineup_top3_edge", "lineup_vs_starter_edge",
                 "lineup_recent_edge", "arsenal_match_edge",
                 "arsenal_overall_xwoba_edge", "park_factor",
+                "ump_k_edge", "ump_runs_edge",
+                "wx_hr_factor", "wx_wind_out",
                 "winpct_edge", "run_diff_edge", "offense_l7_edge"]:
         if col in full_clean.columns:
             log.info("  %s: %+.3f", col,
@@ -602,6 +599,8 @@ def main():
     for col in ["f5_home_implied_prob", "era_edge", "k9_edge", "bb9_edge",
                 "lineup_ops_edge", "lineup_top3_edge", "lineup_vs_starter_edge",
                 "arsenal_match_edge", "arsenal_overall_xwoba_edge",
+                "ump_k_edge", "ump_k_pitcher_interact",
+                "wx_hr_factor", "wx_wind_out",
                 "park_factor", "offense_l7_edge"]:
         if col in f5_clean.columns:
             log.info("  %s: %+.3f", col,

@@ -11,6 +11,10 @@ on:
         description: "Run ID of Pull MLB Pitchers workflow"
         required: true
         type: string
+      bullpen_run_id:
+        description: "Run ID of Pull MLB Bullpen workflow"
+        required: true
+        type: string
 
 jobs:
   build:
@@ -20,15 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
         run: pip install pandas pyarrow numpy
 
-      - name: Download historical games parquets
+      - name: Download backfill (games)
         uses: actions/download-artifact@v4
         with:
           name: mlb-historical-data
@@ -36,7 +39,7 @@ jobs:
           run-id: ${{ inputs.backfill_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download pitcher parquets
+      - name: Download pitchers
         uses: actions/download-artifact@v4
         with:
           name: mlb-pitcher-data
@@ -44,17 +47,25 @@ jobs:
           run-id: ${{ inputs.pitcher_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List downloaded files
+      - name: Download bullpen
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-bullpen-data
+          path: data/
+          run-id: ${{ inputs.bullpen_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List downloads
         run: ls -la data/
 
       - name: Build features
         run: python python/build_features.py
 
-      - name: Upload training data + previews
+      - name: Upload training data
         uses: actions/upload-artifact@v4
         with:
           name: mlb-training-data
           path: |
-            data/mlb_training_data_*.parquet
+            data/mlb_training_*.parquet
             data/preview_features_*.csv
           retention-days: 14

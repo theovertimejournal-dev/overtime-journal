@@ -85,27 +85,34 @@ function RelieverTable({ relievers, team }) {
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 10, fontWeight: 600, color: "#4a5568", textTransform: "uppercase", marginBottom: 6 }}>{team} Pen</div>
       {relievers.slice(0, 5).map((r, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", fontSize: 11 }}>
-          <span>{FATIGUE_ICON[r.fatigue] || "⚪"}</span>
-          <span style={{ color: "#e2e8f0", flex: 1 }}>{r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span></span>
-          <span style={{ color: "#6b7280" }}>{r.pitches_last_3d}p/3d</span>
-          <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rst</span>
-          {/* ERA: use display_era from backend (already handles fallback logic) */}
-          {r.display_era != null ? (
-            <span style={{ color: r.display_era > 4.5 ? "#ef4444" : r.display_era < 3.0 ? "#22c55e" : "#94a3b8" }}>
-              {fmt(r.display_era)} ERA
-              {r.display_era_source === "2025" && (
-                <span style={{ fontSize: 9, color: "#4a5568", marginLeft: 2 }}>'25</span>
-              )}
+        <div key={i} style={{ padding: "4px 0", fontSize: 11, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+          {/* Row 1: name */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span>{FATIGUE_ICON[r.fatigue] || "⚪"}</span>
+            <span style={{ color: "#e2e8f0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span>
             </span>
-          ) : (r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era) != null ? (
-            <span style={{ color: "#4a5568" }} title="2025 season ERA">
-              {fmt(r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era)}{" "}
-              <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
-            </span>
-          ) : (
-            <span style={{ color: "#374151" }}>— ERA</span>
-          )}
+          </div>
+          {/* Row 2: stats — wraps cleanly on mobile */}
+          <div style={{ display: "flex", gap: 10, marginLeft: 20, marginTop: 2, flexWrap: "wrap", fontSize: 10, color: "#6b7280" }}>
+            <span>{r.pitches_last_3d}p/3d</span>
+            <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rest</span>
+            {r.display_era != null ? (
+              <span style={{ color: r.display_era > 4.5 ? "#ef4444" : r.display_era < 3.0 ? "#22c55e" : "#94a3b8" }}>
+                {fmt(r.display_era)} ERA
+                {r.display_era_source === "2025" && (
+                  <span style={{ fontSize: 9, color: "#4a5568", marginLeft: 2 }}>'25</span>
+                )}
+              </span>
+            ) : (r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era) != null ? (
+              <span style={{ color: "#4a5568" }} title="2025 season ERA">
+                {fmt(r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era)}{" "}
+                <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
+              </span>
+            ) : (
+              <span style={{ color: "#374151" }}>— ERA</span>
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -153,46 +160,66 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
         onClick={onToggle}
         style={{ padding: "14px 16px", cursor: "pointer", userSelect: "none" }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
 
-          {/* Left: matchup + venue */}
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", letterSpacing: "-0.02em" }}>
-                {game.away_team} <span style={{ color: "#374151" }}>@</span> {game.home_team}
-              </span>
-              {park.factor && (
-                <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: `${parkColor}15`, color: parkColor, fontWeight: 600 }}>
-                  PF {park.factor}
+          {/* Row 1: matchup + pills (left) + lean badge + arrow (right) */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+
+            {/* Left: matchup + venue + pills */}
+            <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", letterSpacing: "-0.02em" }}>
+                  {game.away_team} <span style={{ color: "#374151" }}>@</span> {game.home_team}
                 </span>
-              )}
-              {realFeel.score != null && (
-                <span style={{
-                  fontSize: 9, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
-                  background: realFeel.score >= 70 ? "rgba(239,68,68,0.12)"
-                            : realFeel.score >= 50 ? "rgba(245,158,11,0.12)"
-                            : realFeel.score >= 35 ? "rgba(107,114,128,0.12)"
-                            : "rgba(96,165,250,0.12)",
-                  color: realFeel.score >= 70 ? "#ef4444"
-                       : realFeel.score >= 50 ? "#f59e0b"
-                       : realFeel.score >= 35 ? "#6b7280"
-                       : "#60a5fa",
-                }}>
-                  🌡️ {realFeel.score} {realFeel.label || ""}
-                </span>
-              )}
-              {game.status && (
-                <span style={{ fontSize: 9, color: "#4a5568" }}>{game.status}</span>
+                {park.factor && (
+                  <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: `${parkColor}15`, color: parkColor, fontWeight: 600 }}>
+                    PF {park.factor}
+                  </span>
+                )}
+                {realFeel.score != null && (
+                  <span style={{
+                    fontSize: 9, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
+                    background: realFeel.score >= 70 ? "rgba(239,68,68,0.12)"
+                              : realFeel.score >= 50 ? "rgba(245,158,11,0.12)"
+                              : realFeel.score >= 35 ? "rgba(107,114,128,0.12)"
+                              : "rgba(96,165,250,0.12)",
+                    color: realFeel.score >= 70 ? "#ef4444"
+                         : realFeel.score >= 50 ? "#f59e0b"
+                         : realFeel.score >= 35 ? "#6b7280"
+                         : "#60a5fa",
+                  }}>
+                    🌡️ {realFeel.score} {realFeel.label || ""}
+                  </span>
+                )}
+                {game.status && (
+                  <span style={{ fontSize: 9, color: "#4a5568" }}>{game.status}</span>
+                )}
+              </div>
+              {game.venue && (
+                <div style={{ fontSize: 10, color: "#374151", marginTop: 2 }}>{game.venue}</div>
               )}
             </div>
-            {game.venue && (
-              <div style={{ fontSize: 10, color: "#374151", marginTop: 2 }}>{game.venue}</div>
-            )}
+
+            {/* Right: lean badge + arrow (stays compact, never overflows) */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              {lean ? (
+                <div style={{
+                  padding: "5px 12px", borderRadius: 6,
+                  background: `${confColor}15`, border: `1px solid ${confColor}30`
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 800, color: confColor }}>{lean}</span>
+                  <span style={{ fontSize: 9, color: confColor, opacity: 0.7, marginLeft: 4 }}>{conf}</span>
+                </div>
+              ) : (
+                <span style={{ fontSize: 11, color: "#374151" }}>No lean</span>
+              )}
+              <span style={{ fontSize: 12, color: "#374151" }}>{isExpanded ? "▲" : "▼"}</span>
+            </div>
           </div>
 
-          {/* Starters line — most important context */}
+          {/* Row 2: starters — own line, wraps cleanly */}
           {(analysis.away_starter?.name || game.away_starter) && (
-            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: "#6b7280" }}>
               <span style={{ color: "#94a3b8", fontWeight: 600 }}>
                 {analysis.away_starter?.name || game.away_starter}
               </span>
@@ -203,29 +230,17 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
             </div>
           )}
 
-          {/* Right: lean + odds */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {hasOdds && (
-              <div style={{ fontSize: 11, color: "#6b7280" }}>
-                {game.away_team} {awayML} / {game.home_team} {homeML}
-              </div>
-            )}
-            {game.total && (
-              <div style={{ fontSize: 11, color: "#6b7280" }}>O/U {game.total}</div>
-            )}
-            {lean ? (
-              <div style={{
-                padding: "5px 12px", borderRadius: 6,
-                background: `${confColor}15`, border: `1px solid ${confColor}30`
-              }}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: confColor }}>{lean}</span>
-                <span style={{ fontSize: 9, color: confColor, opacity: 0.7, marginLeft: 4 }}>{conf}</span>
-              </div>
-            ) : (
-              <span style={{ fontSize: 11, color: "#374151" }}>No lean</span>
-            )}
-            <span style={{ fontSize: 12, color: "#374151" }}>{isExpanded ? "▲" : "▼"}</span>
-          </div>
+          {/* Row 3: odds — own line, won't push off screen */}
+          {(hasOdds || game.total) && (
+            <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#6b7280", flexWrap: "wrap" }}>
+              {hasOdds && (
+                <span>{game.away_team} {awayML} / {game.home_team} {homeML}</span>
+              )}
+              {game.total && (
+                <span>O/U {game.total}</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Narrative preview */}
@@ -263,7 +278,7 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>
                     Starting Pitchers
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
                     {[
                       { sp: analysis.away_starter, team: game.away_team, tto: analysis.away_tto },
                       { sp: analysis.home_starter, team: game.home_team, tto: analysis.home_tto },
@@ -299,7 +314,7 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                       ⚠ Early season — ERA/WHIP showing 2025 season where current IP &lt;15
                     </div>
                   )}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
                     {[ab, hb].map((bp, i) => (
                       <div key={i}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>{bp.team || (i === 0 ? game.away_team : game.home_team)}</div>
@@ -344,7 +359,7 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
               {(apyth.actual_wpct != null || hpyth.actual_wpct != null) && (
                 <div style={{ marginTop: 14 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>Pythagorean Record</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, fontSize: 11 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, fontSize: 11 }}>
                     {[
                       { r: apyth, team: game.away_team },
                       { r: hpyth, team: game.home_team }

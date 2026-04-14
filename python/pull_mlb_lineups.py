@@ -324,6 +324,9 @@ def compute_team_lineup_features(batter_ids, season, game_date_str,
         "lineup_vs_starter_ops": avg([b[split_key] for b in qualified]),
         # Handedness composition
         "lineup_lhb_count": sum(1 for b in batters if b["hand"] in ("L", "S")),
+        # Raw batter IDs (comma-delimited) — needed for pitch-type matching
+        # in build_features. Full lineup in batting order.
+        "batter_ids": ",".join(str(b["id"]) for b in batters),
     }
 
 

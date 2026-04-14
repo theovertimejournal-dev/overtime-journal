@@ -275,7 +275,7 @@ def get_team_recent_form(team_id, season, end_date, n=30):
                                      "startDate": start_dt, "endDate": end_date})
     wins, losses, rf, ra, games = 0, 0, 0, 0, 0
     rf7, ra7, games7 = 0, 0, 0
-    cutoff_7 = pd.Timestamp(end_date) - pd.Timedelta(days=7)
+    cutoff_7 = pd.Timestamp(end_date, tz="UTC") - pd.Timedelta(days=7)
     for d in payload.get("dates", []):
         for g in d.get("games", []):
             if g.get("status", {}).get("codedGameState") not in ("F", "O"): continue
@@ -288,9 +288,16 @@ def get_team_recent_form(team_id, season, end_date, n=30):
                 continue
             wins += int(tr > opp); losses += int(tr < opp)
             rf += tr; ra += opp; games += 1
-            game_dt = pd.Timestamp(g.get("gameDate"))
-            if game_dt >= cutoff_7:
-                rf7 += tr; ra7 += opp; games7 += 1
+            try:
+                game_dt = pd.Timestamp(g.get("gameDate"))
+                if game_dt.tz is None:
+                    game_dt = game_dt.tz_localize("UTC")
+                else:
+                    game_dt = game_dt.tz_convert("UTC")
+                if game_dt >= cutoff_7:
+                    rf7 += tr; ra7 += opp; games7 += 1
+            except Exception:
+                pass
     if games == 0: return {}
     return {
         "winpct_l10": round(wins / games, 3) if games >= 3 else None,

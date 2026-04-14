@@ -100,14 +100,8 @@ def get_hitter_splits(pb, batter_id, season):
 
 
 def process_year(year, pb):
-    lineup_path = INPUT_DIR / f"lineup_features_{year}.parquet"
-    if not lineup_path.exists():
-        log.error("missing %s — run pull_mlb_lineups first", lineup_path); return
-
-    # We need the actual batter IDs from the lineup pull. The lineup_features
-    # parquet aggregates per game; we need the underlying lineup contents.
-    # Easiest path: re-derive unique batters from the boxscores referenced in
-    # pitcher_features (which has gamePk).
+    # We pull unique batters directly from boxscores (via gamePks in pitcher_features)
+    # so we don't actually need the lineup file - just the pitcher one.
     pitcher_path = INPUT_DIR / f"pitcher_features_{year}.parquet"
     if not pitcher_path.exists():
         log.error("missing %s", pitcher_path); return

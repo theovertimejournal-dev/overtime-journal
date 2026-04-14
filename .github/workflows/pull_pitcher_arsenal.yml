@@ -1,0 +1,59 @@
+name: Pull Pitcher Arsenal
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Year (blank = both)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - "2024"
+          - "2025"
+      pitcher_run_id:
+        description: "Pull MLB Pitchers run ID"
+        required: true
+        type: string
+
+jobs:
+  arsenal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install pandas pyarrow pybaseball requests
+
+      - name: Download pitchers
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-pitcher-data
+          path: data/
+          run-id: ${{ inputs.pitcher_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run arsenal pull
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="--year ${{ inputs.year }}"
+          fi
+          python python/pull_pitcher_arsenal.py $ARGS
+
+      - name: Upload arsenal data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-arsenal-data
+          path: |
+            data/pitcher_arsenal_*.parquet
+            data/preview_arsenal_*.csv
+          retention-days: 14

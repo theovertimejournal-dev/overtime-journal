@@ -136,6 +136,21 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
   const signals = game.signals || [];
   const confColor = CONF_COLOR[conf] || "#6b7280";
 
+  // ML model data (from predict_mlb_today.py → game.scores)
+  const scores = game.scores || {};
+  const isMLPrediction = scores.model_version === "v5_ensemble" || scores.base_model_probs;
+  const fullHomeProb = scores.full_ml_home_prob;
+  const fullAwayProb = scores.full_ml_away_prob;
+  const f5HomeProb = scores.f5_ml_home_prob;
+  const f5AwayProb = scores.f5_ml_away_prob;
+  const runTotalLean = scores.run_total_lean;
+
+  // Compute displayed probability for the lean direction
+  const leanProb = lean === "HOME" ? fullHomeProb : lean === "AWAY" ? fullAwayProb : null;
+  const leanTeam = lean === "HOME" ? game.home_team : lean === "AWAY" ? game.away_team : null;
+  const f5Prob = f5HomeProb != null ? Math.max(f5HomeProb, f5AwayProb) : null;
+  const f5Team = f5HomeProb != null ? (f5HomeProb >= f5AwayProb ? game.home_team : game.away_team) : null;
+
   const hasOdds = game.ml_home != null || game.ml_away != null;
   const awayML = game.ml_away != null ? (game.ml_away > 0 ? `+${game.ml_away}` : `${game.ml_away}`) : null;
   const homeML = game.ml_home != null ? (game.ml_home > 0 ? `+${game.ml_home}` : `${game.ml_home}`) : null;
@@ -205,10 +220,22 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
               {lean ? (
                 <div style={{
                   padding: "5px 12px", borderRadius: 6,
-                  background: `${confColor}15`, border: `1px solid ${confColor}30`
+                  background: `${confColor}15`, border: `1px solid ${confColor}30`,
+                  display: "flex", alignItems: "center", gap: 5,
                 }}>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: confColor }}>{lean}</span>
-                  <span style={{ fontSize: 9, color: confColor, opacity: 0.7, marginLeft: 4 }}>{conf}</span>
+                  {isMLPrediction && (
+                    <span title="ML Ensemble Model" style={{ fontSize: 10 }}>🤖</span>
+                  )}
+                  <span style={{ fontSize: 12, fontWeight: 800, color: confColor }}>
+                    {leanTeam || lean}
+                  </span>
+                  {leanProb != null ? (
+                    <span style={{ fontSize: 11, color: confColor, fontWeight: 700 }}>
+                      {(leanProb * 100).toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 9, color: confColor, opacity: 0.7 }}>{conf}</span>
+                  )}
                 </div>
               ) : (
                 <span style={{ fontSize: 11, color: "#374151" }}>No lean</span>
@@ -269,6 +296,76 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                 <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(96,165,250,0.04)", border: "1px solid rgba(96,165,250,0.1)", borderRadius: 8 }}>
                   <div style={{ fontSize: 10, fontWeight: 600, color: "#60a5fa", marginBottom: 4, textTransform: "uppercase" }}>OTJ Analysis</div>
                   <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>{game.narrative}</div>
+                </div>
+              )}
+
+              {/* ML Model Predictions */}
+              {isMLPrediction && (
+                <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(168,85,247,0.04)", border: "1px solid rgba(168,85,247,0.15)", borderRadius: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                    <span style={{ fontSize: 12 }}>🤖</span>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#a855f7", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      ML Ensemble Predictions
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                    {/* Full Game ML */}
+                    {fullHomeProb != null && (
+                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>Full Game ML</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>
+                          {fullHomeProb >= fullAwayProb ? game.home_team : game.away_team}
+                          <span style={{ color: confColor, marginLeft: 6 }}>
+                            {(Math.max(fullHomeProb, fullAwayProb) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
+                          {game.away_team} {(fullAwayProb * 100).toFixed(0)}% / {game.home_team} {(fullHomeProb * 100).toFixed(0)}%
+                        </div>
+                      </div>
+                    )}
+                    {/* First 5 Innings ML */}
+                    {f5HomeProb != null && (
+                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>First 5 ML</div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>
+                          {f5Team}
+                          <span style={{ color: "#a855f7", marginLeft: 6 }}>
+                            {(f5Prob * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
+                          {game.away_team} {(f5AwayProb * 100).toFixed(0)}% / {game.home_team} {(f5HomeProb * 100).toFixed(0)}%
+                        </div>
+                      </div>
+                    )}
+                    {/* Run Total Lean */}
+                    {runTotalLean && (
+                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>Run Total</div>
+                        <div style={{
+                          fontSize: 13, fontWeight: 700,
+                          color: runTotalLean === "OVER" ? "#f59e0b" : runTotalLean === "UNDER" ? "#60a5fa" : "#94a3b8"
+                        }}>
+                          {runTotalLean}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
+                          park · arsenal · weather
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Optional: base model agreement */}
+                  {scores.base_model_probs && (
+                    <div style={{ marginTop: 10, fontSize: 9, color: "#4a5568", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ color: "#6b7280" }}>Models:</span>
+                      {Object.entries(scores.base_model_probs).map(([m, p]) => (
+                        <span key={m}>
+                          {m.toUpperCase()} <span style={{ color: "#94a3b8" }}>{(p * 100).toFixed(0)}%</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

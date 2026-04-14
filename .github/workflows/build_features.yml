@@ -4,22 +4,34 @@ on:
   workflow_dispatch:
     inputs:
       backfill_run_id:
-        description: "Run ID of Backfill MLB History workflow"
+        description: "Backfill MLB History run ID"
         required: true
         type: string
       pitcher_run_id:
-        description: "Run ID of Pull MLB Pitchers workflow"
+        description: "Pull MLB Pitchers run ID"
         required: true
         type: string
       bullpen_run_id:
-        description: "Run ID of Pull MLB Bullpen workflow"
+        description: "Pull MLB Bullpen run ID"
+        required: true
+        type: string
+      lineup_run_id:
+        description: "Pull MLB Lineups run ID (the one with batter_ids)"
+        required: true
+        type: string
+      arsenal_run_id:
+        description: "Pull Pitcher Arsenal run ID"
+        required: true
+        type: string
+      hitter_splits_run_id:
+        description: "Pull Hitter Pitch Splits run ID"
         required: true
         type: string
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +43,7 @@ jobs:
       - name: Install deps
         run: pip install pandas pyarrow numpy
 
-      - name: Download backfill (games)
+      - name: Download backfill
         uses: actions/download-artifact@v4
         with:
           name: mlb-historical-data
@@ -53,6 +65,30 @@ jobs:
           name: mlb-bullpen-data
           path: data/
           run-id: ${{ inputs.bullpen_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download lineups
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-lineup-data
+          path: data/
+          run-id: ${{ inputs.lineup_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download arsenal
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-arsenal-data
+          path: data/
+          run-id: ${{ inputs.arsenal_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download hitter splits
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-hitter-splits-data
+          path: data/
+          run-id: ${{ inputs.hitter_splits_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: List downloads

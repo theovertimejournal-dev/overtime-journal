@@ -1,0 +1,60 @@
+name: Build MLB Features
+
+on:
+  workflow_dispatch:
+    inputs:
+      backfill_run_id:
+        description: "Run ID of Backfill MLB History workflow"
+        required: true
+        type: string
+      pitcher_run_id:
+        description: "Run ID of Pull MLB Pitchers workflow"
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install pandas pyarrow numpy
+
+      - name: Download historical games parquets
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-historical-data
+          path: data/
+          run-id: ${{ inputs.backfill_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pitcher parquets
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-pitcher-data
+          path: data/
+          run-id: ${{ inputs.pitcher_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List downloaded files
+        run: ls -la data/
+
+      - name: Build features
+        run: python python/build_features.py
+
+      - name: Upload training data + previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-training-data
+          path: |
+            data/mlb_training_data_*.parquet
+            data/preview_features_*.csv
+          retention-days: 14

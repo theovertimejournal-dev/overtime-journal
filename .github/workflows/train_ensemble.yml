@@ -1,0 +1,54 @@
+name: Train MLB Ensemble
+
+on:
+  workflow_dispatch:
+    inputs:
+      training_run_id:
+        description: "Build MLB Features run ID (the one that produced training parquets)"
+        required: true
+        type: string
+      variant:
+        description: "Which variant to train"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - "all"
+          - "full_with_line"
+          - "full_no_line"
+          - "f5_with_line"
+          - "f5_no_line"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install pandas pyarrow numpy scikit-learn lightgbm xgboost catboost
+
+      - name: Download training data
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-training-data
+          path: data/
+          run-id: ${{ inputs.training_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Train ensemble
+        run: python python/train_ensemble.py --variant ${{ inputs.variant }}
+
+      - name: Upload trained models
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-trained-models
+          path: |
+            models/**
+          retention-days: 30

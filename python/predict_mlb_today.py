@@ -378,7 +378,123 @@ def american_to_implied_prob(odds):
     return 100 / (odds + 100)
 
 
-def build_features_for_game(g, season, today, full_feature_list):
+# ── Live lineups + cached arsenal/hitter splits ─────────────────────────────
+
+def load_cached_lookups():
+    """Load arsenal + hitter_splits parquets as in-memory lookups."""
+    arsenal_lookup = {}  # (pitcher_id, season) -> arsenal dict
+    hitter_lookup = {}   # (batter_id, season) -> splits dict
+
+    for year in (2024, 2025, 2026):
+        ap = DATA_DIR / f"pitcher_arsenal_{year}.parquet"
+        if ap.exists():
+            df = pd.read_parquet(ap)
+            for _, r in df.iterrows():
+                key = (int(r["pitcher_id"]), int(r["season"]))
+                arsenal_lookup[key] = {
+                    "fastball_pct": r.get("arsenal_fastball_pct"),
+                    "breaking_pct": r.get("arsenal_breaking_pct"),
+                    "offspeed_pct": r.get("arsenal_offspeed_pct"),
+                    "fb_velo": r.get("arsenal_fb_velo"),
+                    "fb_whiff": r.get("arsenal_fb_whiff"),
+                    "breaking_whiff": r.get("arsenal_breaking_whiff"),
+                    "overall_xwoba": r.get("arsenal_overall_xwoba"),
+                }
+
+        hp = DATA_DIR / f"hitter_pitch_splits_{year}.parquet"
+        if hp.exists():
+            df = pd.read_parquet(hp)
+            for _, r in df.iterrows():
+                key = (int(r["batter_id"]), int(r["season"]))
+                hitter_lookup[key] = {
+                    "vs_fb_woba": r.get("vs_fastball_woba"),
+                    "vs_br_woba": r.get("vs_breaking_woba"),
+                    "vs_os_woba": r.get("vs_offspeed_woba"),
+                    "pitches_seen": r.get("total_pitches_seen", 0),
+                }
+
+    log.info("loaded cache: %s arsenals, %s hitters",
+             len(arsenal_lookup), len(hitter_lookup))
+    return arsenal_lookup, hitter_lookup
+
+
+def get_todays_lineup(game_pk, side):
+    """Returns list of batter IDs for one team from the boxscore.
+    Falls back to empty list if not yet confirmed."""
+    payload = mlb_get(f"/game/{game_pk}/boxscore")
+    if not payload: return []
+    team = payload.get("teams", {}).get(side, {})
+    # battingOrder is the confirmed lineup
+    order = team.get("battingOrder", [])
+    if order:
+        # order is list of "ID123456" strings or ints
+        return [int(str(x).replace("ID", "")) for x in order[:9]]
+    # Fallback: use batters list
+    batters = team.get("batters", [])
+    return [int(b) for b in batters[:9]]
+
+
+def get_batter_season_stats(batter_id, season):
+    """OPS + handedness + L/R splits for one batter."""
+    if not batter_id: return {}
+    try:
+        payload = mlb_get(f"/people/{batter_id}/stats",
+                          {"stats": "season", "group": "hitting", "season": season})
+        splits = payload.get("stats", [{}])[0].get("splits", [])
+        if not splits: return {}
+        s = splits[0].get("stat", {})
+        return {
+            "ops": float(s.get("ops", 0)) if s.get("ops") else None,
+            "obp": float(s.get("obp", 0)) if s.get("obp") else None,
+            "slg": float(s.get("slg", 0)) if s.get("slg") else None,
+            "pa": int(s.get("plateAppearances", 0)),
+        }
+    except Exception:
+        return {}
+
+
+def compute_lineup_features(batter_ids, season):
+    """Aggregate OPS etc across 9 starters. Skips early-season bench guys."""
+    if not batter_ids: return {}
+    ops_vals, obp_vals, slg_vals = [], [], []
+    for bid in batter_ids:
+        s = get_batter_season_stats(bid, season)
+        if s.get("pa", 0) >= 20 and s.get("ops"):
+            ops_vals.append(s["ops"])
+            if s.get("obp"): obp_vals.append(s["obp"])
+            if s.get("slg"): slg_vals.append(s["slg"])
+        time.sleep(0.03)
+    if not ops_vals: return {}
+    return {
+        "lineup_avg_ops": sum(ops_vals) / len(ops_vals),
+        "lineup_avg_obp": sum(obp_vals) / len(obp_vals) if obp_vals else None,
+        "lineup_avg_slg": sum(slg_vals) / len(slg_vals) if slg_vals else None,
+        "top3_avg_ops": sum(sorted(ops_vals, reverse=True)[:3]) / min(3, len(ops_vals)),
+        "n_qualified": len(ops_vals),
+    }
+
+
+def compute_arsenal_match(batter_ids, pitcher_arsenal, hitter_lookup, season):
+    """The killer feature: weighted wOBA against pitcher's pitch mix."""
+    if not batter_ids or not pitcher_arsenal: return None
+    p_fb = pitcher_arsenal.get("fastball_pct") or 0
+    p_br = pitcher_arsenal.get("breaking_pct") or 0
+    p_os = pitcher_arsenal.get("offspeed_pct") or 0
+    total = p_fb + p_br + p_os
+    if total <= 0: return None
+    w_fb, w_br, w_os = p_fb / total, p_br / total, p_os / total
+
+    vals = []
+    for bid in batter_ids:
+        s = hitter_lookup.get((bid, season)) or hitter_lookup.get((bid, season - 1))
+        if not s or s.get("pitches_seen", 0) < 200: continue
+        if None in (s.get("vs_fb_woba"), s.get("vs_br_woba"), s.get("vs_os_woba")): continue
+        vals.append(w_fb * s["vs_fb_woba"] + w_br * s["vs_br_woba"] + w_os * s["vs_os_woba"])
+    return sum(vals) / len(vals) if vals else None
+
+
+def build_features_for_game(g, season, today, full_feature_list,
+                             arsenal_lookup=None, hitter_lookup=None):
     """Returns a single-row dict of ALL features the model expects."""
     home_sgo = g["home_sgo"]
     away_sgo = g["away_sgo"]
@@ -405,6 +521,33 @@ def build_features_for_game(g, season, today, full_feature_list):
 
     # Park
     park_factor = PARK_FACTORS_BY_TEAM.get(home_sgo, 100)
+
+    # Lineups (live)
+    home_batter_ids = get_todays_lineup(g["game_pk"], "home")
+    away_batter_ids = get_todays_lineup(g["game_pk"], "away")
+    home_lineup = compute_lineup_features(home_batter_ids, season) if home_batter_ids else {}
+    away_lineup = compute_lineup_features(away_batter_ids, season) if away_batter_ids else {}
+
+    # Arsenal (from cache, with previous-season fallback)
+    home_arsenal = None
+    away_arsenal = None
+    if arsenal_lookup:
+        home_arsenal = arsenal_lookup.get((g["home_starter_id"], season)) if g.get("home_starter_id") else None
+        if not home_arsenal and g.get("home_starter_id"):
+            home_arsenal = arsenal_lookup.get((g["home_starter_id"], season - 1))
+        away_arsenal = arsenal_lookup.get((g["away_starter_id"], season)) if g.get("away_starter_id") else None
+        if not away_arsenal and g.get("away_starter_id"):
+            away_arsenal = arsenal_lookup.get((g["away_starter_id"], season - 1))
+
+    # Arsenal match (killer feature)
+    home_match_woba = None
+    away_match_woba = None
+    if hitter_lookup and away_arsenal and home_batter_ids:
+        # Home lineup faces AWAY pitcher's arsenal
+        home_match_woba = compute_arsenal_match(home_batter_ids, away_arsenal, hitter_lookup, season)
+    if hitter_lookup and home_arsenal and away_batter_ids:
+        # Away lineup faces HOME pitcher's arsenal
+        away_match_woba = compute_arsenal_match(away_batter_ids, home_arsenal, hitter_lookup, season)
 
     # Build feature row
     row = {}
@@ -469,6 +612,45 @@ def build_features_for_game(g, season, today, full_feature_list):
     row["month"] = pd.Timestamp(today).month
     row["day_of_week"] = pd.Timestamp(today).dayofweek
     row["is_weekend"] = 1 if row["day_of_week"] in (5, 6) else 0
+
+    # Lineup features
+    row["home_lineup_avg_ops"] = home_lineup.get("lineup_avg_ops")
+    row["away_lineup_avg_ops"] = away_lineup.get("lineup_avg_ops")
+    row["home_lineup_avg_obp"] = home_lineup.get("lineup_avg_obp")
+    row["away_lineup_avg_obp"] = away_lineup.get("lineup_avg_obp")
+    row["home_lineup_avg_slg"] = home_lineup.get("lineup_avg_slg")
+    row["away_lineup_avg_slg"] = away_lineup.get("lineup_avg_slg")
+    row["home_top3_avg_ops"] = home_lineup.get("top3_avg_ops")
+    row["away_top3_avg_ops"] = away_lineup.get("top3_avg_ops")
+    if home_lineup.get("lineup_avg_ops") and away_lineup.get("lineup_avg_ops"):
+        row["lineup_ops_edge"] = home_lineup["lineup_avg_ops"] - away_lineup["lineup_avg_ops"]
+    if home_lineup.get("top3_avg_ops") and away_lineup.get("top3_avg_ops"):
+        row["lineup_top3_edge"] = home_lineup["top3_avg_ops"] - away_lineup["top3_avg_ops"]
+
+    # Arsenal features
+    if home_arsenal:
+        row["home_arsenal_fastball_pct"] = home_arsenal.get("fastball_pct")
+        row["home_arsenal_breaking_pct"] = home_arsenal.get("breaking_pct")
+        row["home_arsenal_offspeed_pct"] = home_arsenal.get("offspeed_pct")
+        row["home_arsenal_fb_velo"] = home_arsenal.get("fb_velo")
+        row["home_arsenal_overall_xwoba"] = home_arsenal.get("overall_xwoba")
+    if away_arsenal:
+        row["away_arsenal_fastball_pct"] = away_arsenal.get("fastball_pct")
+        row["away_arsenal_breaking_pct"] = away_arsenal.get("breaking_pct")
+        row["away_arsenal_offspeed_pct"] = away_arsenal.get("offspeed_pct")
+        row["away_arsenal_fb_velo"] = away_arsenal.get("fb_velo")
+        row["away_arsenal_overall_xwoba"] = away_arsenal.get("overall_xwoba")
+    if home_arsenal and away_arsenal:
+        if home_arsenal.get("overall_xwoba") and away_arsenal.get("overall_xwoba"):
+            row["arsenal_overall_xwoba_edge"] = away_arsenal["overall_xwoba"] - home_arsenal["overall_xwoba"]
+        if home_arsenal.get("fb_velo") and away_arsenal.get("fb_velo"):
+            row["arsenal_fb_velo_edge"] = home_arsenal["fb_velo"] - away_arsenal["fb_velo"]
+
+    # THE KILLER FEATURE: arsenal match
+    row["home_arsenal_match_woba"] = home_match_woba
+    row["away_arsenal_match_woba"] = away_match_woba
+    if home_match_woba is not None and away_match_woba is not None:
+        row["arsenal_match_edge"] = home_match_woba - away_match_woba
 
     # Ensure ALL features model expects are present (fill missing with NaN -> imputer)
     for feat in full_feature_list:
@@ -557,12 +739,17 @@ def main():
 
     full_features = full_nl["features"]  # superset
 
+    # Load cached arsenal + hitter splits from parquets
+    arsenal_lookup, hitter_lookup = load_cached_lookups()
+
     # Step 3: Predict each game
     predictions = []
     for i, g in enumerate(games):
         log.info("[%s/%s] %s @ %s", i+1, len(games), g["away_abbrev"], g["home_abbrev"])
         try:
-            row = build_features_for_game(g, season, game_date, full_features)
+            row = build_features_for_game(g, season, game_date, full_features,
+                                           arsenal_lookup=arsenal_lookup,
+                                           hitter_lookup=hitter_lookup)
         except Exception as e:
             log.warning("  feature build failed: %s", e); continue
 

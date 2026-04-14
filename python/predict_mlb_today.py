@@ -499,6 +499,9 @@ def load_model_bundle(variant):
 def predict_one(bundle, row):
     feats = bundle["features"]
     X = pd.DataFrame([{f: row.get(f) for f in feats}])
+    # Force all columns to numeric float — LightGBM rejects 'object' dtype
+    for col in X.columns:
+        X[col] = pd.to_numeric(X[col], errors="coerce")
     base_preds = {}
     for name in ("lgb", "xgb", "rf", "lr", "cat"):
         if name not in bundle: continue

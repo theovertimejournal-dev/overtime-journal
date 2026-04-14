@@ -1,0 +1,59 @@
+name: Pull MLB Umpires
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Year (blank = both)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - "2024"
+          - "2025"
+      pitcher_run_id:
+        description: "Pull MLB Pitchers run ID (provides gamePks)"
+        required: true
+        type: string
+
+jobs:
+  umpires:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests pandas pyarrow
+
+      - name: Download pitchers
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-pitcher-data
+          path: data/
+          run-id: ${{ inputs.pitcher_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run umpire pull
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="--year ${{ inputs.year }}"
+          fi
+          python python/pull_mlb_umpires.py $ARGS
+
+      - name: Upload umpire data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-umpire-data
+          path: |
+            data/umpire_features_*.parquet
+            data/preview_umpires_*.csv
+          retention-days: 14

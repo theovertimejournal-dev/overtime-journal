@@ -1,0 +1,71 @@
+name: Pull MLB Lineups
+
+on:
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Year (blank = both 2024 & 2025)"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - "2024"
+          - "2025"
+      backfill_run_id:
+        description: "Backfill MLB History run ID"
+        required: true
+        type: string
+      pitcher_run_id:
+        description: "Pull MLB Pitchers run ID"
+        required: true
+        type: string
+
+jobs:
+  lineups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # 6 hours, this one's long
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install requests pandas pyarrow
+
+      - name: Download backfill
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-historical-data
+          path: data/
+          run-id: ${{ inputs.backfill_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pitchers (need gamePks)
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-pitcher-data
+          path: data/
+          run-id: ${{ inputs.pitcher_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run lineup pull
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="--year ${{ inputs.year }}"
+          fi
+          python python/pull_mlb_lineups.py $ARGS
+
+      - name: Upload lineup data
+        if: always()   # save partial work even on timeout
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlb-lineup-data
+          path: |
+            data/lineup_features_*.parquet
+            data/preview_lineups_*.csv
+          retention-days: 14

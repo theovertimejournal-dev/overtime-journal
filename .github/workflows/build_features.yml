@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       lineup_run_id:
-        description: "Pull MLB Lineups run ID (the one with batter_ids)"
+        description: "Pull MLB Lineups run ID (with batter_ids)"
         required: true
         type: string
       arsenal_run_id:
@@ -25,6 +25,14 @@ on:
         type: string
       hitter_splits_run_id:
         description: "Pull Hitter Pitch Splits run ID"
+        required: true
+        type: string
+      umpire_run_id:
+        description: "Pull MLB Umpires run ID"
+        required: true
+        type: string
+      weather_run_id:
+        description: "Pull MLB Weather run ID"
         required: true
         type: string
 
@@ -89,6 +97,22 @@ jobs:
           name: mlb-hitter-splits-data
           path: data/
           run-id: ${{ inputs.hitter_splits_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download umpires
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-umpire-data
+          path: data/
+          run-id: ${{ inputs.umpire_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download weather
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-weather-data
+          path: data/
+          run-id: ${{ inputs.weather_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: List downloads

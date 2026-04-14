@@ -459,11 +459,21 @@ def compute_lineup_features(batter_ids, season):
     ops_vals, obp_vals, slg_vals = [], [], []
     for bid in batter_ids:
         s = get_batter_season_stats(bid, season)
-        if s.get("pa", 0) >= 20 and s.get("ops"):
+        # Early season: accept any qualified batter with at least 5 PAs
+        if s.get("pa", 0) >= 5 and s.get("ops"):
             ops_vals.append(s["ops"])
             if s.get("obp"): obp_vals.append(s["obp"])
             if s.get("slg"): slg_vals.append(s["slg"])
         time.sleep(0.03)
+    # Also try previous season as fallback if still no data
+    if not ops_vals:
+        for bid in batter_ids:
+            s = get_batter_season_stats(bid, season - 1)
+            if s.get("pa", 0) >= 50 and s.get("ops"):
+                ops_vals.append(s["ops"])
+                if s.get("obp"): obp_vals.append(s["obp"])
+                if s.get("slg"): slg_vals.append(s["slg"])
+            time.sleep(0.03)
     if not ops_vals: return {}
     return {
         "lineup_avg_ops": sum(ops_vals) / len(ops_vals),

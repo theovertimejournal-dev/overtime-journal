@@ -1,0 +1,61 @@
+name: Predict MLB Today
+
+on:
+  workflow_dispatch:
+    inputs:
+      trained_models_run_id:
+        description: "Train MLB Ensemble run ID (source of trained models)"
+        required: true
+        type: string
+      game_date:
+        description: "Game date (YYYY-MM-DD, blank = today)"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Dry run (no DB writes)"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install pandas pyarrow numpy scikit-learn lightgbm xgboost catboost requests supabase python-dotenv
+
+      - name: Download trained models
+        uses: actions/download-artifact@v4
+        with:
+          name: mlb-trained-models
+          path: models/
+          run-id: ${{ inputs.trained_models_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: List models
+        run: ls -la models/ && ls -la models/full_no_line/ || true
+
+      - name: Run predictions
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.game_date }}" ]; then
+            ARGS="$ARGS --date=${{ inputs.game_date }}"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python python/predict_mlb_today.py $ARGS

@@ -10,10 +10,12 @@ on:
       arsenal_run_id:
         description: "Pull Pitcher Arsenal run ID (cached arsenal data)"
         required: true
+        default: "24395104024"
         type: string
       hitter_splits_run_id:
         description: "Pull Hitter Pitch Splits run ID (cached hitter data)"
         required: true
+        default: "24395285253"
         type: string
       game_date:
         description: "Game date (YYYY-MM-DD, blank = today)"

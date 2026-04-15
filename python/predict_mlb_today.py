@@ -662,6 +662,39 @@ def build_features_for_game(g, season, today, full_feature_list,
     if home_match_woba is not None and away_match_woba is not None:
         row["arsenal_match_edge"] = home_match_woba - away_match_woba
 
+    # ── Interaction features (mirrors build_features.add_interaction_features) ──
+    era_edge = row.get("era_edge")
+    if era_edge is not None:
+        abs_era = abs(era_edge)
+        row["pitcher_parity"] = math.exp(-abs_era / 0.8)
+        row["pitcher_dominance"] = max(0, min(1, 1 - row["pitcher_parity"]))
+        row["era_edge_x_dominance"] = era_edge * row["pitcher_dominance"]
+    else:
+        row["pitcher_parity"] = 0.5
+        row["pitcher_dominance"] = 0.5
+        row["era_edge_x_dominance"] = 0
+
+    home_era = row.get("home_p_era") or 4.5
+    away_era = row.get("away_p_era") or 4.5
+    home_ace = 1 if home_era < 3.00 else 0
+    away_ace = 1 if away_era < 3.00 else 0
+    home_tank = 1 if home_era > 5.00 else 0
+    away_tank = 1 if away_era > 5.00 else 0
+    row["has_ace_pitcher"] = home_ace or away_ace
+    row["has_tank_pitcher"] = home_tank or away_tank
+    row["ace_vs_tank"] = (home_ace and away_tank) or (away_ace and home_tank)
+    row["ace_vs_tank"] = int(row["ace_vs_tank"])
+
+    parity = row["pitcher_parity"]
+    if row.get("lineup_ops_edge") is not None:
+        row["lineup_x_parity"] = row["lineup_ops_edge"] * parity
+    if row.get("lineup_recent_edge") is not None:
+        row["lineup_recent_x_parity"] = row["lineup_recent_edge"] * parity
+    if row.get("arsenal_match_edge") is not None:
+        row["arsenal_match_x_parity"] = row["arsenal_match_edge"] * parity
+    if row.get("bp_era_edge") is not None:
+        row["bp_x_parity"] = row["bp_era_edge"] * parity
+
     # Ensure ALL features model expects are present (fill missing with NaN -> imputer)
     for feat in full_feature_list:
         if feat not in row: row[feat] = None

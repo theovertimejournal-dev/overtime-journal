@@ -714,6 +714,39 @@ def prob_to_confidence(prob):
     return "LOW"
 
 
+def american_to_decimal(am):
+    """American odds -> decimal (payout multiplier)."""
+    if am is None or pd.isna(am): return None
+    am = float(am)
+    if am < 0: return 1 + 100 / abs(am)
+    return 1 + am / 100
+
+
+def kelly_units(model_prob, american_odds, max_fraction=0.25, unit_scale=20):
+    """
+    Quarter Kelly bet sizing returned as units (0-5 scale).
+
+    Kelly formula: k = (b*p - q) / b
+      where b = decimal_odds - 1, p = our prob, q = 1 - p
+
+    We cap at max_fraction (0.25 = quarter Kelly) and scale to units.
+    unit_scale=20 means 1 unit = 5% of bankroll, so max bet = 5 units.
+    """
+    decimal_odds = american_to_decimal(american_odds)
+    if decimal_odds is None or decimal_odds <= 1: return 0.0
+    if model_prob is None or pd.isna(model_prob): return 0.0
+
+    b = decimal_odds - 1
+    p = model_prob
+    q = 1 - p
+    full_kelly = (b * p - q) / b
+    if full_kelly <= 0: return 0.0  # no edge, don't bet
+
+    fraction = min(full_kelly, max_fraction)
+    units = round(fraction * unit_scale, 1)
+    return units
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -836,9 +869,12 @@ def main():
             "edge": edge,
         })
 
+        pick_prob_pct = (full_prob if pick == "HOME" else (1 - full_prob)) * 100
+        f5_pct_log = (max(f5_prob, 1 - f5_prob) * 100) if f5_prob else None
+
         log.info("  → %s %s (%.1f%%) | F5: %s | Total: %s",
-                 pick_team, confidence, full_prob * 100,
-                 f"{f5_prob*100:.1f}%" if f5_prob else "N/A",
+                 pick_team, confidence, pick_prob_pct,
+                 f"{f5_pct_log:.1f}%" if f5_pct_log else "N/A",
                  run_total_lean or "—")
 
     if not predictions:
@@ -855,16 +891,57 @@ def main():
         return
 
     slate_resp = supabase.table("slates").select("id").eq("sport", "mlb")\
-        .eq("date", game_date).single().execute()
+        .eq("date", game_date).execute()
     if not slate_resp.data:
-        log.error("no slate row for %s mlb", game_date); sys.exit(1)
-    slate_id = slate_resp.data["id"]
+        log.error("no slate row for %s mlb — push slate first, then re-run predictor", game_date)
+        log.info("predictions were generated but not saved. dump:")
+        for p in predictions:
+            log.info("  %s: %s pick, %s%% confidence",
+                     p["matchup"], p["pick"],
+                     round(max(p["edge"]["scores"].get("full_ml_home_prob", 0),
+                               p["edge"]["scores"].get("full_ml_away_prob", 0)) * 100, 1))
+        return
+    slate_id = slate_resp.data[0]["id"]
     log.info("slate_id: %s", slate_id)
+
+    # Fetch current odds for all games in this slate so we can compute Kelly
+    games_resp = supabase.table("games").select("matchup, ml_home, ml_away")\
+        .eq("slate_id", slate_id).execute()
+    odds_by_matchup = {r["matchup"]: {"ml_home": r.get("ml_home"), "ml_away": r.get("ml_away")}
+                       for r in (games_resp.data or [])}
+    log.info("loaded odds for %s games", len(odds_by_matchup))
 
     # Step 5: Upsert predictions to games table
     now_iso = datetime.now(timezone.utc).isoformat()
     updated = 0
     for pred in predictions:
+        # Compute Kelly for this game if odds are available
+        odds_row = odds_by_matchup.get(pred["matchup"], {})
+        ml_home = odds_row.get("ml_home")
+        ml_away = odds_row.get("ml_away")
+        home_prob = pred["edge"]["scores"].get("full_ml_home_prob")
+        away_prob = pred["edge"]["scores"].get("full_ml_away_prob")
+
+        lean = pred["edge"]["lean"]
+        if lean == "HOME":
+            kelly_u = kelly_units(home_prob, ml_home) if ml_home is not None else 0.0
+            vegas_implied = 1.0 / american_to_decimal(ml_home) if ml_home else None
+        elif lean == "AWAY":
+            kelly_u = kelly_units(away_prob, ml_away) if ml_away is not None else 0.0
+            vegas_implied = 1.0 / american_to_decimal(ml_away) if ml_away else None
+        else:
+            kelly_u = 0.0
+            vegas_implied = None
+
+        # Add Kelly fields to the scores
+        pred["edge"]["scores"]["kelly_units"] = kelly_u
+        pred["edge"]["scores"]["kelly_fraction"] = "quarter"
+        if vegas_implied is not None:
+            pred["edge"]["scores"]["vegas_implied_prob"] = round(vegas_implied, 4)
+            model_prob = home_prob if lean == "HOME" else away_prob
+            if model_prob:
+                pred["edge"]["scores"]["model_edge"] = round(model_prob - vegas_implied, 4)
+
         try:
             supabase.table("games").update({
                 "lean": pred["edge"]["lean"],
@@ -874,7 +951,8 @@ def main():
                 "prediction_updated_at": now_iso,
             }).eq("slate_id", slate_id).eq("matchup", pred["matchup"]).execute()
             updated += 1
-            log.info("  ✅ %s updated", pred["matchup"])
+            kelly_str = f"{kelly_u}u" if kelly_u > 0 else "no bet"
+            log.info("  ✅ %s updated (Kelly: %s)", pred["matchup"], kelly_str)
         except Exception as e:
             log.warning("  ❌ %s update failed: %s", pred["matchup"], e)
 

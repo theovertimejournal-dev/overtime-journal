@@ -512,20 +512,69 @@ def generate_narrative(game_data: dict) -> str:
         if away_ip < 15 or home_ip < 15:
             sample_note = "\nNOTE: Early season — bullpen ERA shown is from 2025 season. Do NOT cite tiny current-season numbers."
 
+        # Pre-compute which team has the edge in each metric so Claude can't
+        # screw up the direction (lower ERA = better, lower fatigue = better,
+        # higher K/9 = better, more positive luck = better/lucky).
+        away_era_num = abp.get('bullpen_era') if away_ip >= 15 else abp.get('prior_era')
+        home_era_num = hbp.get('bullpen_era') if home_ip >= 15 else hbp.get('prior_era')
+        away_team = game.get('away_team', 'AWAY')
+        home_team = game.get('home_team', 'HOME')
+
+        edge_summary = []
+        if away_era_num is not None and home_era_num is not None:
+            if away_era_num < home_era_num:
+                edge_summary.append(f"BULLPEN ERA EDGE → {away_team} ({away_era_num} vs {home_era_num}, lower is better)")
+            elif home_era_num < away_era_num:
+                edge_summary.append(f"BULLPEN ERA EDGE → {home_team} ({home_era_num} vs {away_era_num}, lower is better)")
+
+        away_fatigue = abp.get('fatigue_score')
+        home_fatigue = hbp.get('fatigue_score')
+        if away_fatigue is not None and home_fatigue is not None:
+            if abs(away_fatigue - home_fatigue) >= 10:
+                tired_team = away_team if away_fatigue > home_fatigue else home_team
+                edge_summary.append(f"FATIGUE → {tired_team} pen is more gassed ({max(away_fatigue, home_fatigue)} vs {min(away_fatigue, home_fatigue)}, higher = worse)")
+
+        away_k9 = abp.get('bullpen_k_per_9') or abp.get('bullpen_k9')
+        home_k9 = hbp.get('bullpen_k_per_9') or hbp.get('bullpen_k9')
+        if away_k9 is not None and home_k9 is not None:
+            if abs(away_k9 - home_k9) >= 1.5:
+                better = away_team if away_k9 > home_k9 else home_team
+                edge_summary.append(f"BULLPEN K/9 → {better} ({max(away_k9, home_k9)} vs {min(away_k9, home_k9)}, higher is better)")
+
+        edge_text = "\n".join(f"• {x}" for x in edge_summary) if edge_summary else "• No major bullpen edges"
+
+        # The model's pick — narrative MUST agree with this
+        model_pick_team = ""
+        if edge.get('lean') == "HOME":
+            model_pick_team = home_team
+        elif edge.get('lean') == "AWAY":
+            model_pick_team = away_team
+
         prompt = f"""You are OTJ's MLB analyst. Write a punchy 2-3 sentence game preview for bettors.
 
-Game: {game.get('away_team')} @ {game.get('home_team')}
+Game: {away_team} @ {home_team}
 Venue: {game.get('venue')} (Park factor: {park.get('factor', 100)} — {park.get('label', 'NEUTRAL')})
 Starters: {game.get('away_starter', {}).get('name', 'TBD')} vs {game.get('home_starter', {}).get('name', 'TBD')}
 
-Edge lean: {edge.get('lean', 'None')} ({edge.get('confidence', 'LOW')})
-Key signals: {', '.join(s['type'] + ': ' + s['detail'] for s in edge.get('signals', [])[:3])}
+MODEL'S PICK: {model_pick_team or 'no lean'} ({edge.get('confidence', 'LOW')} confidence)
+Your narrative MUST support this pick. Do NOT recommend the other team.
 
-Away bullpen ERA: {away_era_display} | Fatigue score: {abp.get('fatigue_score', 'N/A')}
-Home bullpen ERA: {home_era_display} | Fatigue score: {hbp.get('fatigue_score', 'N/A')}
-Away Pythagorean luck: {apyth.get('luck_factor', 0):+.1f}W | Home luck: {hpyth.get('luck_factor', 0):+.1f}W
+PRE-COMPUTED EDGES (use these — do NOT flip the direction):
+{edge_text}
+
+Raw stats (DO NOT misread direction — lower ERA/fatigue is BETTER, higher K/9 is BETTER):
+{away_team} bullpen ERA: {away_era_display} | Fatigue: {away_fatigue if away_fatigue is not None else 'N/A'}
+{home_team} bullpen ERA: {home_era_display} | Fatigue: {home_fatigue if home_fatigue is not None else 'N/A'}
+{away_team} Pythagorean luck: {apyth.get('luck_factor', 0):+.1f}W | {home_team} luck: {hpyth.get('luck_factor', 0):+.1f}W
 {sample_note}
-Keep it sharp, specific, and under 60 words. Reference the actual teams and numbers."""
+
+Other model signals: {', '.join(s['type'] + ': ' + s['detail'] for s in edge.get('signals', [])[:3])}
+
+Rules:
+- Recommend {model_pick_team or 'whichever side has the edge'}
+- Use the PRE-COMPUTED EDGES verbatim — do not flip them
+- Keep it under 60 words, sharp, specific
+- Reference real numbers from above"""
 
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         msg = client.messages.create(

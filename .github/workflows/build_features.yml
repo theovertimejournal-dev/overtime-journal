@@ -6,34 +6,42 @@ on:
       backfill_run_id:
         description: "Backfill MLB History run ID"
         required: true
+        default: "24380643261"
         type: string
       pitcher_run_id:
         description: "Pull MLB Pitchers run ID"
         required: true
+        default: "24383362620"
         type: string
       bullpen_run_id:
         description: "Pull MLB Bullpen run ID"
         required: true
+        default: "24381377366"
         type: string
       lineup_run_id:
         description: "Pull MLB Lineups run ID (with batter_ids)"
         required: true
+        default: "24404975223"
         type: string
       arsenal_run_id:
         description: "Pull Pitcher Arsenal run ID"
         required: true
+        default: "24395104024"
         type: string
       hitter_splits_run_id:
         description: "Pull Hitter Pitch Splits run ID"
         required: true
+        default: "24395285253"
         type: string
       umpire_run_id:
         description: "Pull MLB Umpires run ID"
         required: true
+        default: "24413363272"
         type: string
       weather_run_id:
         description: "Pull MLB Weather run ID"
         required: true
+        default: "24414543067"
         type: string
 
 jobs:

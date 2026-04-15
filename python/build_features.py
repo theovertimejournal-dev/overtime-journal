@@ -421,6 +421,65 @@ def add_situational_features(df):
     return df
 
 
+def add_interaction_features(df):
+    """
+    Conditional importance features. Lets the model learn rules like:
+      - When pitchers are similar (parity), trust lineup edge more
+      - When one pitcher is elite vs tank, ignore lineup, trust pitcher
+      - Bullpen parity → bullpen edge matters more
+
+    These are EXPLICIT interactions the model can learn from.
+    Tree models can learn implicit interactions, but with limited data
+    (~4,700 games) these explicit features make patterns easier to capture.
+    """
+    if "era_edge" not in df.columns:
+        return df
+
+    # PITCHER PARITY: how similar are the starting pitchers?
+    # |era_edge| is small (<0.5) → high parity (similar pitchers)
+    # |era_edge| is large (>1.5) → low parity (clear advantage)
+    abs_era = df["era_edge"].abs().fillna(1.0)
+    df["pitcher_parity"] = np.exp(-abs_era / 0.8)  # 1.0 when identical, ~0.15 at 1.5 ERA gap
+    df["pitcher_dominance"] = (1 - df["pitcher_parity"]).clip(0, 1)  # inverse
+
+    # ACE FLAG: at least one pitcher is elite (ERA < 3.00)
+    home_ace = (df["home_p_era"].fillna(4.5) < 3.00).astype(int)
+    away_ace = (df["away_p_era"].fillna(4.5) < 3.00).astype(int)
+    df["has_ace_pitcher"] = (home_ace | away_ace).astype(int)
+
+    # TANK FLAG: at least one pitcher is rough (ERA > 5.00)
+    home_tank = (df["home_p_era"].fillna(4.5) > 5.00).astype(int)
+    away_tank = (df["away_p_era"].fillna(4.5) > 5.00).astype(int)
+    df["has_tank_pitcher"] = (home_tank | away_tank).astype(int)
+
+    # ACE vs TANK: classic mismatch — pitcher should dominate signal
+    df["ace_vs_tank"] = ((home_ace & away_tank) | (away_ace & home_tank)).astype(int)
+
+    # LINEUP × PARITY: when pitchers are similar, lineup matters MORE
+    if "lineup_ops_edge" in df.columns:
+        df["lineup_x_parity"] = (df["lineup_ops_edge"].fillna(0)
+                                  * df["pitcher_parity"])
+    if "lineup_recent_edge" in df.columns:
+        df["lineup_recent_x_parity"] = (df["lineup_recent_edge"].fillna(0)
+                                          * df["pitcher_parity"])
+
+    # ARSENAL_MATCH × PARITY: arsenal matchup matters more when pitchers similar
+    if "arsenal_match_edge" in df.columns:
+        df["arsenal_match_x_parity"] = (df["arsenal_match_edge"].fillna(0)
+                                          * df["pitcher_parity"])
+
+    # BULLPEN × PARITY: when starters are similar, bullpens decide
+    if "bp_era_edge" in df.columns:
+        df["bp_x_parity"] = (df["bp_era_edge"].fillna(0)
+                              * df["pitcher_parity"])
+
+    # PITCHER × DOMINANCE: when pitchers ARE far apart, era_edge matters extra
+    df["era_edge_x_dominance"] = (df["era_edge"].fillna(0)
+                                    * df["pitcher_dominance"])
+
+    return df
+
+
 ID_COLS = ["event_id", "game_date", "season",
            "home_team", "away_team", "home_team_name", "away_team_name",
            "home_starter_name", "away_starter_name"]
@@ -498,6 +557,14 @@ SITUATIONAL_FEATURES = [
     "month", "day_of_week", "is_weekend",
 ]
 
+INTERACTION_FEATURES = [
+    "pitcher_parity", "pitcher_dominance",
+    "has_ace_pitcher", "has_tank_pitcher", "ace_vs_tank",
+    "lineup_x_parity", "lineup_recent_x_parity",
+    "arsenal_match_x_parity", "bp_x_parity",
+    "era_edge_x_dominance",
+]
+
 MARKET_FEATURES_FULL = [
     "home_implied_prob", "away_implied_prob",
     "home_fair_prob", "away_fair_prob",
@@ -530,11 +597,13 @@ def main():
     df = add_weather_features(df)
     df = add_team_form_features(df)
     df = add_situational_features(df)
+    df = add_interaction_features(df)  # <-- NEW
 
     fundamentals = (PITCHER_FEATURES + BULLPEN_FEATURES + LINEUP_FEATURES
                     + ARSENAL_FEATURES + ARSENAL_MATCH_FEATURES
                     + UMPIRE_FEATURES + WEATHER_FEATURES
-                    + PARK_FEATURES + FORM_FEATURES + SITUATIONAL_FEATURES)
+                    + PARK_FEATURES + FORM_FEATURES + SITUATIONAL_FEATURES
+                    + INTERACTION_FEATURES)  # <-- NEW
 
     # FULL GAME
     full_clean = df.dropna(subset=["home_win", "era_edge"]).copy()
@@ -589,7 +658,11 @@ def main():
                 "arsenal_overall_xwoba_edge", "park_factor",
                 "ump_k_edge", "ump_runs_edge",
                 "wx_hr_factor", "wx_wind_out",
-                "winpct_edge", "run_diff_edge", "offense_l7_edge"]:
+                "winpct_edge", "run_diff_edge", "offense_l7_edge",
+                # NEW interaction features
+                "lineup_x_parity", "lineup_recent_x_parity",
+                "arsenal_match_x_parity", "bp_x_parity",
+                "era_edge_x_dominance", "ace_vs_tank"]:
         if col in full_clean.columns:
             log.info("  %s: %+.3f", col,
                      full_clean[col].corr(full_clean["home_win"]))

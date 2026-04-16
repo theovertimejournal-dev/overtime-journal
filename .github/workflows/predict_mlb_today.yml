@@ -6,7 +6,7 @@ on:
       trained_models_run_id:
         description: "Train MLB Ensemble run ID (source of trained models)"
         required: true
-        default: "24478170121"
+        default: "24411504075"
         type: string
       arsenal_run_id:
         description: "Pull Pitcher Arsenal run ID (cached arsenal data)"

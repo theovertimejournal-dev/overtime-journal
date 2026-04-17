@@ -138,18 +138,14 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
 
   // ML model data (from predict_mlb_today.py → game.scores)
   const scores = game.scores || {};
-  const isMLPrediction = scores.model_version === "v5_ensemble" || scores.base_model_probs;
+  const isMLPrediction = scores.model_version === "v5_ensemble" || !!scores.base_model_probs;
   const fullHomeProb = scores.full_ml_home_prob;
   const fullAwayProb = scores.full_ml_away_prob;
   const f5HomeProb = scores.f5_ml_home_prob;
   const f5AwayProb = scores.f5_ml_away_prob;
   const runTotalLean = scores.run_total_lean;
-  const kellyUnits = scores.kelly_units;
-  const modelEdge = scores.model_edge;  // model_prob - vegas_implied
-  const vegasImplied = scores.vegas_implied_prob;
-  const kellyUnits = scores.kelly_units;
+  const kellyUnits = scores.kelly_units || 0;
   const modelEdge = scores.model_edge;
-  const vegasImplied = scores.vegas_implied_prob;
 
   // Compute displayed probability for the lean direction
   const leanProb = lean === "HOME" ? fullHomeProb : lean === "AWAY" ? fullAwayProb : null;
@@ -244,11 +240,10 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                   )}
                   {kellyUnits > 0 && (
                     <span style={{
-                      fontSize: 10, fontWeight: 700,
-                      color: "#22c55e", marginLeft: 2,
-                      padding: "1px 4px", borderRadius: 3,
+                      fontSize: 10, fontWeight: 700, color: "#22c55e",
+                      padding: "1px 5px", borderRadius: 3,
                       background: "rgba(34,197,94,0.12)",
-                    }} title="Quarter Kelly recommended unit size">
+                    }} title="Quarter Kelly recommended bet size">
                       {kellyUnits}u
                     </span>
                   )}
@@ -376,15 +371,16 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                         <div style={{ fontSize: 9, color: "#22c55e", textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>
                           💰 Kelly Size
                         </div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#22c55e" }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e" }}>
                           {kellyUnits}u
                         </div>
                         <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
                           {modelEdge != null && (
                             <>edge: <span style={{ color: modelEdge > 0 ? "#22c55e" : "#ef4444" }}>
                               {modelEdge > 0 ? "+" : ""}{(modelEdge * 100).toFixed(1)}%
-                            </span></>
+                            </span> vs vegas</>
                           )}
+                          {!modelEdge && "quarter Kelly · 1u = 1% bankroll"}
                         </div>
                       </div>
                     )}
@@ -739,8 +735,6 @@ export default function MLBDashboard({ user }) {
           <br />
           <strong style={{ color: "#4a5568" }}>Real Feel:</strong> 0-100 HR conditions (park + wind + temp). &nbsp;
           <span style={{ color: "#ef4444" }}>70+ ELITE</span> · <span style={{ color: "#f59e0b" }}>50-69 WARM</span> · 35-49 NEUTRAL · <span style={{ color: "#60a5fa" }}>&lt;35 COLD</span>
-          <br />
-          <strong style={{ color: "#4a5568" }}>🤖 Kelly Size:</strong> Quarter-Kelly bet sizing based on model edge vs vegas. 1u = 1% of bankroll. Only shown when model has real edge.
           <br />⚠ One factor among many. Always check line value. Gamble responsibly.
         </div>
       )}

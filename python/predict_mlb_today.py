@@ -1,743 +1,997 @@
-import { useState, useEffect } from 'react';
-import { useSlate } from '../../hooks/useSlate';
-import DateNav from '../common/DateNav';
-import { Pill } from '../common/Pill';
-import { LoginModal } from '../common/LoginModal';
+"""
+predict_mlb_today.py
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+Runs the trained ensemble model on today's MLB slate and updates the Supabase
+games table with predictions.
 
-// 2025 bullpen ERA by team — used as fallback when current IP < 5 (Opening Week)
-// Source: 2025 final season stats
-const PRIOR_BULLPEN_ERA = {
-  LAD: { era: 3.21, whip: 1.14 }, ATL: { era: 3.54, whip: 1.18 },
-  NYY: { era: 3.61, whip: 1.19 }, MIL: { era: 3.67, whip: 1.21 },
-  HOU: { era: 3.72, whip: 1.22 }, CLE: { era: 3.74, whip: 1.23 },
-  SD:  { era: 3.81, whip: 1.24 }, BAL: { era: 3.85, whip: 1.25 },
-  PHI: { era: 3.91, whip: 1.26 }, SF:  { era: 3.94, whip: 1.27 },
-  SEA: { era: 3.97, whip: 1.28 }, BOS: { era: 4.02, whip: 1.29 },
-  MIN: { era: 4.05, whip: 1.30 }, STL: { era: 4.08, whip: 1.30 },
-  NYM: { era: 4.11, whip: 1.31 }, DET: { era: 4.14, whip: 1.31 },
-  AZ:  { era: 4.17, whip: 1.32 }, TOR: { era: 4.21, whip: 1.33 },
-  TEX: { era: 4.24, whip: 1.33 }, KC:  { era: 4.28, whip: 1.34 },
-  PIT: { era: 4.31, whip: 1.35 }, CIN: { era: 4.35, whip: 1.35 },
-  TB:  { era: 4.38, whip: 1.36 }, MIA: { era: 4.42, whip: 1.37 },
-  CHC: { era: 4.45, whip: 1.37 }, LAA: { era: 4.51, whip: 1.38 },
-  CWS: { era: 4.54, whip: 1.39 }, WSH: { era: 4.58, whip: 1.40 },
-  COL: { era: 5.12, whip: 1.52 }, ATH: { era: 4.61, whip: 1.40 },
-};
+Workflow:
+  1. Fetch today's games + probable pitchers from MLB Stats API
+  2. Pull same feature data used in training (pitcher stats, bullpen, lineups,
+     arsenal, hitter splits, umpires, weather)
+  3. Build feature matrix using same logic as build_features.py
+  4. Load trained models from models/ directory
+  5. Run full_with_line (or full_no_line fallback) + f5_no_line per game
+  6. Compute run_total_lean from arsenal_match + wx_hr_factor + park
+  7. Upsert each game in the `games` table with edge.lean/confidence/scores/signals
 
-const CONF_COLOR = { HIGH: "#ef4444", MODERATE: "#f59e0b", LOW: "#6b7280" };
-const FATIGUE_COLOR = { HIGH: "#ef4444", MODERATE: "#f59e0b", FRESH: "#22c55e" };
-const FATIGUE_ICON  = { HIGH: "🔴", MODERATE: "🟡", FRESH: "🟢" };
+Usage:
+  python predict_mlb_today.py
+  python predict_mlb_today.py --date=2026-04-15
+  python predict_mlb_today.py --dry-run
+"""
+import os, sys, json, pickle, argparse, logging, time, math
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from collections import defaultdict
+import numpy as np
+import pandas as pd
+import requests
 
-function fmt(val, dec = 2) {
-  if (val == null) return "—";
-  return parseFloat(val).toFixed(dec);
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from supabase import create_client
+
+# ── Config ───────────────────────────────────────────────────────────────────
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+SGO_API_KEY = os.environ.get("SPORTSGAMEODDS_API_KEY", "")
+
+MLB_API = "https://statsapi.mlb.com/api/v1"
+SGO_BASE = "https://api.sportsgameodds.com/v2"
+SGO_HEADERS = {"X-Api-Key": SGO_API_KEY}
+OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+
+MODELS_DIR = Path("models")
+DATA_DIR = Path("data")
+
+logging.basicConfig(level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger("predict")
+
+
+# ── Stadium / Park / Team Maps (same as build_features.py) ──────────────────
+PARK_FACTORS_BY_TEAM = {
+    "COLORADO_ROCKIES_MLB": 114, "CINCINNATI_REDS_MLB": 107,
+    "TEXAS_RANGERS_MLB": 106, "BOSTON_RED_SOX_MLB": 105,
+    "CHICAGO_CUBS_MLB": 104, "PHILADELPHIA_PHILLIES_MLB": 103,
+    "ATLANTA_BRAVES_MLB": 102, "MILWAUKEE_BREWERS_MLB": 102,
+    "TORONTO_BLUE_JAYS_MLB": 101, "BALTIMORE_ORIOLES_MLB": 101,
+    "MINNESOTA_TWINS_MLB": 101, "LOS_ANGELES_ANGELS_MLB": 100,
+    "NEW_YORK_YANKEES_MLB": 100, "WASHINGTON_NATIONALS_MLB": 100,
+    "CLEVELAND_GUARDIANS_MLB": 99, "DETROIT_TIGERS_MLB": 99,
+    "STLOUIS_CARDINALS_MLB": 99, "ARIZONA_DIAMONDBACKS_MLB": 99,
+    "KANSAS_CITY_ROYALS_MLB": 98, "SAN_FRANCISCO_GIANTS_MLB": 98,
+    "CHICAGO_WHITE_SOX_MLB": 98, "HOUSTON_ASTROS_MLB": 97,
+    "PITTSBURGH_PIRATES_MLB": 97, "TAMPA_BAY_RAYS_MLB": 96,
+    "NEW_YORK_METS_MLB": 96, "LOS_ANGELES_DODGERS_MLB": 96,
+    "SAN_DIEGO_PADRES_MLB": 95, "SEATTLE_MARINERS_MLB": 95,
+    "MIAMI_MARLINS_MLB": 94, "OAKLAND_ATHLETICS_MLB": 94,
+    "ATHLETICS_MLB": 94,
 }
 
-function StatBox({ label, value, highlight, priorValue, priorLabel }) {
-  const isSmall    = value == null;
-  const displayVal = isSmall && priorValue != null ? priorValue : (value ?? "—");
-  const color      = isSmall && priorValue != null ? "#6b7280" : highlight ? "#ef4444" : "#e2e8f0";
-  return (
-    <div style={{
-      background: highlight && !isSmall ? "rgba(239,68,68,0.08)" : "rgba(255,255,255,0.02)",
-      border: `1px solid ${highlight && !isSmall ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.05)"}`,
-      borderRadius: 6, padding: "6px 10px", textAlign: "center"
-    }}>
-      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 700, color }}>{displayVal}</div>
-      {isSmall && priorValue != null && (
-        <div style={{ fontSize: 8, color: "#374151", marginTop: 1 }}>{priorLabel || "'25"}</div>
-      )}
-    </div>
-  );
+STADIUMS = {
+    "ARIZONA_DIAMONDBACKS_MLB":     {"lat": 33.4452, "lon": -112.0667, "roof": "retractable", "cf_bearing": None},
+    "ATLANTA_BRAVES_MLB":           {"lat": 33.8908, "lon": -84.4678,  "roof": False, "cf_bearing": 50},
+    "BALTIMORE_ORIOLES_MLB":        {"lat": 39.2838, "lon": -76.6217,  "roof": False, "cf_bearing": 62},
+    "BOSTON_RED_SOX_MLB":           {"lat": 42.3467, "lon": -71.0972,  "roof": False, "cf_bearing": 45},
+    "CHICAGO_CUBS_MLB":             {"lat": 41.9475, "lon": -87.6560,  "roof": False, "cf_bearing": 31},
+    "CHICAGO_WHITE_SOX_MLB":        {"lat": 41.8300, "lon": -87.6337,  "roof": False, "cf_bearing": 45},
+    "CINCINNATI_REDS_MLB":          {"lat": 39.0974, "lon": -84.5071,  "roof": False, "cf_bearing": 125},
+    "CLEVELAND_GUARDIANS_MLB":      {"lat": 41.4962, "lon": -81.6852,  "roof": False, "cf_bearing": 88},
+    "COLORADO_ROCKIES_MLB":         {"lat": 39.7561, "lon": -104.9942, "roof": False, "cf_bearing": 3},
+    "DETROIT_TIGERS_MLB":           {"lat": 42.3391, "lon": -83.0485,  "roof": False, "cf_bearing": 65},
+    "KANSAS_CITY_ROYALS_MLB":       {"lat": 39.0517, "lon": -94.4803,  "roof": False, "cf_bearing": 45},
+    "LOS_ANGELES_ANGELS_MLB":       {"lat": 33.8003, "lon": -117.8827, "roof": False, "cf_bearing": 45},
+    "LOS_ANGELES_DODGERS_MLB":      {"lat": 34.0739, "lon": -118.2400, "roof": False, "cf_bearing": 22},
+    "NEW_YORK_METS_MLB":            {"lat": 40.7571, "lon": -73.8458,  "roof": False, "cf_bearing": 60},
+    "NEW_YORK_YANKEES_MLB":         {"lat": 40.8296, "lon": -73.9262,  "roof": False, "cf_bearing": 88},
+    "OAKLAND_ATHLETICS_MLB":        {"lat": 37.7516, "lon": -122.2008, "roof": False, "cf_bearing": 56},
+    "ATHLETICS_MLB":                {"lat": 38.5764, "lon": -121.4934, "roof": False, "cf_bearing": 49},
+    "PHILADELPHIA_PHILLIES_MLB":    {"lat": 39.9057, "lon": -75.1665,  "roof": False, "cf_bearing": 17},
+    "PITTSBURGH_PIRATES_MLB":       {"lat": 40.4469, "lon": -80.0057,  "roof": False, "cf_bearing": 115},
+    "SAN_DIEGO_PADRES_MLB":         {"lat": 32.7076, "lon": -117.1566, "roof": False, "cf_bearing": 1},
+    "SAN_FRANCISCO_GIANTS_MLB":     {"lat": 37.7786, "lon": -122.3893, "roof": False, "cf_bearing": 92},
+    "WASHINGTON_NATIONALS_MLB":     {"lat": 38.8730, "lon": -77.0074,  "roof": False, "cf_bearing": 45},
+    "HOUSTON_ASTROS_MLB":           {"lat": 29.7573, "lon": -95.3555,  "roof": "retractable", "cf_bearing": 340},
+    "MIAMI_MARLINS_MLB":            {"lat": 25.7781, "lon": -80.2197,  "roof": "retractable", "cf_bearing": 67},
+    "MILWAUKEE_BREWERS_MLB":        {"lat": 43.0280, "lon": -87.9712,  "roof": "retractable", "cf_bearing": 110},
+    "SEATTLE_MARINERS_MLB":         {"lat": 47.5914, "lon": -122.3325, "roof": "retractable", "cf_bearing": 57},
+    "STLOUIS_CARDINALS_MLB":        {"lat": 38.6226, "lon": -90.1928,  "roof": False, "cf_bearing": 102},
+    "MINNESOTA_TWINS_MLB":          {"lat": 44.9817, "lon": -93.2772,  "roof": False, "cf_bearing": 90},
+    "TEXAS_RANGERS_MLB":            {"lat": 32.7475, "lon": -97.0830,  "roof": "retractable", "cf_bearing": 353},
+    "TORONTO_BLUE_JAYS_MLB":        {"lat": 43.6414, "lon": -79.3894,  "roof": "retractable", "cf_bearing": 325},
+    "TAMPA_BAY_RAYS_MLB":           {"lat": 27.7682, "lon": -82.6534,  "roof": "dome", "cf_bearing": None},
 }
 
-function FatigueBar({ score }) {
-  if (score == null) return null;
-  const pct = Math.min(score, 100);
-  const color = pct >= 60 ? "#ef4444" : pct >= 30 ? "#f59e0b" : "#22c55e";
-  return (
-    <div style={{ height: 4, borderRadius: 2, background: "rgba(255,255,255,0.06)", overflow: "hidden" }}>
-      <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 2, transition: "width 0.4s ease" }} />
-    </div>
-  );
+# MLB Stats API abbreviation -> our SGO team ID
+ABBREV_TO_SGO = {
+    "ARI": "ARIZONA_DIAMONDBACKS_MLB", "ATL": "ATLANTA_BRAVES_MLB",
+    "BAL": "BALTIMORE_ORIOLES_MLB", "BOS": "BOSTON_RED_SOX_MLB",
+    "CHC": "CHICAGO_CUBS_MLB", "CWS": "CHICAGO_WHITE_SOX_MLB",
+    "CHW": "CHICAGO_WHITE_SOX_MLB", "CIN": "CINCINNATI_REDS_MLB",
+    "CLE": "CLEVELAND_GUARDIANS_MLB", "COL": "COLORADO_ROCKIES_MLB",
+    "DET": "DETROIT_TIGERS_MLB", "HOU": "HOUSTON_ASTROS_MLB",
+    "KC": "KANSAS_CITY_ROYALS_MLB", "KCR": "KANSAS_CITY_ROYALS_MLB",
+    "LAA": "LOS_ANGELES_ANGELS_MLB", "LAD": "LOS_ANGELES_DODGERS_MLB",
+    "MIA": "MIAMI_MARLINS_MLB", "MIL": "MILWAUKEE_BREWERS_MLB",
+    "MIN": "MINNESOTA_TWINS_MLB", "NYM": "NEW_YORK_METS_MLB",
+    "NYY": "NEW_YORK_YANKEES_MLB", "OAK": "OAKLAND_ATHLETICS_MLB",
+    "ATH": "ATHLETICS_MLB", "PHI": "PHILADELPHIA_PHILLIES_MLB",
+    "PIT": "PITTSBURGH_PIRATES_MLB", "SD": "SAN_DIEGO_PADRES_MLB",
+    "SDP": "SAN_DIEGO_PADRES_MLB", "SF": "SAN_FRANCISCO_GIANTS_MLB",
+    "SFG": "SAN_FRANCISCO_GIANTS_MLB", "SEA": "SEATTLE_MARINERS_MLB",
+    "STL": "STLOUIS_CARDINALS_MLB", "TB": "TAMPA_BAY_RAYS_MLB",
+    "TBR": "TAMPA_BAY_RAYS_MLB", "TEX": "TEXAS_RANGERS_MLB",
+    "TOR": "TORONTO_BLUE_JAYS_MLB", "WSH": "WASHINGTON_NATIONALS_MLB",
+    "WSN": "WASHINGTON_NATIONALS_MLB",
 }
 
-function SignalRow({ signal }) {
-  const color = signal.strength === "STRONG" ? "#22c55e" : signal.strength === "MODERATE" ? "#f59e0b" : "#6b7280";
-  return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-      <span style={{
-        fontSize: 9, padding: "2px 6px", borderRadius: 3, flexShrink: 0, marginTop: 1,
-        background: `${color}15`, color, fontWeight: 700, minWidth: 54, textAlign: "center"
-      }}>{signal.strength}</span>
-      <span style={{ fontSize: 11, color: "#94a3b8", flex: 1, lineHeight: 1.5 }}>{signal.detail}</span>
-      <span style={{ fontSize: 10, color: "#60a5fa", flexShrink: 0, fontWeight: 600 }}>→ {signal.favors}</span>
-    </div>
-  );
-}
 
-function RelieverTable({ relievers, team }) {
-  if (!relievers?.length) return null;
-  return (
-    <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 10, fontWeight: 600, color: "#4a5568", textTransform: "uppercase", marginBottom: 6 }}>{team} Pen</div>
-      {relievers.slice(0, 5).map((r, i) => (
-        <div key={i} style={{ padding: "4px 0", fontSize: 11, borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-          {/* Row 1: name */}
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span>{FATIGUE_ICON[r.fatigue] || "⚪"}</span>
-            <span style={{ color: "#e2e8f0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span>
-            </span>
-          </div>
-          {/* Row 2: stats — wraps cleanly on mobile */}
-          <div style={{ display: "flex", gap: 10, marginLeft: 20, marginTop: 2, flexWrap: "wrap", fontSize: 10, color: "#6b7280" }}>
-            <span>{r.pitches_last_3d}p/3d</span>
-            <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rest</span>
-            {r.display_era != null ? (
-              <span style={{ color: r.display_era > 4.5 ? "#ef4444" : r.display_era < 3.0 ? "#22c55e" : "#94a3b8" }}>
-                {fmt(r.display_era)} ERA
-                {r.display_era_source === "2025" && (
-                  <span style={{ fontSize: 9, color: "#4a5568", marginLeft: 2 }}>'25</span>
-                )}
-              </span>
-            ) : (r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era) != null ? (
-              <span style={{ color: "#4a5568" }} title="2025 season ERA">
-                {fmt(r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era)}{" "}
-                <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
-              </span>
-            ) : (
-              <span style={{ color: "#374151" }}>— ERA</span>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+# ── HTTP helpers ─────────────────────────────────────────────────────────────
+def mlb_get(endpoint, params=None):
+    try:
+        r = requests.get(f"{MLB_API}{endpoint}", params=params, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        log.warning("MLB API %s: %s", endpoint, e)
+        return {}
 
-// ── MLB Game Card ─────────────────────────────────────────────────────────────
 
-function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
-  const analysis = game.analysis || {};
-  const ab = analysis.away_bullpen || {};
-  const hb = analysis.home_bullpen || {};
-  const apyth = analysis.away_pythagorean || {};
-  const hpyth = analysis.home_pythagorean || {};
-  const park = analysis.park_factor || {};
-  const realFeel = analysis.real_feel || {};
-  const weather = analysis.weather || {};
+def sgo_get(params):
+    try:
+        r = requests.get(f"{SGO_BASE}/events", headers=SGO_HEADERS,
+                         params=params, timeout=20)
+        r.raise_for_status()
+        return r.json().get("data", [])
+    except Exception as e:
+        log.warning("SGO: %s", e)
+        return []
 
-  const lean = game.lean;
-  const conf = game.confidence || "LOW";
-  const signals = game.signals || [];
-  const confColor = CONF_COLOR[conf] || "#6b7280";
 
-  // ML model data (from predict_mlb_today.py → game.scores)
-  const scores = game.scores || {};
-  const isMLPrediction = scores.model_version === "v5_ensemble" || !!scores.base_model_probs;
-  const fullHomeProb = scores.full_ml_home_prob;
-  const fullAwayProb = scores.full_ml_away_prob;
-  const f5HomeProb = scores.f5_ml_home_prob;
-  const f5AwayProb = scores.f5_ml_away_prob;
-  const runTotalLean = scores.run_total_lean;
-  const kellyUnits = scores.kelly_units || 0;
-  const modelEdge = scores.model_edge;
+# ── Data pulls (live, for today) ────────────────────────────────────────────
 
-  // Compute displayed probability for the lean direction
-  const leanProb = lean === "HOME" ? fullHomeProb : lean === "AWAY" ? fullAwayProb : null;
-  const leanTeam = lean === "HOME" ? game.home_team : lean === "AWAY" ? game.away_team : null;
-  const f5Prob = f5HomeProb != null ? Math.max(f5HomeProb, f5AwayProb) : null;
-  const f5Team = f5HomeProb != null ? (f5HomeProb >= f5AwayProb ? game.home_team : game.away_team) : null;
+def get_todays_games(game_date):
+    """Fetch today's MLB games with probable pitchers and venues."""
+    payload = mlb_get("/schedule", {
+        "sportId": 1, "date": game_date,
+        "hydrate": "probablePitcher,team,venue,lineups"
+    })
+    games = []
+    for d in payload.get("dates", []):
+        for g in d.get("games", []):
+            if g.get("status", {}).get("codedGameState") in ("F", "O"):
+                continue
+            t = g["teams"]
+            home_abbrev = t["home"]["team"].get("abbreviation", "")
+            away_abbrev = t["away"]["team"].get("abbreviation", "")
+            games.append({
+                "game_pk": g["gamePk"],
+                "game_date": g.get("gameDate"),
+                "home_abbrev": home_abbrev,
+                "away_abbrev": away_abbrev,
+                "home_sgo": ABBREV_TO_SGO.get(home_abbrev, ""),
+                "away_sgo": ABBREV_TO_SGO.get(away_abbrev, ""),
+                "home_name": t["home"]["team"].get("name", ""),
+                "away_name": t["away"]["team"].get("name", ""),
+                "home_team_id": t["home"]["team"].get("id"),
+                "away_team_id": t["away"]["team"].get("id"),
+                "home_starter_id": t["home"].get("probablePitcher", {}).get("id"),
+                "away_starter_id": t["away"].get("probablePitcher", {}).get("id"),
+                "home_starter_name": t["home"].get("probablePitcher", {}).get("fullName", "TBD"),
+                "away_starter_name": t["away"].get("probablePitcher", {}).get("fullName", "TBD"),
+                "venue": g.get("venue", {}).get("name", ""),
+                "lineups": g.get("lineups", {}),
+                "matchup": f"{away_abbrev}@{home_abbrev}",
+            })
+    log.info("found %s games for %s", len(games), game_date)
+    return games
 
-  const hasOdds = game.ml_home != null || game.ml_away != null;
-  const awayML = game.ml_away != null ? (game.ml_away > 0 ? `+${game.ml_away}` : `${game.ml_away}`) : null;
-  const homeML = game.ml_home != null ? (game.ml_home > 0 ? `+${game.ml_home}` : `${game.ml_home}`) : null;
 
-  const parkLabel = park.label || "NEUTRAL";
-  const parkColor = parkLabel === "HITTER_FRIENDLY" ? "#f59e0b"
-                  : parkLabel === "PITCHER_FRIENDLY" ? "#22c55e"
-                  : "#6b7280";
+def get_pitcher_season_stats(pid, season):
+    """Season line (ERA/WHIP/K/9/BB/9/HR/9)."""
+    if not pid: return {}
+    payload = mlb_get(f"/people/{pid}/stats",
+                      {"stats": "season", "group": "pitching", "season": season})
+    try:
+        splits = payload.get("stats", [{}])[0].get("splits", [])
+        if not splits: return {}
+        s = splits[0].get("stat", {})
+        ip = float(s.get("inningsPitched", 0))
+        bb = float(s.get("baseOnBalls", 0))
+        k = float(s.get("strikeOuts", 0))
+        hr = float(s.get("homeRuns", 0))
+        w = int(s.get("wins", 0))
+        l = int(s.get("losses", 0))
+        gs = int(s.get("gamesStarted", 0))
+        return {
+            "era": float(s.get("era", 0)) if s.get("era") else None,
+            "whip": float(s.get("whip", 0)) if s.get("whip") else None,
+            "k_per_9": round(k / ip * 9, 2) if ip > 0 else None,
+            "bb_per_9": round(bb / ip * 9, 2) if ip > 0 else None,
+            "hr_per_9": round(hr / ip * 9, 2) if ip > 0 else None,
+            "ip": ip, "wins": w, "losses": l, "games_started": gs,
+        }
+    except (IndexError, KeyError, ValueError):
+        return {}
 
-  const locked = !user && !isFree;
 
-  return (
-    <div style={{
-      background: "rgba(255,255,255,0.02)",
-      border: `1px solid ${lean ? `${confColor}30` : "rgba(255,255,255,0.05)"}`,
-      borderRadius: 12, overflow: "hidden",
-      boxShadow: lean && conf === "HIGH" ? `0 0 20px ${confColor}10` : "none",
-      transition: "border-color 0.2s"
-    }}>
-      {/* Header */}
-      <div
-        onClick={onToggle}
-        style={{ padding: "14px 16px", cursor: "pointer", userSelect: "none" }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+def get_team_7day_bullpen(team_id, season, end_date):
+    """Rough 7-day bullpen rolling ERA/WHIP/K9."""
+    if not team_id: return {}
+    start_dt = (pd.Timestamp(end_date) - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+    payload = mlb_get("/schedule", {"sportId": 1, "teamId": team_id,
+                                     "startDate": start_dt, "endDate": end_date,
+                                     "hydrate": "boxscore"})
+    bp = {"ip": 0.0, "er": 0.0, "bb": 0.0, "k": 0.0, "hr": 0.0, "hits": 0.0}
+    for d in payload.get("dates", []):
+        for g in d.get("games", []):
+            if g.get("status", {}).get("codedGameState") not in ("F", "O"): continue
+            box = mlb_get(f"/game/{g['gamePk']}/boxscore") or {}
+            for side in ("home", "away"):
+                team = box.get("teams", {}).get(side, {})
+                if team.get("team", {}).get("id") != team_id: continue
+                # Aggregate relievers (non-starters)
+                starter_id = None
+                for bat in team.get("battingOrder", []) or []:
+                    pass  # not needed
+                pitchers = team.get("pitchers", [])  # order pitched
+                if not pitchers: continue
+                starter_id = pitchers[0]
+                for pid in pitchers[1:]:
+                    stat = team.get("players", {}).get(f"ID{pid}", {})\
+                        .get("stats", {}).get("pitching", {})
+                    try:
+                        bp["ip"] += float(stat.get("inningsPitched", 0))
+                        bp["er"] += float(stat.get("earnedRuns", 0))
+                        bp["bb"] += float(stat.get("baseOnBalls", 0))
+                        bp["k"] += float(stat.get("strikeOuts", 0))
+                        bp["hr"] += float(stat.get("homeRuns", 0))
+                        bp["hits"] += float(stat.get("hits", 0))
+                    except (ValueError, TypeError):
+                        continue
+            time.sleep(0.05)
+    if bp["ip"] < 1:
+        return {}
+    return {
+        "bp_era_7d": round(bp["er"] / bp["ip"] * 9, 2),
+        "bp_whip_7d": round((bp["bb"] + bp["hits"]) / bp["ip"], 2),
+        "bp_k_per_9_7d": round(bp["k"] / bp["ip"] * 9, 2),
+        "bp_bb_per_9_7d": round(bp["bb"] / bp["ip"] * 9, 2),
+        "bp_hr_per_9_7d": round(bp["hr"] / bp["ip"] * 9, 2),
+        "bp_ip_7d": round(bp["ip"], 1),
+    }
 
-          {/* Row 1: matchup + pills (left) + lean badge + arrow (right) */}
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
 
-            {/* Left: matchup + venue + pills */}
-            <div style={{ minWidth: 0, flex: "1 1 auto" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 16, fontWeight: 800, color: "#f1f5f9", letterSpacing: "-0.02em" }}>
-                  {game.away_team} <span style={{ color: "#374151" }}>@</span> {game.home_team}
-                </span>
-                {park.factor && (
-                  <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: `${parkColor}15`, color: parkColor, fontWeight: 600 }}>
-                    PF {park.factor}
-                  </span>
-                )}
-                {realFeel.score != null && (
-                  <span style={{
-                    fontSize: 9, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
-                    background: realFeel.score >= 70 ? "rgba(239,68,68,0.12)"
-                              : realFeel.score >= 50 ? "rgba(245,158,11,0.12)"
-                              : realFeel.score >= 35 ? "rgba(107,114,128,0.12)"
-                              : "rgba(96,165,250,0.12)",
-                    color: realFeel.score >= 70 ? "#ef4444"
-                         : realFeel.score >= 50 ? "#f59e0b"
-                         : realFeel.score >= 35 ? "#6b7280"
-                         : "#60a5fa",
-                  }}>
-                    🌡️ {realFeel.score} {realFeel.label || ""}
-                  </span>
-                )}
-                {game.status && (
-                  <span style={{ fontSize: 9, color: "#4a5568" }}>{game.status}</span>
-                )}
-              </div>
-              {game.venue && (
-                <div style={{ fontSize: 10, color: "#374151", marginTop: 2 }}>{game.venue}</div>
-              )}
-            </div>
+def get_team_recent_form(team_id, season, end_date, n=30):
+    """Last N games: win pct, run diff, runs for/against rolling."""
+    if not team_id: return {}
+    start_dt = (pd.Timestamp(end_date) - pd.Timedelta(days=n)).strftime("%Y-%m-%d")
+    payload = mlb_get("/schedule", {"sportId": 1, "teamId": team_id,
+                                     "startDate": start_dt, "endDate": end_date})
+    wins, losses, rf, ra, games = 0, 0, 0, 0, 0
+    rf7, ra7, games7 = 0, 0, 0
+    cutoff_7 = pd.Timestamp(end_date, tz="UTC") - pd.Timedelta(days=7)
+    for d in payload.get("dates", []):
+        for g in d.get("games", []):
+            if g.get("status", {}).get("codedGameState") not in ("F", "O"): continue
+            home = g["teams"]["home"]; away = g["teams"]["away"]
+            if home["team"].get("id") == team_id:
+                tr = home.get("score", 0); opp = away.get("score", 0)
+            elif away["team"].get("id") == team_id:
+                tr = away.get("score", 0); opp = home.get("score", 0)
+            else:
+                continue
+            wins += int(tr > opp); losses += int(tr < opp)
+            rf += tr; ra += opp; games += 1
+            try:
+                game_dt = pd.Timestamp(g.get("gameDate"))
+                if game_dt.tz is None:
+                    game_dt = game_dt.tz_localize("UTC")
+                else:
+                    game_dt = game_dt.tz_convert("UTC")
+                if game_dt >= cutoff_7:
+                    rf7 += tr; ra7 += opp; games7 += 1
+            except Exception:
+                pass
+    if games == 0: return {}
+    return {
+        "winpct_l10": round(wins / games, 3) if games >= 3 else None,
+        "run_diff_l10": round((rf - ra) / games, 2) if games >= 3 else None,
+        "runs_for_l30": round(rf / games, 2),
+        "runs_against_l30": round(ra / games, 2),
+        "runs_for_l7": round(rf7 / games7, 2) if games7 >= 3 else None,
+        "runs_against_l7": round(ra7 / games7, 2) if games7 >= 3 else None,
+    }
 
-            {/* Right: lean badge + arrow (stays compact, never overflows) */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              {lean ? (
-                <div style={{
-                  padding: "5px 12px", borderRadius: 6,
-                  background: `${confColor}15`, border: `1px solid ${confColor}30`,
-                  display: "flex", alignItems: "center", gap: 5,
-                }}>
-                  {isMLPrediction && (
-                    <span title="ML Ensemble Model" style={{ fontSize: 10 }}>🤖</span>
-                  )}
-                  <span style={{ fontSize: 12, fontWeight: 800, color: confColor }}>
-                    {leanTeam || lean}
-                  </span>
-                  {leanProb != null ? (
-                    <span style={{ fontSize: 11, color: confColor, fontWeight: 700 }}>
-                      {(leanProb * 100).toFixed(1)}%
-                    </span>
-                  ) : (
-                    <span style={{ fontSize: 9, color: confColor, opacity: 0.7 }}>{conf}</span>
-                  )}
-                  {kellyUnits > 0 && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, color: "#22c55e",
-                      padding: "1px 5px", borderRadius: 3,
-                      background: "rgba(34,197,94,0.12)",
-                    }} title="Quarter Kelly recommended bet size">
-                      {kellyUnits}u
-                    </span>
-                  )}
-                </div>
-              ) : (
-                <span style={{ fontSize: 11, color: "#374151" }}>No lean</span>
-              )}
-              <span style={{ fontSize: 12, color: "#374151" }}>{isExpanded ? "▲" : "▼"}</span>
-            </div>
-          </div>
 
-          {/* Row 2: starters — own line, wraps cleanly */}
-          {(analysis.away_starter?.name || game.away_starter) && (
-            <div style={{ fontSize: 11, color: "#6b7280" }}>
-              <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-                {analysis.away_starter?.name || game.away_starter}
-              </span>
-              <span style={{ color: "#374151", margin: "0 6px" }}>vs</span>
-              <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-                {analysis.home_starter?.name || game.home_starter}
-              </span>
-            </div>
-          )}
+# Weather for today (forecast endpoint - different from archive)
+def get_game_weather(sgo_team_id, game_date, game_hour_utc):
+    """Forecast weather at game time for home stadium."""
+    stadium = STADIUMS.get(sgo_team_id)
+    if not stadium: return {}
+    roof = stadium.get("roof")
+    if roof == "dome":
+        return {"wx_roof": "dome", "wx_is_indoor": 1}
 
-          {/* Row 3: odds — own line, won't push off screen */}
-          {(hasOdds || game.total) && (
-            <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#6b7280", flexWrap: "wrap" }}>
-              {hasOdds && (
-                <span>{game.away_team} {awayML} / {game.home_team} {homeML}</span>
-              )}
-              {game.total && (
-                <span>O/U {game.total}</span>
-              )}
-            </div>
-          )}
-        </div>
+    try:
+        r = requests.get(OPEN_METEO, params={
+            "latitude": stadium["lat"], "longitude": stadium["lon"],
+            "start_date": game_date, "end_date": game_date,
+            "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,"
+                      "wind_direction_10m,precipitation,cloud_cover",
+            "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
+        }, timeout=15)
+        r.raise_for_status()
+        h = r.json().get("hourly", {})
+        times = h.get("time", [])
+        # Match game hour
+        idx = None
+        for i, t in enumerate(times):
+            try:
+                if int(t[11:13]) == game_hour_utc: idx = i; break
+            except (ValueError, IndexError): continue
+        if idx is None: return {}
 
-        {/* Narrative preview */}
-        {game.narrative && !isExpanded && (
-          <div style={{ fontSize: 11, color: "#4a5568", marginTop: 8, lineHeight: 1.5, fontStyle: "italic" }}>
-            "{game.narrative.slice(0, 120)}{game.narrative.length > 120 ? "…" : ""}"
-          </div>
-        )}
-      </div>
+        def safe(arr, i, default=None):
+            try: return arr[i] if arr else default
+            except IndexError: return default
 
-      {/* Expanded body */}
-      {isExpanded && (
-        <div style={{ padding: "0 16px 16px", borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+        temp = safe(h.get("temperature_2m"), idx)
+        wind_sp = safe(h.get("wind_speed_10m"), idx)
+        wind_dir = safe(h.get("wind_direction_10m"), idx)
+        humid = safe(h.get("relative_humidity_2m"), idx)
+        precip = safe(h.get("precipitation"), idx)
+        cloud = safe(h.get("cloud_cover"), idx)
 
-          {/* Lock gate for non-users */}
-          {locked ? (
-            <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <div style={{ fontSize: 18, marginBottom: 8 }}>🔒</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#f1f5f9" }}>Sign in to see full analysis</div>
-              <div style={{ fontSize: 11, color: "#4a5568", marginTop: 4 }}>Bullpen data · Pythagorean · Signals</div>
-            </div>
-          ) : (
-            <>
-              {/* Full narrative */}
-              {game.narrative && (
-                <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(96,165,250,0.04)", border: "1px solid rgba(96,165,250,0.1)", borderRadius: 8 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#60a5fa", marginBottom: 4, textTransform: "uppercase" }}>OTJ Analysis</div>
-                  <div style={{ fontSize: 12, color: "#94a3b8", lineHeight: 1.7 }}>{game.narrative}</div>
-                </div>
-              )}
+        # wind out toward CF
+        cf_bearing = stadium.get("cf_bearing")
+        wind_out = None
+        if cf_bearing is not None and wind_sp is not None and wind_dir is not None and roof is False:
+            from_home = (cf_bearing + 180) % 360
+            diff = abs(wind_dir - from_home)
+            if diff > 180: diff = 360 - diff
+            wind_out = round(wind_sp * math.cos(math.radians(diff)), 2)
 
-              {/* ML Model Predictions */}
-              {isMLPrediction && (
-                <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(168,85,247,0.04)", border: "1px solid rgba(168,85,247,0.15)", borderRadius: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                    <span style={{ fontSize: 12 }}>🤖</span>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#a855f7", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                      ML Ensemble Predictions
-                    </div>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
-                    {/* Full Game ML */}
-                    {fullHomeProb != null && (
-                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>Full Game ML</div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>
-                          {fullHomeProb >= fullAwayProb ? game.home_team : game.away_team}
-                          <span style={{ color: confColor, marginLeft: 6 }}>
-                            {(Math.max(fullHomeProb, fullAwayProb) * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
-                          {game.away_team} {(fullAwayProb * 100).toFixed(0)}% / {game.home_team} {(fullHomeProb * 100).toFixed(0)}%
-                        </div>
-                      </div>
-                    )}
-                    {/* First 5 Innings ML */}
-                    {f5HomeProb != null && (
-                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>First 5 ML</div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>
-                          {f5Team}
-                          <span style={{ color: "#a855f7", marginLeft: 6 }}>
-                            {(f5Prob * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
-                          {game.away_team} {(f5AwayProb * 100).toFixed(0)}% / {game.home_team} {(f5HomeProb * 100).toFixed(0)}%
-                        </div>
-                      </div>
-                    )}
-                    {/* Run Total Lean */}
-                    {runTotalLean && (
-                      <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 6, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 9, color: "#6b7280", textTransform: "uppercase", marginBottom: 4 }}>Run Total</div>
-                        <div style={{
-                          fontSize: 13, fontWeight: 700,
-                          color: runTotalLean === "OVER" ? "#f59e0b" : runTotalLean === "UNDER" ? "#60a5fa" : "#94a3b8"
-                        }}>
-                          {runTotalLean}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
-                          park · arsenal · weather
-                        </div>
-                      </div>
-                    )}
-                    {/* Kelly Bet Sizing */}
-                    {kellyUnits > 0 && (
-                      <div style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.15)", borderRadius: 6, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 9, color: "#22c55e", textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>
-                          💰 Kelly Size
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e" }}>
-                          {kellyUnits}u
-                        </div>
-                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
-                          {modelEdge != null && (
-                            <>edge: <span style={{ color: modelEdge > 0 ? "#22c55e" : "#ef4444" }}>
-                              {modelEdge > 0 ? "+" : ""}{(modelEdge * 100).toFixed(1)}%
-                            </span> vs vegas</>
-                          )}
-                          {!modelEdge && "quarter Kelly · 1u = 1% bankroll"}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  {/* Optional: base model agreement */}
-                  {scores.base_model_probs && (
-                    <div style={{ marginTop: 10, fontSize: 9, color: "#4a5568", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <span style={{ color: "#6b7280" }}>Models:</span>
-                      {Object.entries(scores.base_model_probs).map(([m, p]) => (
-                        <span key={m}>
-                          {m.toUpperCase()} <span style={{ color: "#94a3b8" }}>{(p * 100).toFixed(0)}%</span>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+        return {
+            "wx_roof": str(roof),
+            "wx_temp_f": temp, "wx_humidity": humid,
+            "wx_wind_mph": wind_sp, "wx_wind_dir": wind_dir,
+            "wx_wind_out": wind_out, "wx_precip": precip,
+            "wx_cloud_cover": cloud, "wx_is_indoor": 0,
+        }
+    except Exception as e:
+        log.warning("weather %s: %s", sgo_team_id, e)
+        return {}
 
-              {/* Starting Pitchers */}
-              {(analysis.away_starter?.name || analysis.home_starter?.name) && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>
-                    Starting Pitchers
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-                    {[
-                      { sp: analysis.away_starter, team: game.away_team, tto: analysis.away_tto },
-                      { sp: analysis.home_starter, team: game.home_team, tto: analysis.home_tto },
-                    ].map(({ sp, team, tto }, i) => (
-                      <div key={i} style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: "10px 12px" }}>
-                        <div style={{ fontSize: 11, color: "#4a5568", marginBottom: 4 }}>{team}</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
-                          {sp?.name || "TBD"}
-                        </div>
-                        {tto?.status === "OK" && tto?.degradation != null && (
-                          <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                            TTO degradation:{" "}
-                            <span style={{ color: tto.degradation >= 0.08 ? "#ef4444" : tto.degradation >= 0.04 ? "#f59e0b" : "#22c55e", fontWeight: 600 }}>
-                              {tto.degradation >= 0 ? "+" : ""}{(tto.degradation * 1000).toFixed(0)}pts BA 3rd time thru
-                            </span>
-                          </div>
-                        )}
-                        {tto?.status === "TBD" && (
-                          <div style={{ fontSize: 10, color: "#374151" }}>Starter TBD</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              {/* Bullpen comparison */}
-              {(ab.team || hb.team) && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 6 }}>Bullpen Comparison (7d)</div>
-                  {((ab.bullpen_ip_7d || 0) < 15 || (hb.bullpen_ip_7d || 0) < 15) && (
-                    <div style={{ fontSize: 10, color: "#6b7280", marginBottom: 8, padding: "4px 8px", background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)", borderRadius: 4 }}>
-                      ⚠ Early season — ERA/WHIP showing 2025 season where current IP &lt;15
-                    </div>
-                  )}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
-                    {[ab, hb].map((bp, i) => (
-                      <div key={i}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", marginBottom: 8 }}>{bp.team || (i === 0 ? game.away_team : game.home_team)}</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                          {(() => {
-                            const isSmall = (bp.bullpen_ip_7d || 0) < 15;
-                            const teamKey = i === 0 ? game.away_team : game.home_team;
-                            const staticFallback = PRIOR_BULLPEN_ERA[teamKey] || {};
-                            const priorEra  = bp.prior_era  ?? staticFallback.era;
-                            const priorWhip = bp.prior_whip ?? staticFallback.whip;
-                            return (<>
-                              <StatBox label="ERA"
-                                value={!isSmall ? fmt(bp.bullpen_era) : null}
-                                highlight={!isSmall && bp.bullpen_era >= 4.5}
-                                priorValue={isSmall && priorEra != null ? fmt(priorEra) : null}
-                                priorLabel="'25 ERA" />
-                              <StatBox label="WHIP"
-                                value={!isSmall ? fmt(bp.bullpen_whip) : null}
-                                highlight={!isSmall && bp.bullpen_whip >= 1.4}
-                                priorValue={isSmall && priorWhip != null ? fmt(priorWhip) : null}
-                                priorLabel="'25 WHIP" />
-                            </>);
-                          })()}
-                          <StatBox label="K/9" value={fmt(bp.bullpen_k_per_9 ?? bp.bullpen_k9)} />
-                          <StatBox label="IP 7d" value={fmt(bp.bullpen_ip_7d, 1)} />
-                        </div>
-                        <div style={{ marginTop: 8 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#4a5568", marginBottom: 3 }}>
-                            <span>Fatigue</span>
-                            <span>{bp.fatigue_score ?? "—"}/100 · {bp.high_fatigue_count ?? 0} gassed</span>
-                          </div>
-                          <FatigueBar score={bp.fatigue_score} />
-                        </div>
-                        <RelieverTable relievers={bp.relievers} team={bp.team} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+# ── Feature construction (mirrors build_features.py) ────────────────────────
 
-              {/* Pythagorean */}
-              {(apyth.actual_wpct != null || hpyth.actual_wpct != null) && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>Pythagorean Record</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, fontSize: 11 }}>
-                    {[
-                      { r: apyth, team: game.away_team },
-                      { r: hpyth, team: game.home_team }
-                    ].map(({ r, team }, i) => (
-                      <div key={i} style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: 10 }}>
-                        <div style={{ fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>{team}</div>
-                        <div style={{ color: "#94a3b8", lineHeight: 1.9 }}>
-                          <div>W% <span style={{ color: "#e2e8f0", fontWeight: 600 }}>{fmt(r.actual_wpct, 3)}</span> → Pythag <span style={{ color: "#e2e8f0" }}>{fmt(r.expected_wpct, 3)}</span></div>
-                          <div>Luck <span style={{ color: r.luck_factor > 0 ? "#22c55e" : r.luck_factor < 0 ? "#ef4444" : "#94a3b8", fontWeight: 600 }}>{r.luck_factor > 0 ? "+" : ""}{fmt(r.luck_factor, 1)}W</span></div>
-                          <div>RD/G <span style={{ color: r.run_diff_per_game > 0 ? "#22c55e" : "#ef4444", fontWeight: 600 }}>{r.run_diff_per_game > 0 ? "+" : ""}{fmt(r.run_diff_per_game, 2)}</span></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+def american_to_implied_prob(odds):
+    if odds is None or pd.isna(odds): return np.nan
+    odds = float(odds)
+    if odds < 0: return -odds / (-odds + 100)
+    return 100 / (odds + 100)
 
-              {/* Edge signals */}
-              {signals.length > 0 && (
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>Edge Signals</div>
-                  {signals.map((s, i) => <SignalRow key={i} signal={s} />)}
-                </div>
-              )}
 
-              {/* Real Feel HR Conditions */}
-              {realFeel.score != null && (
-                <div style={{
-                  marginTop: 14, padding: "12px 14px", borderRadius: 8,
-                  background: realFeel.score >= 70 ? "rgba(239,68,68,0.04)"
-                            : realFeel.score >= 50 ? "rgba(245,158,11,0.04)"
-                            : "rgba(255,255,255,0.02)",
-                  border: `1px solid ${
-                    realFeel.score >= 70 ? "rgba(239,68,68,0.12)"
-                  : realFeel.score >= 50 ? "rgba(245,158,11,0.12)"
-                  : "rgba(255,255,255,0.06)"
-                  }`,
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" }}>
-                      🌡️ Real Feel HR Conditions
-                    </div>
-                    <div style={{
-                      fontSize: 18, fontWeight: 800, letterSpacing: "-0.02em",
-                      color: realFeel.score >= 70 ? "#ef4444"
-                           : realFeel.score >= 50 ? "#f59e0b"
-                           : realFeel.score >= 35 ? "#94a3b8"
-                           : "#60a5fa",
-                    }}>
-                      {realFeel.score}<span style={{ fontSize: 11, fontWeight: 600, opacity: 0.6 }}>/100</span>
-                    </div>
-                  </div>
+# ── Live lineups + cached arsenal/hitter splits ─────────────────────────────
 
-                  {/* Score bar */}
-                  <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.06)", overflow: "hidden", marginBottom: 10 }}>
-                    <div style={{
-                      height: "100%", borderRadius: 3, transition: "width 0.4s ease",
-                      width: `${Math.min(realFeel.score, 100)}%`,
-                      background: realFeel.score >= 70 ? "#ef4444"
-                                : realFeel.score >= 50 ? "#f59e0b"
-                                : realFeel.score >= 35 ? "#6b7280"
-                                : "#60a5fa",
-                    }} />
-                  </div>
+def load_cached_lookups():
+    """Load arsenal + hitter_splits parquets as in-memory lookups."""
+    arsenal_lookup = {}  # (pitcher_id, season) -> arsenal dict
+    hitter_lookup = {}   # (batter_id, season) -> splits dict
 
-                  {/* Breakdown */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>Park</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>{realFeel.park_pts ?? "—"}<span style={{ fontSize: 9, color: "#4a5568" }}>/30</span></div>
-                    </div>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>Wind</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: realFeel.wind_pts < 0 ? "#60a5fa" : "#e2e8f0" }}>
-                        {realFeel.wind_pts ?? "—"}<span style={{ fontSize: 9, color: "#4a5568" }}>/30</span>
-                      </div>
-                    </div>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 9, color: "#4a5568", textTransform: "uppercase", marginBottom: 2 }}>Temp</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0" }}>{realFeel.temp_pts ?? "—"}<span style={{ fontSize: 9, color: "#4a5568" }}>/20</span></div>
-                    </div>
-                  </div>
+    for year in (2024, 2025, 2026):
+        ap = DATA_DIR / f"pitcher_arsenal_{year}.parquet"
+        if ap.exists():
+            df = pd.read_parquet(ap)
+            for _, r in df.iterrows():
+                key = (int(r["pitcher_id"]), int(r["season"]))
+                arsenal_lookup[key] = {
+                    "fastball_pct": r.get("arsenal_fastball_pct"),
+                    "breaking_pct": r.get("arsenal_breaking_pct"),
+                    "offspeed_pct": r.get("arsenal_offspeed_pct"),
+                    "fb_velo": r.get("arsenal_fb_velo"),
+                    "fb_whiff": r.get("arsenal_fb_whiff"),
+                    "breaking_whiff": r.get("arsenal_breaking_whiff"),
+                    "overall_xwoba": r.get("arsenal_overall_xwoba"),
+                }
 
-                  {/* Weather detail line */}
-                  {weather.temp_f != null && (
-                    <div style={{ fontSize: 10, color: "#4a5568", marginTop: 8, textAlign: "center" }}>
-                      {weather.dome ? "🏟 Dome — controlled environment" : (
-                        <>
-                          {weather.temp_f}°F · {weather.wind_speed_mph || 0}mph {(weather.wind_direction || "").replace(/_/g, " ")}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+        hp = DATA_DIR / f"hitter_pitch_splits_{year}.parquet"
+        if hp.exists():
+            df = pd.read_parquet(hp)
+            for _, r in df.iterrows():
+                key = (int(r["batter_id"]), int(r["season"]))
+                hitter_lookup[key] = {
+                    "vs_fb_woba": r.get("vs_fastball_woba"),
+                    "vs_br_woba": r.get("vs_breaking_woba"),
+                    "vs_os_woba": r.get("vs_offspeed_woba"),
+                    "pitches_seen": r.get("total_pitches_seen", 0),
+                }
 
-              {/* Park factor note */}
-              {park.factor && (
-                <div style={{ marginTop: 10, fontSize: 10, color: parkColor }}>
-                  ⚾ {game.home_team} — {parkLabel.replace(/_/g, " ")} (PF {park.factor})
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+    log.info("loaded cache: %s arsenals, %s hitters",
+             len(arsenal_lookup), len(hitter_lookup))
+    return arsenal_lookup, hitter_lookup
 
-// ── Main Dashboard ────────────────────────────────────────────────────────────
 
-export default function MLBDashboard({ user }) {
-  const today = (() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-  })();
+def get_todays_lineup(game_pk, side):
+    """Returns list of batter IDs for one team from the boxscore.
+    Falls back to empty list if not yet confirmed."""
+    payload = mlb_get(f"/game/{game_pk}/boxscore")
+    if not payload: return []
+    team = payload.get("teams", {}).get(side, {})
+    # battingOrder is the confirmed lineup
+    order = team.get("battingOrder", [])
+    if order:
+        # order is list of "ID123456" strings or ints
+        return [int(str(x).replace("ID", "")) for x in order[:9]]
+    # Fallback: use batters list
+    batters = team.get("batters", [])
+    return [int(b) for b in batters[:9]]
 
-  const [selectedDate, setSelectedDate] = useState(today);
-  const { slate, loading } = useSlate('mlb', selectedDate);
-  const [showModal, setShowModal] = useState(false);
-  const [expanded, setExpanded] = useState({});
-  const [loadTimedOut, setLoadTimedOut] = useState(false);
 
-  useEffect(() => { if (user) setShowModal(false); }, [user]);
+def get_batter_season_stats(batter_id, season):
+    """OPS + handedness + L/R splits for one batter."""
+    if not batter_id: return {}
+    try:
+        payload = mlb_get(f"/people/{batter_id}/stats",
+                          {"stats": "season", "group": "hitting", "season": season})
+        splits = payload.get("stats", [{}])[0].get("splits", [])
+        if not splits: return {}
+        s = splits[0].get("stat", {})
+        return {
+            "ops": float(s.get("ops", 0)) if s.get("ops") else None,
+            "obp": float(s.get("obp", 0)) if s.get("obp") else None,
+            "slg": float(s.get("slg", 0)) if s.get("slg") else None,
+            "pa": int(s.get("plateAppearances", 0)),
+        }
+    except Exception:
+        return {}
 
-  useEffect(() => {
-    if (!loading) return;
-    const t = setTimeout(() => setLoadTimedOut(true), 10000);
-    return () => clearTimeout(t);
-  }, [loading]);
 
-  // Auto-expand first HIGH confidence game
-  useEffect(() => {
-    if (!slate?.games?.length) return;
-    const firstHigh = slate.games.findIndex(g => g.confidence === "HIGH");
-    setExpanded({ [firstHigh >= 0 ? firstHigh : 0]: true });
-  }, [slate?.date]);
+def compute_lineup_features(batter_ids, season):
+    """Aggregate OPS etc across 9 starters. Skips early-season bench guys."""
+    if not batter_ids: return {}
+    ops_vals, obp_vals, slg_vals = [], [], []
+    for bid in batter_ids:
+        s = get_batter_season_stats(bid, season)
+        # Early season: accept any qualified batter with at least 5 PAs
+        if s.get("pa", 0) >= 5 and s.get("ops"):
+            ops_vals.append(s["ops"])
+            if s.get("obp"): obp_vals.append(s["obp"])
+            if s.get("slg"): slg_vals.append(s["slg"])
+        time.sleep(0.03)
+    # Also try previous season as fallback if still no data
+    if not ops_vals:
+        for bid in batter_ids:
+            s = get_batter_season_stats(bid, season - 1)
+            if s.get("pa", 0) >= 50 and s.get("ops"):
+                ops_vals.append(s["ops"])
+                if s.get("obp"): obp_vals.append(s["obp"])
+                if s.get("slg"): slg_vals.append(s["slg"])
+            time.sleep(0.03)
+    if not ops_vals: return {}
+    return {
+        "lineup_avg_ops": sum(ops_vals) / len(ops_vals),
+        "lineup_avg_obp": sum(obp_vals) / len(obp_vals) if obp_vals else None,
+        "lineup_avg_slg": sum(slg_vals) / len(slg_vals) if slg_vals else None,
+        "top3_avg_ops": sum(sorted(ops_vals, reverse=True)[:3]) / min(3, len(ops_vals)),
+        "n_qualified": len(ops_vals),
+    }
 
-  const games = slate?.games || [];
-  const highConf = games.filter(g => g.confidence === "HIGH");
 
-  const toggle = (i) => {
-    if (!user) { setShowModal(true); return; }
-    setExpanded(p => ({ ...p, [i]: !p[i] }));
-  };
+def compute_arsenal_match(batter_ids, pitcher_arsenal, hitter_lookup, season):
+    """The killer feature: weighted wOBA against pitcher's pitch mix."""
+    if not batter_ids or not pitcher_arsenal: return None
+    p_fb = pitcher_arsenal.get("fastball_pct") or 0
+    p_br = pitcher_arsenal.get("breaking_pct") or 0
+    p_os = pitcher_arsenal.get("offspeed_pct") or 0
+    total = p_fb + p_br + p_os
+    if total <= 0: return None
+    w_fb, w_br, w_os = p_fb / total, p_br / total, p_os / total
 
-  if (loading && !loadTimedOut) return (
-    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 24 }}>⚾</div>
-      <div style={{ fontSize: 13, color: "#4a5568" }}>Loading today's slate...</div>
-      <div style={{ fontSize: 10, color: "#374151" }}>Connecting to pipeline</div>
-    </div>
-  );
+    vals = []
+    for bid in batter_ids:
+        s = hitter_lookup.get((bid, season)) or hitter_lookup.get((bid, season - 1))
+        if not s or s.get("pitches_seen", 0) < 200: continue
+        if None in (s.get("vs_fb_woba"), s.get("vs_br_woba"), s.get("vs_os_woba")): continue
+        vals.append(w_fb * s["vs_fb_woba"] + w_br * s["vs_br_woba"] + w_os * s["vs_os_woba"])
+    return sum(vals) / len(vals) if vals else None
 
-  if (!slate && loadTimedOut) return (
-    <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 12, padding: 24 }}>
-      <div style={{ fontSize: 24 }}>⚾</div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: "#f1f5f9" }}>Couldn't load today's slate</div>
-      <div style={{ fontSize: 11, color: "#4a5568", textAlign: "center", lineHeight: 1.6 }}>
-        The MLB pipeline runs at 11AM ET daily.<br />Check back then for today's games.
-      </div>
-      <button onClick={() => window.location.reload()}
-        style={{ fontSize: 12, padding: "10px 24px", borderRadius: 8, cursor: "pointer", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontFamily: "inherit", fontWeight: 700 }}>
-        🔄 Refresh
-      </button>
-    </div>
-  );
 
-  return (
-    <div style={{ maxWidth: 920, margin: "0 auto", padding: "24px 16px" }}>
-      {showModal && <LoginModal onClose={() => setShowModal(false)} />}
+def build_features_for_game(g, season, today, full_feature_list,
+                             arsenal_lookup=None, hitter_lookup=None):
+    """Returns a single-row dict of ALL features the model expects."""
+    home_sgo = g["home_sgo"]
+    away_sgo = g["away_sgo"]
 
-      {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 26 }}>⚾</span>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: "#f1f5f9", letterSpacing: "-0.03em" }}>
-            MLB Bullpen Edge Analyzer
-          </h1>
-          <Pill text="v1.0" color="#22c55e" />
-        </div>
-        <p style={{ fontSize: 11, color: "#4a5568", margin: "0 0 12px" }}>
-          Bullpen ERA · Fatigue · Park Factors · Pythagorean · Run Diff · L/R Splits
-        </p>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <Pill text={`📅 ${slate?.date || selectedDate}`} color="#6b7280" />
-          <Pill text={`${games.length} games`} color="#6b7280" />
-          {highConf.length > 0 && (
-            <Pill text={`🔥 ${highConf.length} HIGH confidence`} color="#ef4444" />
-          )}
-        </div>
-      </div>
+    # Pitchers
+    hp = get_pitcher_season_stats(g["home_starter_id"], season)
+    ap = get_pitcher_season_stats(g["away_starter_id"], season)
 
-      {/* Date nav */}
-      <DateNav selectedDate={selectedDate} onDateChange={setSelectedDate} />
+    # Bullpens
+    hbp = get_team_7day_bullpen(g["home_team_id"], season, today)
+    abp = get_team_7day_bullpen(g["away_team_id"], season, today)
 
-      {/* High confidence callout */}
-      {highConf.length > 0 && (
-        <div style={{
-          background: "rgba(239,68,68,0.04)", border: "1px solid rgba(239,68,68,0.12)",
-          borderRadius: 10, padding: "12px 16px", marginBottom: 16
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", marginBottom: 6, textTransform: "uppercase" }}>
-            🔥 High Confidence Tonight
-          </div>
-          {highConf.map((g, i) => (
-            <div key={i} style={{ fontSize: 13, color: "#fca5a5" }}>
-              {g.matchup} → <strong>{g.lean}</strong>
-            </div>
-          ))}
-        </div>
-      )}
+    # Form
+    hf = get_team_recent_form(g["home_team_id"], season, today)
+    af = get_team_recent_form(g["away_team_id"], season, today)
 
-      {/* No slate yet */}
-      {!loading && games.length === 0 && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#374151" }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>⚾</div>
-          <div style={{ fontSize: 14, color: "#6b7280" }}>No MLB games found for {selectedDate}</div>
-          <div style={{ fontSize: 11, color: "#374151", marginTop: 4 }}>
-            Pipeline runs at 11AM ET · Off-days happen
-          </div>
-        </div>
-      )}
+    # Weather
+    try:
+        game_dt = pd.Timestamp(g["game_date"])
+        game_hour_utc = game_dt.hour
+    except Exception:
+        game_hour_utc = 23
+    wx = get_game_weather(home_sgo, today, game_hour_utc)
 
-      {/* Game cards */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {games.map((game, i) => (
-          <MLBGameCard
-            key={game.matchup}
-            game={game}
-            isExpanded={!!expanded[i]}
-            onToggle={() => toggle(i)}
-            isFree={i === 0}
-            user={user}
-          />
-        ))}
-      </div>
+    # Park
+    park_factor = PARK_FACTORS_BY_TEAM.get(home_sgo, 100)
 
-      {/* Footer */}
-      {games.length > 0 && (
-        <div style={{ marginTop: 28, padding: "14px 0", borderTop: "1px solid rgba(255,255,255,0.04)", fontSize: 10, color: "#374151", lineHeight: 1.8 }}>
-          <strong style={{ color: "#4a5568" }}>Fatigue:</strong> 0 = fresh, 100 = gassed. &nbsp;
-          <strong style={{ color: "#4a5568" }}>Luck:</strong> negative = due for regression UP. &nbsp;
-          <strong style={{ color: "#4a5568" }}>Park Factor:</strong> 100 = neutral, &gt;105 = hitter friendly.
-          <br />
-          <strong style={{ color: "#4a5568" }}>Real Feel:</strong> 0-100 HR conditions (park + wind + temp). &nbsp;
-          <span style={{ color: "#ef4444" }}>70+ ELITE</span> · <span style={{ color: "#f59e0b" }}>50-69 WARM</span> · 35-49 NEUTRAL · <span style={{ color: "#60a5fa" }}>&lt;35 COLD</span>
-          <br />⚠ One factor among many. Always check line value. Gamble responsibly.
-        </div>
-      )}
-    </div>
-  );
-}
+    # Lineups (live)
+    home_batter_ids = get_todays_lineup(g["game_pk"], "home")
+    away_batter_ids = get_todays_lineup(g["game_pk"], "away")
+    home_lineup = compute_lineup_features(home_batter_ids, season) if home_batter_ids else {}
+    away_lineup = compute_lineup_features(away_batter_ids, season) if away_batter_ids else {}
+
+    # Arsenal (from cache, with previous-season fallback)
+    home_arsenal = None
+    away_arsenal = None
+    if arsenal_lookup:
+        home_arsenal = arsenal_lookup.get((g["home_starter_id"], season)) if g.get("home_starter_id") else None
+        if not home_arsenal and g.get("home_starter_id"):
+            home_arsenal = arsenal_lookup.get((g["home_starter_id"], season - 1))
+        away_arsenal = arsenal_lookup.get((g["away_starter_id"], season)) if g.get("away_starter_id") else None
+        if not away_arsenal and g.get("away_starter_id"):
+            away_arsenal = arsenal_lookup.get((g["away_starter_id"], season - 1))
+
+    # Arsenal match (killer feature)
+    home_match_woba = None
+    away_match_woba = None
+    if hitter_lookup and away_arsenal and home_batter_ids:
+        # Home lineup faces AWAY pitcher's arsenal
+        home_match_woba = compute_arsenal_match(home_batter_ids, away_arsenal, hitter_lookup, season)
+    if hitter_lookup and home_arsenal and away_batter_ids:
+        # Away lineup faces HOME pitcher's arsenal
+        away_match_woba = compute_arsenal_match(away_batter_ids, home_arsenal, hitter_lookup, season)
+
+    # Build feature row
+    row = {}
+
+    # Pitcher features
+    row["home_p_era"] = hp.get("era"); row["away_p_era"] = ap.get("era")
+    row["home_p_whip"] = hp.get("whip"); row["away_p_whip"] = ap.get("whip")
+    row["home_p_k_per_9"] = hp.get("k_per_9"); row["away_p_k_per_9"] = ap.get("k_per_9")
+    row["home_p_bb_per_9"] = hp.get("bb_per_9"); row["away_p_bb_per_9"] = ap.get("bb_per_9")
+    row["home_p_hr_per_9"] = hp.get("hr_per_9"); row["away_p_hr_per_9"] = ap.get("hr_per_9")
+    row["home_p_workload"] = hp.get("ip"); row["away_p_workload"] = ap.get("ip")
+    row["home_p_experience"] = hp.get("games_started"); row["away_p_experience"] = ap.get("games_started")
+    hw, hl = hp.get("wins", 0), hp.get("losses", 0)
+    aw, al = ap.get("wins", 0), ap.get("losses", 0)
+    row["home_p_winpct"] = hw / (hw + hl) if (hw + hl) > 0 else None
+    row["away_p_winpct"] = aw / (aw + al) if (aw + al) > 0 else None
+    row["era_edge"] = (row["home_p_era"] - row["away_p_era"]) if row["home_p_era"] and row["away_p_era"] else None
+    row["whip_edge"] = (row["home_p_whip"] - row["away_p_whip"]) if row["home_p_whip"] and row["away_p_whip"] else None
+    row["k9_edge"] = (row["home_p_k_per_9"] - row["away_p_k_per_9"]) if row["home_p_k_per_9"] and row["away_p_k_per_9"] else None
+    row["bb9_edge"] = (row["home_p_bb_per_9"] - row["away_p_bb_per_9"]) if row["home_p_bb_per_9"] and row["away_p_bb_per_9"] else None
+    row["hr9_edge"] = (row["home_p_hr_per_9"] - row["away_p_hr_per_9"]) if row["home_p_hr_per_9"] and row["away_p_hr_per_9"] else None
+
+    # Bullpen features
+    for k, v in hbp.items(): row[f"home_{k}"] = v
+    for k, v in abp.items(): row[f"away_{k}"] = v
+    if hbp and abp:
+        row["bp_era_edge"] = hbp["bp_era_7d"] - abp["bp_era_7d"]
+        row["bp_whip_edge"] = hbp["bp_whip_7d"] - abp["bp_whip_7d"]
+        row["bp_k9_edge"] = hbp["bp_k_per_9_7d"] - abp["bp_k_per_9_7d"]
+        row["home_bp_workload"] = hbp["bp_ip_7d"]
+        row["away_bp_workload"] = abp["bp_ip_7d"]
+        row["bp_workload_edge"] = hbp["bp_ip_7d"] - abp["bp_ip_7d"]
+
+    # Park
+    row["park_factor"] = park_factor
+    row["park_pitcher_friendly"] = max(0, 100 - park_factor)
+
+    # Weather
+    for k, v in wx.items(): row[k] = v
+    # Derived weather
+    temp = row.get("wx_temp_f") or 70
+    wind_out = row.get("wx_wind_out") or 0
+    humid = row.get("wx_humidity") or 50
+    row["wx_hr_factor"] = (temp - 70) * 0.01 + wind_out * 0.02 + (50 - humid) * 0.005
+    row["wx_has_precip"] = 1 if (row.get("wx_precip") or 0) > 0.01 else 0
+    row["wx_is_cold"] = 1 if temp < 50 else 0
+    row["wx_is_hot"] = 1 if temp > 90 else 0
+    if "wx_is_indoor" not in row: row["wx_is_indoor"] = 0
+
+    # Form
+    for k, v in hf.items(): row[f"home_{k}"] = v
+    for k, v in af.items(): row[f"away_{k}"] = v
+    if hf and af:
+        row["winpct_edge"] = (hf.get("winpct_l10") or 0.5) - (af.get("winpct_l10") or 0.5)
+        row["run_diff_edge"] = (hf.get("run_diff_l10") or 0) - (af.get("run_diff_l10") or 0)
+        row["offense_edge"] = (hf.get("runs_for_l30") or 4.5) - (af.get("runs_for_l30") or 4.5)
+        row["defense_edge"] = (af.get("runs_against_l30") or 4.5) - (hf.get("runs_against_l30") or 4.5)
+        row["offense_l7_edge"] = (hf.get("runs_for_l7") or 4.5) - (af.get("runs_for_l7") or 4.5)
+        row["defense_l7_edge"] = (af.get("runs_against_l7") or 4.5) - (hf.get("runs_against_l7") or 4.5)
+
+    # Situational
+    row["month"] = pd.Timestamp(today).month
+    row["day_of_week"] = pd.Timestamp(today).dayofweek
+    row["is_weekend"] = 1 if row["day_of_week"] in (5, 6) else 0
+
+    # Lineup features
+    row["home_lineup_avg_ops"] = home_lineup.get("lineup_avg_ops")
+    row["away_lineup_avg_ops"] = away_lineup.get("lineup_avg_ops")
+    row["home_lineup_avg_obp"] = home_lineup.get("lineup_avg_obp")
+    row["away_lineup_avg_obp"] = away_lineup.get("lineup_avg_obp")
+    row["home_lineup_avg_slg"] = home_lineup.get("lineup_avg_slg")
+    row["away_lineup_avg_slg"] = away_lineup.get("lineup_avg_slg")
+    row["home_top3_avg_ops"] = home_lineup.get("top3_avg_ops")
+    row["away_top3_avg_ops"] = away_lineup.get("top3_avg_ops")
+    if home_lineup.get("lineup_avg_ops") and away_lineup.get("lineup_avg_ops"):
+        row["lineup_ops_edge"] = home_lineup["lineup_avg_ops"] - away_lineup["lineup_avg_ops"]
+    if home_lineup.get("top3_avg_ops") and away_lineup.get("top3_avg_ops"):
+        row["lineup_top3_edge"] = home_lineup["top3_avg_ops"] - away_lineup["top3_avg_ops"]
+
+    # Arsenal features
+    if home_arsenal:
+        row["home_arsenal_fastball_pct"] = home_arsenal.get("fastball_pct")
+        row["home_arsenal_breaking_pct"] = home_arsenal.get("breaking_pct")
+        row["home_arsenal_offspeed_pct"] = home_arsenal.get("offspeed_pct")
+        row["home_arsenal_fb_velo"] = home_arsenal.get("fb_velo")
+        row["home_arsenal_overall_xwoba"] = home_arsenal.get("overall_xwoba")
+    if away_arsenal:
+        row["away_arsenal_fastball_pct"] = away_arsenal.get("fastball_pct")
+        row["away_arsenal_breaking_pct"] = away_arsenal.get("breaking_pct")
+        row["away_arsenal_offspeed_pct"] = away_arsenal.get("offspeed_pct")
+        row["away_arsenal_fb_velo"] = away_arsenal.get("fb_velo")
+        row["away_arsenal_overall_xwoba"] = away_arsenal.get("overall_xwoba")
+    if home_arsenal and away_arsenal:
+        if home_arsenal.get("overall_xwoba") and away_arsenal.get("overall_xwoba"):
+            row["arsenal_overall_xwoba_edge"] = away_arsenal["overall_xwoba"] - home_arsenal["overall_xwoba"]
+        if home_arsenal.get("fb_velo") and away_arsenal.get("fb_velo"):
+            row["arsenal_fb_velo_edge"] = home_arsenal["fb_velo"] - away_arsenal["fb_velo"]
+
+    # THE KILLER FEATURE: arsenal match
+    row["home_arsenal_match_woba"] = home_match_woba
+    row["away_arsenal_match_woba"] = away_match_woba
+    if home_match_woba is not None and away_match_woba is not None:
+        row["arsenal_match_edge"] = home_match_woba - away_match_woba
+
+    # ── Interaction features (mirrors build_features.add_interaction_features) ──
+    era_edge = row.get("era_edge")
+    if era_edge is not None:
+        abs_era = abs(era_edge)
+        row["pitcher_parity"] = math.exp(-abs_era / 0.8)
+        row["pitcher_dominance"] = max(0, min(1, 1 - row["pitcher_parity"]))
+        row["era_edge_x_dominance"] = era_edge * row["pitcher_dominance"]
+    else:
+        row["pitcher_parity"] = 0.5
+        row["pitcher_dominance"] = 0.5
+        row["era_edge_x_dominance"] = 0
+
+    home_era = row.get("home_p_era") or 4.5
+    away_era = row.get("away_p_era") or 4.5
+    home_ace = 1 if home_era < 3.00 else 0
+    away_ace = 1 if away_era < 3.00 else 0
+    home_tank = 1 if home_era > 5.00 else 0
+    away_tank = 1 if away_era > 5.00 else 0
+    row["has_ace_pitcher"] = home_ace or away_ace
+    row["has_tank_pitcher"] = home_tank or away_tank
+    row["ace_vs_tank"] = (home_ace and away_tank) or (away_ace and home_tank)
+    row["ace_vs_tank"] = int(row["ace_vs_tank"])
+
+    parity = row["pitcher_parity"]
+    if row.get("lineup_ops_edge") is not None:
+        row["lineup_x_parity"] = row["lineup_ops_edge"] * parity
+    if row.get("lineup_recent_edge") is not None:
+        row["lineup_recent_x_parity"] = row["lineup_recent_edge"] * parity
+    if row.get("arsenal_match_edge") is not None:
+        row["arsenal_match_x_parity"] = row["arsenal_match_edge"] * parity
+    if row.get("bp_era_edge") is not None:
+        row["bp_x_parity"] = row["bp_era_edge"] * parity
+
+    # Ensure ALL features model expects are present (fill missing with NaN -> imputer)
+    for feat in full_feature_list:
+        if feat not in row: row[feat] = None
+
+    return row
+
+
+# ── Model loading + prediction ──────────────────────────────────────────────
+
+def load_model_bundle(variant):
+    vdir = MODELS_DIR / variant
+    if not vdir.exists():
+        log.warning("no %s models", variant); return None
+    bundle = {}
+    for name in ("lgb", "xgb", "rf", "lr", "cat"):
+        p = vdir / f"{name}_classifier.pkl"
+        if p.exists():
+            with open(p, "rb") as f: bundle[name] = pickle.load(f)
+    with open(vdir / "stacker.pkl", "rb") as f: bundle["stacker"] = pickle.load(f)
+    with open(vdir / "calibrator.pkl", "rb") as f: bundle["calibrator"] = pickle.load(f)
+    with open(vdir / "feature_list.json") as f: bundle["features"] = json.load(f)
+    log.info("loaded %s (%s base models + stacker + calibrator)",
+             variant, len([k for k in bundle if k in ("lgb","xgb","rf","lr","cat")]))
+    return bundle
+
+
+def predict_one(bundle, row):
+    feats = bundle["features"]
+    X = pd.DataFrame([{f: row.get(f) for f in feats}])
+    # Force all columns to numeric float — LightGBM rejects 'object' dtype
+    for col in X.columns:
+        X[col] = pd.to_numeric(X[col], errors="coerce")
+    base_preds = {}
+    for name in ("lgb", "xgb", "rf", "lr", "cat"):
+        if name not in bundle: continue
+        try:
+            base_preds[name] = bundle[name].predict_proba(X)[:, 1][0]
+        except Exception as e:
+            log.warning("base model %s failed: %s", name, e); return None
+    base_df = pd.DataFrame([base_preds])
+    stacked = bundle["stacker"].predict_proba(base_df)[:, 1][0]
+    calibrated = bundle["calibrator"].predict([stacked])[0]
+    return float(calibrated), {k: float(v) for k, v in base_preds.items()}
+
+
+def prob_to_confidence(prob):
+    edge = abs(prob - 0.5)
+    if edge >= 0.15: return "HIGH"
+    if edge >= 0.05: return "MODERATE"
+    return "LOW"
+
+
+def american_to_decimal(am):
+    """American odds -> decimal (payout multiplier)."""
+    if am is None or pd.isna(am): return None
+    am = float(am)
+    if am < 0: return 1 + 100 / abs(am)
+    return 1 + am / 100
+
+
+def kelly_units(model_prob, american_odds, max_fraction=0.25, unit_scale=20):
+    """
+    Quarter Kelly bet sizing returned as units (0-5 scale).
+
+    Kelly formula: k = (b*p - q) / b
+      where b = decimal_odds - 1, p = our prob, q = 1 - p
+
+    We cap at max_fraction (0.25 = quarter Kelly) and scale to units.
+    unit_scale=20 means 1 unit = 5% of bankroll, so max bet = 5 units.
+    """
+    decimal_odds = american_to_decimal(american_odds)
+    if decimal_odds is None or decimal_odds <= 1: return 0.0
+    if model_prob is None or pd.isna(model_prob): return 0.0
+
+    b = decimal_odds - 1
+    p = model_prob
+    q = 1 - p
+    full_kelly = (b * p - q) / b
+    if full_kelly <= 0: return 0.0  # no edge, don't bet
+
+    fraction = min(full_kelly, max_fraction)
+    units = round(fraction * unit_scale, 1)
+    return units
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"))
+    p.add_argument("--dry-run", action="store_true")
+    args = p.parse_args()
+    game_date = args.date
+    dry_run = args.dry_run
+    season = int(game_date[:4])
+
+    log.info("=" * 60)
+    log.info("OTJ MLB Predictions — %s %s", game_date, "(DRY RUN)" if dry_run else "")
+    log.info("=" * 60)
+
+    if not dry_run and not SUPABASE_KEY:
+        log.error("SUPABASE_SERVICE_KEY not set"); sys.exit(1)
+
+    supabase = None if dry_run else create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    # Step 1: Today's games
+    games = get_todays_games(game_date)
+    if not games:
+        log.info("no games today"); return
+
+    # Step 2: Load models
+    full_wl = load_model_bundle("full_with_line")
+    full_nl = load_model_bundle("full_no_line")
+    f5_nl = load_model_bundle("f5_no_line")
+
+    if not full_nl:
+        log.error("full_no_line models missing — cannot predict"); sys.exit(1)
+
+    full_features = full_nl["features"]  # superset
+
+    # Load cached arsenal + hitter splits from parquets
+    arsenal_lookup, hitter_lookup = load_cached_lookups()
+
+    # Step 3: Predict each game
+    predictions = []
+    for i, g in enumerate(games):
+        log.info("[%s/%s] %s @ %s", i+1, len(games), g["away_abbrev"], g["home_abbrev"])
+        try:
+            row = build_features_for_game(g, season, game_date, full_features,
+                                           arsenal_lookup=arsenal_lookup,
+                                           hitter_lookup=hitter_lookup)
+        except Exception as e:
+            log.warning("  feature build failed: %s", e); continue
+
+        # Run full_no_line always
+        full_result = predict_one(full_nl, row)
+        if not full_result:
+            log.warning("  full_no_line prediction failed"); continue
+        full_prob, full_bases = full_result
+
+        # F5 prediction
+        f5_result = predict_one(f5_nl, row) if f5_nl else None
+        f5_prob = f5_result[0] if f5_result else None
+
+        # Pick/lean
+        pick = "HOME" if full_prob >= 0.5 else "AWAY"
+        pick_team = g["home_abbrev"] if pick == "HOME" else g["away_abbrev"]
+        confidence = prob_to_confidence(full_prob)
+
+        # Run total lean (derived from arsenal/wx/park)
+        run_total_lean = None
+        hr_factor = row.get("wx_hr_factor") or 0
+        if park_factor := row.get("park_factor"):
+            park_score = (park_factor - 100) / 14  # -1 to +1 roughly
+            total_score = hr_factor + park_score
+            if total_score > 0.08: run_total_lean = "OVER"
+            elif total_score < -0.08: run_total_lean = "UNDER"
+
+        # Build signals
+        signals = []
+        if full_prob >= 0.5:
+            pct = round(full_prob * 100, 1)
+            signals.append({"type": "ML", "detail": f"Model gives {g['home_abbrev']} {pct}% to win"})
+        else:
+            pct = round((1 - full_prob) * 100, 1)
+            signals.append({"type": "ML", "detail": f"Model gives {g['away_abbrev']} {pct}% to win"})
+
+        if f5_prob is not None:
+            f5_pct = round(max(f5_prob, 1 - f5_prob) * 100, 1)
+            f5_pick = g["home_abbrev"] if f5_prob >= 0.5 else g["away_abbrev"]
+            signals.append({"type": "F5", "detail": f"First 5: {f5_pick} {f5_pct}%"})
+
+        # Top fundamental signal
+        era_edge = row.get("era_edge")
+        if era_edge is not None and abs(era_edge) > 0.5:
+            favored = g["home_abbrev"] if era_edge < 0 else g["away_abbrev"]
+            signals.append({"type": "Pitcher", "detail": f"{favored} has {abs(era_edge):.2f} ERA edge on starter matchup"})
+        bp_edge = row.get("bp_era_edge")
+        if bp_edge is not None and abs(bp_edge) > 1.0:
+            favored = g["home_abbrev"] if bp_edge < 0 else g["away_abbrev"]
+            signals.append({"type": "Bullpen", "detail": f"{favored} bullpen is sharper (7d ERA gap {abs(bp_edge):.2f})"})
+        if run_total_lean:
+            signals.append({"type": "Total", "detail": f"Conditions + park lean {run_total_lean}"})
+
+        edge = {
+            "lean": pick,
+            "confidence": confidence,
+            "signals": signals[:5],
+            "scores": {
+                "full_ml_home_prob": round(full_prob, 4),
+                "full_ml_away_prob": round(1 - full_prob, 4),
+                "f5_ml_home_prob": round(f5_prob, 4) if f5_prob else None,
+                "f5_ml_away_prob": round(1 - f5_prob, 4) if f5_prob else None,
+                "run_total_lean": run_total_lean,
+                "base_model_probs": full_bases,
+                "model_version": "v5_ensemble",
+            },
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        predictions.append({
+            "matchup": g["matchup"],
+            "game_pk": g["game_pk"],
+            "pick": pick_team,
+            "edge": edge,
+        })
+
+        pick_prob_pct = (full_prob if pick == "HOME" else (1 - full_prob)) * 100
+        f5_pct_log = (max(f5_prob, 1 - f5_prob) * 100) if f5_prob else None
+
+        log.info("  → %s %s (%.1f%%) | F5: %s | Total: %s",
+                 pick_team, confidence, pick_prob_pct,
+                 f"{f5_pct_log:.1f}%" if f5_pct_log else "N/A",
+                 run_total_lean or "—")
+
+    if not predictions:
+        log.warning("no predictions generated"); return
+
+    log.info("=" * 60)
+    log.info("Generated %s predictions", len(predictions))
+
+    # Step 4: Find today's slate_id
+    if dry_run:
+        log.info("DRY RUN — not writing to Supabase")
+        for p in predictions:
+            log.info("  %s: %s", p["matchup"], json.dumps(p["edge"], default=str)[:200])
+        return
+
+    slate_resp = supabase.table("slates").select("id").eq("sport", "mlb")\
+        .eq("date", game_date).execute()
+    if not slate_resp.data:
+        log.error("no slate row for %s mlb — push slate first, then re-run predictor", game_date)
+        log.info("predictions were generated but not saved. dump:")
+        for p in predictions:
+            log.info("  %s: %s pick, %s%% confidence",
+                     p["matchup"], p["pick"],
+                     round(max(p["edge"]["scores"].get("full_ml_home_prob", 0),
+                               p["edge"]["scores"].get("full_ml_away_prob", 0)) * 100, 1))
+        return
+    slate_id = slate_resp.data[0]["id"]
+    log.info("slate_id: %s", slate_id)
+
+    # Fetch current odds for all games in this slate so we can compute Kelly
+    games_resp = supabase.table("games").select("matchup, ml_home, ml_away")\
+        .eq("slate_id", slate_id).execute()
+    odds_by_matchup = {r["matchup"]: {"ml_home": r.get("ml_home"), "ml_away": r.get("ml_away")}
+                       for r in (games_resp.data or [])}
+    log.info("loaded odds for %s games", len(odds_by_matchup))
+
+    # Step 5: Upsert predictions to games table
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updated = 0
+    for pred in predictions:
+        # Compute Kelly for this game if odds are available
+        odds_row = odds_by_matchup.get(pred["matchup"], {})
+        ml_home = odds_row.get("ml_home")
+        ml_away = odds_row.get("ml_away")
+        home_prob = pred["edge"]["scores"].get("full_ml_home_prob")
+        away_prob = pred["edge"]["scores"].get("full_ml_away_prob")
+
+        lean = pred["edge"]["lean"]
+        if lean == "HOME":
+            kelly_u = kelly_units(home_prob, ml_home) if ml_home is not None else 0.0
+            vegas_implied = 1.0 / american_to_decimal(ml_home) if ml_home else None
+        elif lean == "AWAY":
+            kelly_u = kelly_units(away_prob, ml_away) if ml_away is not None else 0.0
+            vegas_implied = 1.0 / american_to_decimal(ml_away) if ml_away else None
+        else:
+            kelly_u = 0.0
+            vegas_implied = None
+
+        # Add Kelly fields to the scores
+        pred["edge"]["scores"]["kelly_units"] = kelly_u
+        pred["edge"]["scores"]["kelly_fraction"] = "quarter"
+        if vegas_implied is not None:
+            pred["edge"]["scores"]["vegas_implied_prob"] = round(vegas_implied, 4)
+            model_prob = home_prob if lean == "HOME" else away_prob
+            if model_prob:
+                pred["edge"]["scores"]["model_edge"] = round(model_prob - vegas_implied, 4)
+
+        try:
+            supabase.table("games").update({
+                "lean": pred["edge"]["lean"],
+                "confidence": pred["edge"]["confidence"],
+                "signals": pred["edge"]["signals"],
+                "scores": pred["edge"]["scores"],
+                "prediction_updated_at": now_iso,
+            }).eq("slate_id", slate_id).eq("matchup", pred["matchup"]).execute()
+            updated += 1
+            kelly_str = f"{kelly_u}u" if kelly_u > 0 else "no bet"
+            log.info("  ✅ %s updated (Kelly: %s)", pred["matchup"], kelly_str)
+        except Exception as e:
+            log.warning("  ❌ %s update failed: %s", pred["matchup"], e)
+
+    log.info("=" * 60)
+    log.info("DONE — %s/%s games updated with predictions", updated, len(predictions))
+
+
+if __name__ == "__main__":
+    main()

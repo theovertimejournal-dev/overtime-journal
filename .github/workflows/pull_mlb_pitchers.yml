@@ -12,6 +12,7 @@ on:
           - ""
           - "2024"
           - "2025"
+          - "2026"
       backfill_run_id:
         description: "Run ID of the Backfill MLB History workflow that produced the parquets (find in Actions tab URL)"
         required: true
@@ -56,4 +57,4 @@ jobs:
           path: |
             data/pitcher_features_*.parquet
             data/preview_pitchers_*.csv
-          retention-days: 14
+          retention-days: 90

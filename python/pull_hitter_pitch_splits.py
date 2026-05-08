@@ -149,7 +149,7 @@ def process_year(year, pb):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--year", type=int, choices=[2024, 2025])
+    p.add_argument("--year", type=int, choices=[2024, 2025, 2026])
     args = p.parse_args()
     pb = import_pybaseball()
     years = [args.year] if args.year else [2024, 2025]

@@ -400,7 +400,7 @@ def process_year(year):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--year", type=int, choices=[2024, 2025])
+    p.add_argument("--year", type=int, choices=[2024, 2025, 2026])
     args = p.parse_args()
     years = [args.year] if args.year else [2024, 2025]
     for y in years:

@@ -51,4 +51,4 @@ jobs:
           name: mlb-trained-models
           path: |
             models/**
-          retention-days: 30
+          retention-days: 90

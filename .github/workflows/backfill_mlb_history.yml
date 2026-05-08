@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       season:
-        description: "Season to backfill (leave blank for both 2024 & 2025)"
+        description: "Season to backfill (leave blank for 2024, 2025, & 2026)"
         required: false
         default: ""
         type: choice
@@ -12,6 +12,7 @@ on:
           - ""
           - "2024"
           - "2025"
+          - "2026"
       dry_run:
         description: "Dry run (3 days only, for testing)"
         required: false
@@ -55,4 +56,4 @@ jobs:
             data/*.parquet
             data/*.csv
             data/_sample_event.json
-          retention-days: 14
+          retention-days: 90

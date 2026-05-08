@@ -12,6 +12,7 @@ on:
           - ""
           - "2024"
           - "2025"
+          - "2026"
       pitcher_run_id:
         description: "Pull MLB Pitchers run ID (used to find game pks)"
         required: true
@@ -56,4 +57,4 @@ jobs:
           path: |
             data/hitter_pitch_splits_*.parquet
             data/preview_hitter_splits_*.csv
-          retention-days: 14
+          retention-days: 90

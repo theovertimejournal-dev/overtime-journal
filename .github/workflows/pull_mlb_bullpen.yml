@@ -12,6 +12,7 @@ on:
           - ""
           - "2024"
           - "2025"
+          - "2026"
       backfill_run_id:
         description: "Run ID of Backfill MLB History workflow"
         required: true
@@ -56,4 +57,4 @@ jobs:
           path: |
             data/bullpen_features_*.parquet
             data/preview_bullpen_*.csv
-          retention-days: 14
+          retention-days: 90

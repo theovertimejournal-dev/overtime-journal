@@ -12,6 +12,7 @@ on:
           - ""
           - "2024"
           - "2025"
+          - "2026"
       backfill_run_id:
         description: "Backfill MLB History run ID"
         required: true
@@ -56,4 +57,4 @@ jobs:
           path: |
             data/weather_features_*.parquet
             data/preview_weather_*.csv
-          retention-days: 14
+          retention-days: 90

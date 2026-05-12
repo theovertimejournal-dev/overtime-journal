@@ -138,14 +138,12 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
 
   // ML model data (from predict_mlb_today.py → game.scores)
   const scores = game.scores || {};
-  const isMLPrediction = scores.model_version === "v5_ensemble" || !!scores.base_model_probs;
+  const isMLPrediction = scores.model_version === "v5_ensemble" || scores.base_model_probs;
   const fullHomeProb = scores.full_ml_home_prob;
   const fullAwayProb = scores.full_ml_away_prob;
   const f5HomeProb = scores.f5_ml_home_prob;
   const f5AwayProb = scores.f5_ml_away_prob;
   const runTotalLean = scores.run_total_lean;
-  const kellyUnits = scores.kelly_units || 0;
-  const modelEdge = scores.model_edge;
 
   // Compute displayed probability for the lean direction
   const leanProb = lean === "HOME" ? fullHomeProb : lean === "AWAY" ? fullAwayProb : null;
@@ -237,15 +235,6 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                     </span>
                   ) : (
                     <span style={{ fontSize: 9, color: confColor, opacity: 0.7 }}>{conf}</span>
-                  )}
-                  {kellyUnits > 0 && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, color: "#22c55e",
-                      padding: "1px 5px", borderRadius: 3,
-                      background: "rgba(34,197,94,0.12)",
-                    }} title="Quarter Kelly recommended bet size">
-                      {kellyUnits}u
-                    </span>
                   )}
                 </div>
               ) : (
@@ -362,25 +351,6 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                         </div>
                         <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
                           park · arsenal · weather
-                        </div>
-                      </div>
-                    )}
-                    {/* Kelly Bet Sizing */}
-                    {kellyUnits > 0 && (
-                      <div style={{ background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.15)", borderRadius: 6, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 9, color: "#22c55e", textTransform: "uppercase", marginBottom: 4, fontWeight: 700 }}>
-                          💰 Kelly Size
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: "#22c55e" }}>
-                          {kellyUnits}u
-                        </div>
-                        <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
-                          {modelEdge != null && (
-                            <>edge: <span style={{ color: modelEdge > 0 ? "#22c55e" : "#ef4444" }}>
-                              {modelEdge > 0 ? "+" : ""}{(modelEdge * 100).toFixed(1)}%
-                            </span> vs vegas</>
-                          )}
-                          {!modelEdge && "quarter Kelly · 1u = 1% bankroll"}
                         </div>
                       </div>
                     )}
@@ -626,7 +596,12 @@ export default function MLBDashboard({ user }) {
     setExpanded({ [firstHigh >= 0 ? firstHigh : 0]: true });
   }, [slate?.date]);
 
-  const games = slate?.games || [];
+  const games = (slate?.games || []).slice().sort((a, b) => {
+    // Sort by game_time ascending (earliest first)
+    const timeA = a.game_time || "99:99";
+    const timeB = b.game_time || "99:99";
+    return timeA.localeCompare(timeB);
+  });
   const highConf = games.filter(g => g.confidence === "HIGH");
 
   const toggle = (i) => {

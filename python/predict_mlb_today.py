@@ -186,7 +186,7 @@ def get_todays_games(game_date):
                 "away_starter_name": t["away"].get("probablePitcher", {}).get("fullName", "TBD"),
                 "venue": g.get("venue", {}).get("name", ""),
                 "lineups": g.get("lineups", {}),
-                "matchup": f"{away_abbrev}@{home_abbrev}",
+                "matchup": f"{away_abbrev} @ {home_abbrev}",  # must match push format "AZ @ BAL" exactly
             })
     log.info("found %s games for %s", len(games), game_date)
     return games

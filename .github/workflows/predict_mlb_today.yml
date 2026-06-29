@@ -1,38 +1,38 @@
 name: Predict MLB Today
 
 on:
+  # Auto-run right after the slate push finishes.
+  # predict UPDATES the rows the push INSERTs, so it MUST run after the push,
+  # on the SAME date — chaining guarantees both and kills the race condition.
+  workflow_run:
+    workflows: ["OTJ MLB Slate Push (11AM ET)"]
+    types: [completed]
+
+  # Manual override still available. run-id inputs are gone — artifacts are
+  # always resolved to the latest successful run, so there is nothing to type.
   workflow_dispatch:
     inputs:
-      trained_models_run_id:
-        description: "Train MLB Ensemble run ID (source of trained models)"
-        required: true
-        default: "24411504075"
-        type: string
-      arsenal_run_id:
-        description: "Pull Pitcher Arsenal run ID (cached arsenal data)"
-        required: true
-        default: "25761673389"
-        type: string
-      hitter_splits_run_id:
-        description: "Pull Hitter Pitch Splits run ID (cached hitter data)"
-        required: true
-        default: "25761685413"
-        type: string
       game_date:
-        description: "Game date (YYYY-MM-DD, blank = today)"
+        description: "Game date (YYYY-MM-DD, blank = today ET)"
         required: false
         default: ""
-        type: string
       dry_run:
         description: "Dry run (no DB writes)"
         required: false
-        default: false
-        type: boolean
+        default: "false"
+
+# Two push crons (15:00 + 16:00 UTC for DST) will each trigger a predict.
+# Serialize them so they don't write the same rows concurrently.
+concurrency:
+  group: predict-mlb-today
+  cancel-in-progress: false
 
 jobs:
   predict:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # On the chained trigger, only run if the push actually succeeded.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -45,29 +45,31 @@ jobs:
         run: |
           pip install pandas pyarrow numpy scikit-learn lightgbm xgboost catboost requests supabase python-dotenv
 
+      # ---- Artifacts: always grab the LATEST successful run, no run IDs ----
+      # NOTE: confirm these three workflow filenames match your repo exactly.
       - name: Download trained models
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
+          workflow: train_mlb_ensemble.yml          # <-- CONFIRM filename
+          workflow_conclusion: success
           name: mlb-trained-models
           path: models/
-          run-id: ${{ inputs.trained_models_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download arsenal cache
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
+          workflow: pull_pitcher_arsenal.yml        # <-- CONFIRM filename
+          workflow_conclusion: success
           name: mlb-arsenal-data
           path: data/
-          run-id: ${{ inputs.arsenal_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download hitter splits cache
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
+          workflow: pull_hitter_pitch_splits.yml    # <-- CONFIRM filename
+          workflow_conclusion: success
           name: mlb-hitter-splits-data
           path: data/
-          run-id: ${{ inputs.hitter_splits_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: List models + data
         run: ls -la models/ && ls -la data/ || true
@@ -78,11 +80,21 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           SPORTSGAMEODDS_API_KEY: ${{ secrets.SPORTSGAMEODDS_API_KEY }}
         run: |
-          ARGS=""
-          if [ -n "${{ inputs.game_date }}" ]; then
-            ARGS="$ARGS --date=${{ inputs.game_date }}"
+          # Mirror the push's ET date so predict updates the SAME rows the push
+          # inserted. Without this, predict would default to the runner's UTC
+          # "today" and miss rows near the date boundary.
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          GAME_DATE="${{ github.event.inputs.game_date }}"
+          DATE_ARG="--date=${GAME_DATE:-$ET_DATE}"
+
+          DRY=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY="--dry-run"
           fi
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
-          fi
-          python python/predict_mlb_today.py $ARGS
+
+          echo "Running: python python/predict_mlb_today.py $DATE_ARG $DRY"
+          python python/predict_mlb_today.py $DATE_ARG $DRY
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ MLB predict failed — check logs above"

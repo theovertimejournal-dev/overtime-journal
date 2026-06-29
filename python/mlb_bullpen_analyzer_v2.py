@@ -68,6 +68,7 @@ def api_get(endpoint, params=None):
 def get_todays_games(date=None):
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
+    season = int(date.split("-")[0])
     data = api_get("/schedule", {"sportId":1,"date":date,"hydrate":"probablePitcher,team,linescore"})
     games = []
     for de in data.get("dates", []):
@@ -82,17 +83,65 @@ def get_todays_games(date=None):
                 "home_team": t["home"]["team"]["abbreviation"],
                 "home_team_name": t["home"]["team"]["name"],
                 "home_team_id": t["home"]["team"]["id"],
-                "away_starter": _xp(g,"away"), "home_starter": _xp(g,"home"),
+                "away_starter": _xp(g,"away",season), "home_starter": _xp(g,"home",season),
                 "game_time": g.get("gameDate","TBD"),
                 "venue": g.get("venue",{}).get("name","Unknown"),
             })
     return games
 
-def _xp(g, side):
+def _xp(g, side, season=None):
     try:
         p = g["teams"][side].get("probablePitcher",{})
-        return {"id":p.get("id"),"name":p.get("fullName","TBD")}
-    except: return {"id":None,"name":"TBD"}
+        pid = p.get("id")
+        s = {"id":pid,"name":p.get("fullName","TBD")}
+        # Enrich with season ERA so the dashboard can show it on the card
+        era_info = get_pitcher_season_era(pid, season)
+        s["era"] = era_info["era"]
+        s["era_source"] = era_info["era_source"]
+        return s
+    except: return {"id":None,"name":"TBD","era":None,"era_source":None}
+
+
+def get_pitcher_season_era(pitcher_id, season=None):
+    """
+    Fetch a starting pitcher's season ERA from the MLB Stats API.
+    Falls back to the prior season when the current-season sample is thin
+    (Opening Week) — mirrors the bullpen small-sample logic via MIN_RELIABLE_IP.
+    Returns {"era": float|None, "era_source": "2026"|"2025"|None, "ip": float}.
+    """
+    if pitcher_id is None:
+        return {"era": None, "era_source": None, "ip": 0.0}
+    if not season:
+        season = datetime.now().year
+
+    def _fetch(yr):
+        data = api_get(f"/people/{pitcher_id}/stats", {
+            "stats": "season", "group": "pitching", "season": yr, "sportId": 1,
+        })
+        for split in data.get("stats", []):
+            for entry in split.get("splits", []):
+                st = entry.get("stat", {})
+                ip = _parse_ip(st.get("inningsPitched", "0"))
+                try:
+                    era = float(st.get("era"))
+                except (TypeError, ValueError):
+                    era = None
+                return era, ip
+        return None, 0.0
+
+    cur_era, cur_ip = _fetch(season)
+    # Trust current season only once the starter has a real sample
+    if cur_era is not None and cur_ip >= MIN_RELIABLE_IP:
+        return {"era": round(cur_era, 2), "era_source": str(season), "ip": round(cur_ip, 1)}
+
+    prior_era, prior_ip = _fetch(season - 1)
+    if prior_era is not None:
+        return {"era": round(prior_era, 2), "era_source": str(season - 1), "ip": round(prior_ip, 1)}
+
+    # No prior data — fall back to a thin current sample if we have one, else None
+    if cur_era is not None:
+        return {"era": round(cur_era, 2), "era_source": str(season), "ip": round(cur_ip, 1)}
+    return {"era": None, "era_source": None, "ip": round(cur_ip, 1)}
 
 
 def get_recent_games(team_id, end_date, num_days=7):
@@ -570,7 +619,13 @@ def print_game(game,abp,hbp,apyth,hpyth,park,atto,htto,alr,hlr,edge):
     aw=game["away_team"]; hm=game["home_team"]
     print(f"\n{'━'*74}")
     print(f"  {aw} @ {hm}  |  {game['venue']}  |  Park: {park['factor']} ({park['label']})")
-    print(f"  Starters: {game['away_starter']['name']} vs {game['home_starter']['name']}")
+    def _st(s):
+        nm = s.get("name","TBD")
+        if s.get("era") is not None:
+            src = " '25" if s.get("era_source") and s["era_source"] != str(datetime.now().year) else ""
+            return f"{nm} ({s['era']} ERA{src})"
+        return nm
+    print(f"  Starters: {_st(game['away_starter'])} vs {_st(game['home_starter'])}")
     print(f"{'━'*74}")
 
     rows = [

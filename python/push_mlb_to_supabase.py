@@ -91,6 +91,105 @@ def pitcher_url(pitcher_id, source="mlb"):
         return None
     return f"https://www.mlb.com/player/{pitcher_id}"
 
+
+def fetch_series_info(game_date):
+    """
+    Fetch series info for today's games from MLB Stats API.
+    Returns dict keyed by "AWAY @ HOME" with series_game_number, games_in_series,
+    and series_record (computed from recent results).
+    """
+    import requests
+    from datetime import timedelta
+
+    series_map = {}
+    try:
+        # Fetch today's schedule with series info
+        r = requests.get("https://statsapi.mlb.com/api/v1/schedule", params={
+            "sportId": 1, "date": game_date,
+            "hydrate": "team"
+        }, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+
+        for d in data.get("dates", []):
+            for g in d.get("games", []):
+                away_abbr = g.get("teams", {}).get("away", {}).get("team", {}).get("abbreviation", "")
+                home_abbr = g.get("teams", {}).get("home", {}).get("team", {}).get("abbreviation", "")
+
+                # SGO uses different abbreviations for some teams
+                SGO_FIX = {"ARI": "AZ", "KCR": "KC", "SDP": "SD", "SFG": "SF",
+                           "TBR": "TB", "WSN": "WSH", "CHW": "CWS"}
+                away_abbr = SGO_FIX.get(away_abbr, away_abbr)
+                home_abbr = SGO_FIX.get(home_abbr, home_abbr)
+
+                series_num = g.get("seriesGameNumber", None)
+                series_len = g.get("gamesInSeries", None)
+                matchup = f"{away_abbr} @ {home_abbr}"
+
+                series_map[matchup] = {
+                    "series_game_number": series_num,
+                    "games_in_series": series_len,
+                }
+
+        # Now compute series record by checking previous days
+        # Look back up to 4 days for completed games in same series
+        dt = datetime.strptime(game_date, "%Y-%m-%d")
+        for days_back in range(1, 5):
+            prev_date = (dt - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            try:
+                r2 = requests.get("https://statsapi.mlb.com/api/v1/schedule", params={
+                    "sportId": 1, "date": prev_date, "hydrate": "team"
+                }, timeout=10)
+                r2.raise_for_status()
+                for d in r2.json().get("dates", []):
+                    for g in d.get("games", []):
+                        if g.get("status", {}).get("codedGameState") not in ("F", "O"):
+                            continue
+                        a = g.get("teams", {}).get("away", {})
+                        h = g.get("teams", {}).get("home", {})
+                        a_abbr = SGO_FIX.get(a.get("team", {}).get("abbreviation", ""),
+                                              a.get("team", {}).get("abbreviation", ""))
+                        h_abbr = SGO_FIX.get(h.get("team", {}).get("abbreviation", ""),
+                                              h.get("team", {}).get("abbreviation", ""))
+
+                        # Check both orderings (teams can swap home/away in series)
+                        for key in [f"{a_abbr} @ {h_abbr}", f"{h_abbr} @ {a_abbr}"]:
+                            if key in series_map:
+                                rec = series_map[key].setdefault("_results", [])
+                                a_score = a.get("score", 0)
+                                h_score = h.get("score", 0)
+                                # Track from perspective of today's away team
+                                today_away = key.split(" @ ")[0]
+                                if a_abbr == today_away:
+                                    rec.append("W" if a_score > h_score else "L")
+                                else:
+                                    rec.append("W" if h_score > a_score else "L")
+            except Exception:
+                continue
+
+        # Compute series record strings
+        for key, info in series_map.items():
+            results = info.pop("_results", [])
+            away_team = key.split(" @ ")[0]
+            home_team = key.split(" @ ")[1]
+            away_wins = results.count("W")
+            home_wins = results.count("L")
+            if results:
+                if away_wins > home_wins:
+                    info["series_record"] = f"{away_team} leads {away_wins}-{home_wins}"
+                elif home_wins > away_wins:
+                    info["series_record"] = f"{home_team} leads {home_wins}-{away_wins}"
+                else:
+                    info["series_record"] = f"Tied {away_wins}-{home_wins}"
+            else:
+                info["series_record"] = None
+
+        print(f"  ✅ Series info fetched for {len(series_map)} games")
+    except Exception as e:
+        print(f"  ⚠ Series info fetch failed: {e}")
+
+    return series_map
+
 # ── Arg parsing ───────────────────────────────────────────────────────────────
 game_date    = datetime.now().strftime("%Y-%m-%d")
 no_narrative = False
@@ -594,12 +693,17 @@ except Exception as e:
 print("\n⏳ Building slate...")
 now_iso = datetime.now().isoformat()
 
+# Fetch series info (game X of Y, series record)
+print("⏳ Fetching series info...")
+series_info = fetch_series_info(game_date)
+
 # Lightweight game list stored in slates.games JSONB (same shape as NBA)
 slate_games_list = []
 for gd in games_raw:
     g = gd.get("game", {})
     edge = gd.get("edge", {})
     matchup = f"{g.get('away_team', '')} @ {g.get('home_team', '')}"
+    s_info = series_info.get(matchup, {})
     slate_games_list.append({
         "matchup":    matchup,
         "game_id":    str(g.get("game_pk", "")),
@@ -611,6 +715,9 @@ for gd in games_raw:
         "confidence": edge.get("confidence", "LOW"),
         "is_divisional": is_divisional_game(g.get("away_team", ""), g.get("home_team", "")),
         "division":   get_division(g.get("home_team", "")),
+        "series_game": s_info.get("series_game_number"),
+        "series_length": s_info.get("games_in_series"),
+        "series_record": s_info.get("series_record"),
     })
 
 # ── Step 5: Upsert slate row ──────────────────────────────────────────────────

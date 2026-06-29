@@ -822,7 +822,7 @@ for gd in games_raw:
         analysis = existing.get("analysis") or {}
 
     try:
-        supabase.table("games").upsert({
+        record = {
             # ── Static fields (set on first write, unchanged after) ──────────
             "slate_id":         slate_id,
             "sport":            SPORT,
@@ -832,10 +832,6 @@ for gd in games_raw:
             "home_team":        home,
             "game_time":        g.get("game_time", "TBD"),
             "venue":            g.get("venue", ""),
-            "lean":             edge.get("lean"),
-            "confidence":       edge.get("confidence", "LOW"),
-            "signals":          edge.get("signals", []),
-            "scores":           edge.get("scores", {}),
             "analysis":         analysis,
             "narrative":        narrative,
             "created_at":       now_iso if is_first_write else existing.get("created_at", now_iso),
@@ -848,7 +844,20 @@ for gd in games_raw:
             "total":            float(odds["total"])        if odds.get("total")       is not None else None,
             "odds_vendor":      odds.get("vendor"),
             "odds_updated_at":  now_iso if odds else None,
-        }, on_conflict="slate_id,matchup").execute()
+        }
+
+        # Edge fields (lean / confidence / signals / scores) carry the analyzer's
+        # PROVISIONAL edge. Write them ONCE on first write, then leave them to
+        # predict_mlb_today.py, which owns them. Omitting them on odds-refresh
+        # runs prevents the push from clobbering the ML predictions (robot icon /
+        # Kelly units / win prob) that predict writes after the slate push.
+        if is_first_write:
+            record["lean"]       = edge.get("lean")
+            record["confidence"] = edge.get("confidence", "LOW")
+            record["signals"]    = edge.get("signals", [])
+            record["scores"]     = edge.get("scores", {})
+
+        supabase.table("games").upsert(record, on_conflict="slate_id,matchup").execute()
 
         lean_str = f"{edge.get('lean')} ({edge.get('confidence')})" if edge.get("lean") else "No lean"
         odds_str = f"ML {odds.get('ml_home')}/{odds.get('ml_away')}" if odds else "No odds"

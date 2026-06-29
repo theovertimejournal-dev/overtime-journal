@@ -231,6 +231,11 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                     DIV
                   </span>
                 ) : null}
+                {game.series_game && game.series_length && (
+                  <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: "rgba(96,165,250,0.12)", color: "#60a5fa", fontWeight: 600 }}>
+                    GM {game.series_game}/{game.series_length}
+                  </span>
+                )}
                 {realFeel.score != null && (
                   <span style={{
                     fontSize: 9, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
@@ -251,7 +256,14 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                 )}
               </div>
               {game.venue && (
-                <div style={{ fontSize: 10, color: "#374151", marginTop: 2 }}>{game.venue}</div>
+                <div style={{ fontSize: 10, color: "#374151", marginTop: 2 }}>
+                  {game.venue}
+                  {game.series_record && (
+                    <span style={{ color: "#6b7280", marginLeft: 8 }}>
+                      · {game.series_record}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -318,14 +330,9 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                 </span>
               )}
               <span style={{ color: "#374151", margin: "0 8px" }}>·</span>
-              <a href={probablePitchersUrl(game.away_team)} target="_blank" rel="noopener noreferrer"
-                 style={{ fontSize: 9, color: "#4a5568", textDecoration: "none", borderBottom: "1px dotted #374151" }}>
-                {game.away_team}
-              </a>
-              <span style={{ color: "#374151", margin: "0 2px" }}>/</span>
               <a href={probablePitchersUrl(game.home_team)} target="_blank" rel="noopener noreferrer"
                  style={{ fontSize: 9, color: "#4a5568", textDecoration: "none", borderBottom: "1px dotted #374151" }}>
-                {game.home_team} pitchers
+                matchup
               </a>
             </div>
           )}

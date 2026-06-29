@@ -89,9 +89,12 @@ function RelieverTable({ relievers, team }) {
           {/* Row 1: name */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span>{FATIGUE_ICON[r.fatigue] || "⚪"}</span>
-            <span style={{ color: "#e2e8f0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <a href={r.id ? `https://www.mlb.com/player/${r.id}` : `https://www.mlb.com/search?q=${encodeURIComponent(r.name)}`}
+               target="_blank" rel="noopener noreferrer"
+               style={{ color: "#e2e8f0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
               {r.name}<span style={{ color: "#4a5568" }}> ({r.hand})</span>
-            </span>
+            </a>
           </div>
           {/* Row 2: stats — wraps cleanly on mobile */}
           <div style={{ display: "flex", gap: 10, marginLeft: 20, marginTop: 2, flexWrap: "wrap", fontSize: 10, color: "#6b7280" }}>
@@ -138,14 +141,15 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
 
   // ML model data (from predict_mlb_today.py → game.scores)
   const scores = game.scores || {};
-  const isMLPrediction = scores.model_version === "v5_ensemble" || scores.base_model_probs;
+  const isMLPrediction = scores.model_version === "v5_ensemble" || !!scores.base_model_probs;
   const fullHomeProb = scores.full_ml_home_prob;
   const fullAwayProb = scores.full_ml_away_prob;
   const f5HomeProb = scores.f5_ml_home_prob;
   const f5AwayProb = scores.f5_ml_away_prob;
   const runTotalLean = scores.run_total_lean;
+  const kellyUnits = scores.kelly_units || 0;
+  const modelEdge = scores.model_edge;
 
-  // Compute displayed probability for the lean direction
   const leanProb = lean === "HOME" ? fullHomeProb : lean === "AWAY" ? fullAwayProb : null;
   const leanTeam = lean === "HOME" ? game.home_team : lean === "AWAY" ? game.away_team : null;
   const f5Prob = f5HomeProb != null ? Math.max(f5HomeProb, f5AwayProb) : null;
@@ -189,6 +193,11 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                 {park.factor && (
                   <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: `${parkColor}15`, color: parkColor, fontWeight: 600 }}>
                     PF {park.factor}
+                  </span>
+                )}
+                {game.is_divisional && (
+                  <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontWeight: 700 }}>
+                    DIV
                   </span>
                 )}
                 {realFeel.score != null && (
@@ -236,6 +245,15 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                   ) : (
                     <span style={{ fontSize: 9, color: confColor, opacity: 0.7 }}>{conf}</span>
                   )}
+                  {kellyUnits > 0 && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: "#22c55e",
+                      padding: "1px 5px", borderRadius: 3,
+                      background: "rgba(34,197,94,0.12)",
+                    }} title="Quarter Kelly recommended bet size">
+                      {kellyUnits}u
+                    </span>
+                  )}
                 </div>
               ) : (
                 <span style={{ fontSize: 11, color: "#374151" }}>No lean</span>
@@ -247,13 +265,37 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
           {/* Row 2: starters — own line, wraps cleanly */}
           {(analysis.away_starter?.name || game.away_starter) && (
             <div style={{ fontSize: 11, color: "#6b7280" }}>
-              <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-                {analysis.away_starter?.name || game.away_starter}
-              </span>
+              {analysis.away_starter?.url ? (
+                <a href={analysis.away_starter.url} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "#94a3b8", fontWeight: 600, textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
+                  {analysis.away_starter?.name || game.away_starter}
+                </a>
+              ) : (
+                <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+                  {analysis.away_starter?.name || game.away_starter}
+                </span>
+              )}
+              {analysis.away_starter?.era != null && (
+                <span style={{ fontSize: 10, color: analysis.away_starter.era < 3.0 ? "#22c55e" : analysis.away_starter.era > 4.5 ? "#ef4444" : "#6b7280", marginLeft: 4 }}>
+                  ({analysis.away_starter.era} ERA)
+                </span>
+              )}
               <span style={{ color: "#374151", margin: "0 6px" }}>vs</span>
-              <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-                {analysis.home_starter?.name || game.home_starter}
-              </span>
+              {analysis.home_starter?.url ? (
+                <a href={analysis.home_starter.url} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "#94a3b8", fontWeight: 600, textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
+                  {analysis.home_starter?.name || game.home_starter}
+                </a>
+              ) : (
+                <span style={{ color: "#94a3b8", fontWeight: 600 }}>
+                  {analysis.home_starter?.name || game.home_starter}
+                </span>
+              )}
+              {analysis.home_starter?.era != null && (
+                <span style={{ fontSize: 10, color: analysis.home_starter.era < 3.0 ? "#22c55e" : analysis.home_starter.era > 4.5 ? "#ef4444" : "#6b7280", marginLeft: 4 }}>
+                  ({analysis.home_starter.era} ERA)
+                </span>
+              )}
             </div>
           )}
 
@@ -383,7 +425,18 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                       <div key={i} style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: "10px 12px" }}>
                         <div style={{ fontSize: 11, color: "#4a5568", marginBottom: 4 }}>{team}</div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
-                          {sp?.name || "TBD"}
+                          {sp?.url ? (
+                            <a href={sp.url} target="_blank" rel="noopener noreferrer"
+                               style={{ color: "#e2e8f0", textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
+                              {sp?.name || "TBD"}
+                            </a>
+                          ) : (sp?.name || "TBD")}
+                          {sp?.era != null && (
+                            <span style={{ fontSize: 11, fontWeight: 600, marginLeft: 6,
+                              color: sp.era < 3.0 ? "#22c55e" : sp.era > 4.5 ? "#ef4444" : "#94a3b8" }}>
+                              {sp.era} ERA
+                            </span>
+                          )}
                         </div>
                         {tto?.status === "OK" && tto?.degradation != null && (
                           <div style={{ fontSize: 11, color: "#94a3b8" }}>
@@ -597,7 +650,6 @@ export default function MLBDashboard({ user }) {
   }, [slate?.date]);
 
   const games = (slate?.games || []).slice().sort((a, b) => {
-    // Sort by game_time ascending (earliest first)
     const timeA = a.game_time || "99:99";
     const timeB = b.game_time || "99:99";
     return timeA.localeCompare(timeB);

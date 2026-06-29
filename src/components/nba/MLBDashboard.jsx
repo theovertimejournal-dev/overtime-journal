@@ -28,6 +28,37 @@ const PRIOR_BULLPEN_ERA = {
 
 const CONF_COLOR = { HIGH: "#ef4444", MODERATE: "#f59e0b", LOW: "#6b7280" };
 const FATIGUE_COLOR = { HIGH: "#ef4444", MODERATE: "#f59e0b", FRESH: "#22c55e" };
+
+// MLB Divisions — for DIV badge
+const MLB_DIVISIONS = {
+  "AL East": ["NYY", "BOS", "TOR", "BAL", "TB"],
+  "AL Central": ["CLE", "DET", "MIN", "CWS", "KC"],
+  "AL West": ["HOU", "SEA", "TEX", "LAA", "ATH", "OAK"],
+  "NL East": ["ATL", "NYM", "PHI", "MIA", "WSH"],
+  "NL Central": ["CHC", "STL", "MIL", "PIT", "CIN"],
+  "NL West": ["LAD", "SD", "SF", "COL", "AZ"],
+};
+const TEAM_DIV = {};
+Object.entries(MLB_DIVISIONS).forEach(([div, teams]) => teams.forEach(t => TEAM_DIV[t] = div));
+const isDivisional = (away, home) => TEAM_DIV[away] && TEAM_DIV[away] === TEAM_DIV[home];
+
+// Team slugs for MLB.com links
+const TEAM_SLUG = {
+  AZ: "d-backs", ATL: "braves", BAL: "orioles", BOS: "red-sox",
+  CHC: "cubs", CWS: "white-sox", CIN: "reds", CLE: "guardians",
+  COL: "rockies", DET: "tigers", HOU: "astros", KC: "royals",
+  LAA: "angels", LAD: "dodgers", MIA: "marlins", MIL: "brewers",
+  MIN: "twins", NYM: "mets", NYY: "yankees", ATH: "athletics",
+  OAK: "athletics", PHI: "phillies", PIT: "pirates", SD: "padres",
+  SF: "giants", SEA: "mariners", STL: "cardinals", TB: "rays",
+  TEX: "rangers", TOR: "blue-jays", WSH: "nationals",
+};
+const probablePitchersUrl = (team) => `https://www.mlb.com/${TEAM_SLUG[team] || team.toLowerCase()}/roster/probable-pitchers`;
+const playerUrl = (name, id) => {
+  if (id) return `https://www.mlb.com/player/${id}`;
+  // Fallback: ESPN search by name
+  return `https://www.espn.com/mlb/players?search=${encodeURIComponent(name)}`;
+};
 const FATIGUE_ICON  = { HIGH: "🔴", MODERATE: "🟡", FRESH: "🟢" };
 
 function fmt(val, dec = 2) {
@@ -89,7 +120,7 @@ function RelieverTable({ relievers, team }) {
           {/* Row 1: name */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span>{FATIGUE_ICON[r.fatigue] || "⚪"}</span>
-            <a href={r.id ? `https://www.mlb.com/player/${r.id}` : `https://www.mlb.com/search?q=${encodeURIComponent(r.name)}`}
+            <a href={playerUrl(r.name, r.id)}
                target="_blank" rel="noopener noreferrer"
                style={{ color: "#e2e8f0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                         textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
@@ -195,11 +226,11 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                     PF {park.factor}
                   </span>
                 )}
-                {game.is_divisional && (
+                {game.is_divisional || isDivisional(game.away_team, game.home_team) ? (
                   <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 3, background: "rgba(245,158,11,0.12)", color: "#f59e0b", fontWeight: 700 }}>
                     DIV
                   </span>
-                )}
+                ) : null}
                 {realFeel.score != null && (
                   <span style={{
                     fontSize: 9, padding: "2px 6px", borderRadius: 3, fontWeight: 600,
@@ -262,40 +293,40 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
             </div>
           </div>
 
-          {/* Row 2: starters — own line, wraps cleanly */}
+          {/* Row 2: starters — always clickable */}
           {(analysis.away_starter?.name || game.away_starter) && (
             <div style={{ fontSize: 11, color: "#6b7280" }}>
-              {analysis.away_starter?.url ? (
-                <a href={analysis.away_starter.url} target="_blank" rel="noopener noreferrer"
-                   style={{ color: "#94a3b8", fontWeight: 600, textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
-                  {analysis.away_starter?.name || game.away_starter}
-                </a>
-              ) : (
-                <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-                  {analysis.away_starter?.name || game.away_starter}
-                </span>
-              )}
+              <a href={analysis.away_starter?.url || playerUrl(analysis.away_starter?.name || game.away_starter, analysis.away_starter?.id)}
+                 target="_blank" rel="noopener noreferrer"
+                 style={{ color: "#94a3b8", fontWeight: 600, textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
+                {analysis.away_starter?.name || game.away_starter}
+              </a>
               {analysis.away_starter?.era != null && (
                 <span style={{ fontSize: 10, color: analysis.away_starter.era < 3.0 ? "#22c55e" : analysis.away_starter.era > 4.5 ? "#ef4444" : "#6b7280", marginLeft: 4 }}>
                   ({analysis.away_starter.era} ERA)
                 </span>
               )}
               <span style={{ color: "#374151", margin: "0 6px" }}>vs</span>
-              {analysis.home_starter?.url ? (
-                <a href={analysis.home_starter.url} target="_blank" rel="noopener noreferrer"
-                   style={{ color: "#94a3b8", fontWeight: 600, textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
-                  {analysis.home_starter?.name || game.home_starter}
-                </a>
-              ) : (
-                <span style={{ color: "#94a3b8", fontWeight: 600 }}>
-                  {analysis.home_starter?.name || game.home_starter}
-                </span>
-              )}
+              <a href={analysis.home_starter?.url || playerUrl(analysis.home_starter?.name || game.home_starter, analysis.home_starter?.id)}
+                 target="_blank" rel="noopener noreferrer"
+                 style={{ color: "#94a3b8", fontWeight: 600, textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
+                {analysis.home_starter?.name || game.home_starter}
+              </a>
               {analysis.home_starter?.era != null && (
                 <span style={{ fontSize: 10, color: analysis.home_starter.era < 3.0 ? "#22c55e" : analysis.home_starter.era > 4.5 ? "#ef4444" : "#6b7280", marginLeft: 4 }}>
                   ({analysis.home_starter.era} ERA)
                 </span>
               )}
+              <span style={{ color: "#374151", margin: "0 8px" }}>·</span>
+              <a href={probablePitchersUrl(game.away_team)} target="_blank" rel="noopener noreferrer"
+                 style={{ fontSize: 9, color: "#4a5568", textDecoration: "none", borderBottom: "1px dotted #374151" }}>
+                {game.away_team}
+              </a>
+              <span style={{ color: "#374151", margin: "0 2px" }}>/</span>
+              <a href={probablePitchersUrl(game.home_team)} target="_blank" rel="noopener noreferrer"
+                 style={{ fontSize: 9, color: "#4a5568", textDecoration: "none", borderBottom: "1px dotted #374151" }}>
+                {game.home_team} pitchers
+              </a>
             </div>
           )}
 
@@ -425,12 +456,11 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                       <div key={i} style={{ background: "rgba(255,255,255,0.02)", borderRadius: 8, padding: "10px 12px" }}>
                         <div style={{ fontSize: 11, color: "#4a5568", marginBottom: 4 }}>{team}</div>
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0", marginBottom: 6 }}>
-                          {sp?.url ? (
-                            <a href={sp.url} target="_blank" rel="noopener noreferrer"
-                               style={{ color: "#e2e8f0", textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
-                              {sp?.name || "TBD"}
-                            </a>
-                          ) : (sp?.name || "TBD")}
+                          <a href={sp?.url || playerUrl(sp?.name || "TBD", sp?.id)}
+                             target="_blank" rel="noopener noreferrer"
+                             style={{ color: "#e2e8f0", textDecoration: "none", borderBottom: "1px dotted #4a5568" }}>
+                            {sp?.name || "TBD"}
+                          </a>
                           {sp?.era != null && (
                             <span style={{ fontSize: 11, fontWeight: 600, marginLeft: 6,
                               color: sp.era < 3.0 ? "#22c55e" : sp.era > 4.5 ? "#ef4444" : "#94a3b8" }}>

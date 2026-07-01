@@ -419,6 +419,15 @@ Community bets: {bet_wins}W {bet_losses}L across {len(user_bets)} bets
 
 ---
 
+STRUCTURE — build the entry from these segments, in this order, each with its own dramatic, specific header. This is the "full-blown" recap: skimmable up top, deep below.
+
+  1. THE RUNDOWN — 4-6 one-line bullets: the biggest beats of the night. This is the skim layer; a reader gets the whole night in ten seconds here.
+  2. THE STORIES — the conversational core (what the voices already do best): the games that mattered, told through Yumi, Johnnybot, and Krash reacting to the same moments differently. Dramatic headers, not "Game Recap."
+  3. 🚨 UPSETS — games where the result defied the lean/expectation in the data above. Name what happened and let the voices react. If nothing genuinely qualifies, OMIT this segment — do not manufacture an upset for drama.
+  4. 💥 BLOWOUTS — games decided by a wide margin. Narrate at the TEAM level unless a standout performer is listed for that game. Omit the segment if there were none.
+  5. ⭐ STANDOUT PERFORMERS — the best individual nights, pulled ONLY from the standout performers data above. One or two lines of commentary each, in the voices. Never list a player who isn't in the data.
+  6. TONIGHT — the preview segment (see rule 8). Always last.
+
 WRITING RULES:
 1. Open with a narrator line setting the scene — one vivid sentence about last night
 2. Weave all three voices throughout. Use their names (Yumi, Johnnybot, Krash) with quoted paraphrases
@@ -435,7 +444,7 @@ WRITING RULES:
    - Build anticipation — make the reader WANT to check back for tonight's results
    - Use the actual team names and matchup data provided above
 9. Keep the record/streak to ONE line near the bottom
-10. Under 800 words total (a little longer to fit the preview section)
+10. This is the full-blown edition — aim for 1,000-1,500 words. Depth is good, but every segment must earn its space; cut filler, never facts.
 11. End with 🔥
 
 CRITICAL PLAYER ACCURACY RULES — NEVER BREAK THESE:
@@ -444,6 +453,7 @@ CRITICAL PLAYER ACCURACY RULES — NEVER BREAK THESE:
 14. NEVER say a player "dominated", "scored", "went off", "had X points" or took any game action unless you can see their actual stat line in the data above.
 15. If you want to talk about a game but no standout performers are listed, describe the TEAM performance ("Milwaukee couldn't find an answer in the fourth") not individual players.
 16. Getting a player's game wrong (saying someone played when they were injured) destroys reader trust instantly. When in doubt, talk about the team, not the player.
+17. UPSETS and BLOWOUTS must be grounded in the actual scores in the data above — an upset means the underdog (or the team the model faded) actually won; a blowout means a genuinely lopsided final margin. If the data doesn't clearly show it, don't label it. A hot team winning big is not automatically a "collapse" by the loser — journal the result, don't editorialize a narrative onto it.
 
 OUTPUT FORMAT — respond with ONLY a JSON object, no markdown fences:
 {{

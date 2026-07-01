@@ -255,12 +255,22 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                   <span style={{ fontSize: 9, color: "#4a5568" }}>{game.status}</span>
                 )}
               </div>
-              {game.venue && (
+              {(game.venue || game.series_record || game.series_game) && (
                 <div style={{ fontSize: 10, color: "#374151", marginTop: 2 }}>
                   {game.venue}
+                  {game.series_game && game.series_length && (
+                    <span style={{ color: "#6b7280", marginLeft: 8 }}>
+                      · Game {game.series_game} of {game.series_length}
+                    </span>
+                  )}
                   {game.series_record && (
                     <span style={{ color: "#6b7280", marginLeft: 8 }}>
                       · {game.series_record}
+                    </span>
+                  )}
+                  {Array.isArray(game.series_games) && game.series_games.length > 0 && (
+                    <span style={{ color: "#6b7280", marginLeft: 8 }}>
+                      · {game.series_games.map(r => `${r.w} ${r.score}`).join(", ")}
                     </span>
                   )}
                 </div>

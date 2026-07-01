@@ -160,29 +160,36 @@ def fetch_series_info(game_date):
                                 h_score = h.get("score", 0)
                                 # Track from perspective of today's away team
                                 today_away = key.split(" @ ")[0]
-                                if a_abbr == today_away:
-                                    rec.append("W" if a_score > h_score else "L")
+                                # Store the actual result (winner + final score)
+                                # so the card shows a plain box-score line — no
+                                # +/- that a bettor would misread as a run line.
+                                if a_score >= h_score:
+                                    w_abbr, w_sc, l_sc = a_abbr, a_score, h_score
                                 else:
-                                    rec.append("W" if h_score > a_score else "L")
+                                    w_abbr, w_sc, l_sc = h_abbr, h_score, a_score
+                                rec.append({"w": w_abbr, "score": f"{w_sc}-{l_sc}"})
             except Exception:
                 continue
 
         # Compute series record strings
         for key, info in series_map.items():
-            results = info.pop("_results", [])
+            results = info.pop("_results", [])   # list of {"w": abbr, "score": "9-3"}
             away_team = key.split(" @ ")[0]
             home_team = key.split(" @ ")[1]
-            away_wins = results.count("W")
-            home_wins = results.count("L")
+            away_wins = sum(1 for r in results if r["w"] == away_team)
+            home_wins = sum(1 for r in results if r["w"] == home_team)
+            # Oldest game first, so the card reads left-to-right chronologically.
+            info["series_games"] = list(reversed(results))
             if results:
                 if away_wins > home_wins:
                     info["series_record"] = f"{away_team} leads {away_wins}-{home_wins}"
                 elif home_wins > away_wins:
                     info["series_record"] = f"{home_team} leads {home_wins}-{away_wins}"
                 else:
-                    info["series_record"] = f"Tied {away_wins}-{home_wins}"
+                    info["series_record"] = f"Split {away_wins}-{home_wins}"
             else:
                 info["series_record"] = None
+                info["series_games"] = []
 
         print(f"  ✅ Series info fetched for {len(series_map)} games")
     except Exception as e:
@@ -777,6 +784,7 @@ for gd in games_raw:
     home    = g.get("home_team", "")
     matchup = f"{away} @ {home}"
     odds    = sgo_odds_by_matchup.get(matchup, {})
+    s_info  = series_info.get(matchup, {})
 
     existing = existing_games.get(matchup)
     is_first_write = existing is None
@@ -832,6 +840,11 @@ for gd in games_raw:
             "home_team":        home,
             "game_time":        g.get("game_time", "TBD"),
             "venue":            g.get("venue", ""),
+            # ── Series context (game number, record, prior run margins) ──────
+            "series_game":      s_info.get("series_game_number"),
+            "series_length":    s_info.get("games_in_series"),
+            "series_record":    s_info.get("series_record"),
+            "series_games":     s_info.get("series_games"),
             "analysis":         analysis,
             "narrative":        narrative,
             "created_at":       now_iso if is_first_write else existing.get("created_at", now_iso),

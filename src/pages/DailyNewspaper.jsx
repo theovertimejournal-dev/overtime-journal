@@ -130,7 +130,7 @@ export default function DailyNewspaper() {
     const yesterdayStr = yesterdayObj.toLocaleDateString('en-CA');
 
     // Journal: if viewing a specific date, try that date first, fallback to latest
-    const jq = supabase.from("blog_posts").select("*").eq("sport", "nba").order("date", { ascending: false });
+    const jq = supabase.from("blog_posts").select("*").eq("sport", "daily").order("date", { ascending: false });
     if (selectedDate) jq.eq("date", selectedDate);
 
     const [jr, sr, rr, nr] = await Promise.all([

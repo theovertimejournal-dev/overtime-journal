@@ -487,7 +487,7 @@ def generate_blog(prompt: str) -> dict | None:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-5",
                 "max_tokens": 2500,
                 "messages": [{"role": "user", "content": prompt}],
             },
@@ -588,7 +588,7 @@ def pull_news(days_back: int = 2, per_sport: int = 6) -> dict:
     cutoff = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
     try:
         rows = supabase.table("news_feed") \
-            .select("sport,headline,body,character,severity,emoji,source_url,date") \
+            .select("sport,headline,body,character,severity,date") \
             .gte("date", cutoff) \
             .order("date", desc=True) \
             .limit(400) \

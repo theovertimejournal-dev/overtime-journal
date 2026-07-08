@@ -24,14 +24,15 @@ const isMobile = () => {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const W = 800, H = 480;
-const COURT_COLOR = "#c8773a";
-const LINE_COLOR = "#e8955c";
+const COURT_COLOR = "#8f4a1e";
+const LINE_COLOR = "#ffd27f";
 const HOOP_COLOR = "#ff6b00";
 const BALL_R = 10;
 const PLAYER_W = 22, PLAYER_H = 32;
 const SHOT_CLOCK_MAX = 24;
 const QUARTER_TIME = 120;
 const PIXEL_FONT = "'Courier New', monospace";
+const ARCADE_FONT = "'Press Start 2P', 'Courier New', monospace";
 const PLAYER_SPEED = 2.5;
 const CPU_SPEED = 2.0;
 
@@ -823,6 +824,7 @@ export default function NBAJamArcade({ user, profile }) {
     function drawCourt() {
       ctx.fillStyle = COURT_COLOR; ctx.fillRect(0,0,W,H);
       ctx.strokeStyle = LINE_COLOR; ctx.lineWidth = 2;
+      ctx.shadowColor = LINE_COLOR; ctx.shadowBlur = 6;
       ctx.beginPath(); ctx.moveTo(W/2,36); ctx.lineTo(W/2,H-36); ctx.stroke();
       ctx.beginPath(); ctx.arc(W/2,H/2,60,0,Math.PI*2); ctx.stroke();
       ctx.strokeRect(18, H/2-72, 122, 144);
@@ -832,6 +834,7 @@ export default function NBAJamArcade({ user, profile }) {
       ctx.beginPath(); ctx.arc(90,H/2,185,-Math.PI*0.58,Math.PI*0.58); ctx.stroke();
       ctx.beginPath(); ctx.arc(W-90,H/2,185,Math.PI*0.42,Math.PI*1.58); ctx.stroke();
       ctx.strokeRect(8,28,W-16,H-56);
+      ctx.shadowBlur = 0;
       drawHoop(ctx, 62, H/2, false);
       drawHoop(ctx, W-62, H/2, true);
     }
@@ -840,7 +843,9 @@ export default function NBAJamArcade({ user, profile }) {
       ctx.fillStyle = "#fff";
       ctx.fillRect(right?x+8:x-14, y-22, 6, 44);
       ctx.strokeStyle = HOOP_COLOR; ctx.lineWidth = 3;
+      ctx.shadowColor = HOOP_COLOR; ctx.shadowBlur = 10;
       ctx.beginPath(); ctx.arc(right?x-8:x+8, y, 15, 0, Math.PI*2); ctx.stroke();
+      ctx.shadowBlur = 0;
       ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.lineWidth = 1;
       for (let i=-3; i<=3; i++) {
         const bx=(right?x-8:x+8)+i*4;
@@ -871,7 +876,9 @@ export default function NBAJamArcade({ user, profile }) {
       ctx.beginPath(); ctx.ellipse(ball.x,H/2+22,BALL_R*1.3,BALL_R*0.45,0,0,Math.PI*2); ctx.fill();
       const g=ctx.createRadialGradient(ball.x-3,ball.y-3,2,ball.x,ball.y,BALL_R);
       g.addColorStop(0,"#ffa94d"); g.addColorStop(1,"#e06800");
+      ctx.shadowColor="#ff8c1a"; ctx.shadowBlur=12;
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur=0;
       ctx.strokeStyle="#7c3000"; ctx.lineWidth=1.5;
       ctx.beginPath(); ctx.arc(ball.x,ball.y,BALL_R,0,Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(ball.x-BALL_R,ball.y); ctx.lineTo(ball.x+BALL_R,ball.y); ctx.stroke();
@@ -1106,7 +1113,7 @@ export default function NBAJamArcade({ user, profile }) {
   }
 
   return (
-    <div style={{
+    <div className="otj-jam" style={{
       minHeight:"100vh",
       background:"#0a0a0f",
       backgroundImage:`
@@ -1119,6 +1126,29 @@ export default function NBAJamArcade({ user, profile }) {
       display:"flex", flexDirection:"column", alignItems:"center",
       padding:"14px 8px 16px", fontFamily:PIXEL_FONT, overflowX:"hidden",
     }}>
+
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+      .otj-jam .arcade-title {
+        font-family:'Press Start 2P','Courier New',monospace !important;
+        animation:otjjam-title-pulse 2.2s ease-in-out infinite;
+      }
+      @keyframes otjjam-title-pulse {
+        0%,100% { filter:drop-shadow(0 0 6px rgba(251,191,36,0.5)) drop-shadow(0 0 14px rgba(236,72,153,0.25)); }
+        50%     { filter:drop-shadow(0 0 12px rgba(251,191,36,0.9)) drop-shadow(0 0 24px rgba(236,72,153,0.55)); }
+      }
+      .otj-jam .crt-overlay {
+        position:absolute; inset:0; border-radius:8px; pointer-events:none; z-index:2;
+        background:
+          repeating-linear-gradient(0deg, rgba(0,0,0,0.20), rgba(0,0,0,0.20) 1px, transparent 1px, transparent 3px),
+          radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.55) 100%);
+        mix-blend-mode:multiply;
+        animation:otjjam-crt-flicker 4s infinite steps(50);
+      }
+      @keyframes otjjam-crt-flicker {
+        0%,100% { opacity:0.90; } 48% { opacity:1; } 50% { opacity:0.86; } 52% { opacity:1; }
+      }
+    `}</style>
 
     {/* Arcade cabinet wrapper */}
     <div style={{
@@ -1152,11 +1182,11 @@ export default function NBAJamArcade({ user, profile }) {
         <div style={{marginBottom:3}}>
           <a href="/arcade" style={{fontSize:11,color:"#4c1d95",textDecoration:"none"}}>← Arcade</a>
         </div>
-        <h1 style={{
-          fontSize:28, fontWeight:700, margin:0, letterSpacing:"0.12em", textTransform:"uppercase",
+        <h1 className="arcade-title" style={{
+          fontSize:15, fontWeight:700, margin:0, letterSpacing:"0.04em", textTransform:"uppercase",
           background:"linear-gradient(135deg, #fbbf24, #f59e0b, #fbbf24)",
           WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent",
-          filter:"drop-shadow(0 0 8px rgba(251,191,36,0.5))",
+          lineHeight:1.5,
         }}>
           🕹 OTJ JAM
         </h1>
@@ -1339,6 +1369,7 @@ export default function NBAJamArcade({ user, profile }) {
           ref={canvasRef} width={W} height={H}
           style={{display:"block",borderRadius:8,border:"2px solid #1a1a1a",width:"100%",height:"auto"}}
         />
+        <div className="crt-overlay" />
       </div>
 
       {/* Controls — joystick on mobile, keyboard hint on desktop */}

@@ -52,9 +52,33 @@ const STYLES = `
   }
 
   .otj-daily .content-columns {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0;
+    column-count: 2;
+    column-gap: 32px;
+    column-rule: 1px solid var(--rule);
+  }
+  .otj-daily .content-columns > * { break-inside: avoid; }
+
+  .otj-daily .section-head {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 19px; font-weight: 900; color: #f1f5f9;
+    letter-spacing: 0.01em; line-height: 1.2;
+    margin: 26px 0 12px; padding-bottom: 7px;
+    border-bottom: 2px solid var(--accent);
+    break-inside: avoid; break-after: avoid;
+  }
+  .otj-daily .section-head:first-child { margin-top: 0; }
+
+  .otj-daily .team  { font-weight: 700; color: #f1f5f9; }
+  .otj-daily .score { font-weight: 700; color: var(--accent); font-family: 'Playfair Display', Georgia, serif; }
+
+  .otj-daily .rundown { list-style: none; padding: 0; margin: 0 0 8px; }
+  .otj-daily .rundown li {
+    font-family: 'Lora', Georgia, serif; font-size: 14.5px; line-height: 1.6;
+    color: var(--ink); padding-left: 20px; position: relative; margin-bottom: 9px;
+    break-inside: avoid;
+  }
+  .otj-daily .rundown li::before {
+    content: '▸'; position: absolute; left: 2px; top: 0; color: var(--accent); font-weight: 700;
   }
 
   .otj-daily .main-grid {
@@ -64,7 +88,7 @@ const STYLES = `
   }
 
   @media (max-width: 768px) {
-    .otj-daily .content-columns { grid-template-columns: 1fr; }
+    .otj-daily .content-columns { column-count: 1; column-rule: none; }
     .otj-daily .main-grid { grid-template-columns: 1fr; }
     .otj-daily .date-row-ends { display: none; }
   }
@@ -107,6 +131,59 @@ const STYLES = `
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   .otj-daily .fade { animation: fadeIn 0.4s ease both; }
 `;
+
+// Team names + cities we auto-bold in the body so a scanning reader instantly
+// sees what each line is about. Case-sensitive on purpose — "Magic" the team
+// bolds, "magic" the word doesn't.
+const TEAMS = [
+  // MLB
+  "Diamondbacks","Braves","Orioles","Red Sox","White Sox","Cubs","Reds","Guardians",
+  "Rockies","Tigers","Astros","Royals","Angels","Dodgers","Marlins","Brewers","Twins",
+  "Mets","Yankees","Athletics","Phillies","Pirates","Padres","Giants","Mariners",
+  "Cardinals","Rays","Rangers","Blue Jays","Nationals",
+  // NBA
+  "Hawks","Celtics","Nets","Hornets","Bulls","Cavaliers","Mavericks","Nuggets","Pistons",
+  "Warriors","Rockets","Pacers","Clippers","Lakers","Grizzlies","Heat","Bucks",
+  "Timberwolves","Pelicans","Knicks","Thunder","Magic","76ers","Suns","Trail Blazers",
+  "Kings","Spurs","Raptors","Jazz","Wizards",
+  // NHL
+  "Senators","Maple Leafs","Mammoth","Bruins","Oilers","Panthers","Lightning","Kraken","Avalanche",
+  // Cities / short forms that show up in copy
+  "Colorado","Houston","Milwaukee","Pittsburgh","Boston","Atlanta","Washington","Baltimore",
+  "Toronto","Detroit","Cincinnati","Philadelphia","Minnesota","Cleveland","Seattle","Tampa Bay",
+  "Tampa","Chicago","San Francisco","Miami","New York","Kansas City","Los Angeles","Ottawa",
+  "Denver","Phoenix","Dallas","KC",
+];
+const TEAM_SET = new Set(TEAMS);
+const TEAM_ALT = [...TEAMS]
+  .sort((a, b) => b.length - a.length)                       // longest match first
+  .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  .join("|");
+// One regex that captures a team name OR a score like 4-3 / 16-12
+const ENTITY_RE = new RegExp(`(\\b(?:${TEAM_ALT})\\b|\\b\\d{1,2}-\\d{1,2}\\b)`, "g");
+
+function highlightEntities(text, kp) {
+  return text.split(ENTITY_RE).map((p, i) => {
+    if (!p) return null;
+    if (/^\d{1,2}-\d{1,2}$/.test(p)) return <span key={`${kp}s${i}`} className="score">{p}</span>;
+    if (TEAM_SET.has(p)) return <span key={`${kp}t${i}`} className="team">{p}</span>;
+    return <span key={`${kp}x${i}`}>{p}</span>;
+  });
+}
+
+// Parse **bold** and then highlight teams/scores inside the text.
+function fmtInline(text, kp) {
+  const out = [];
+  text.split(/\*\*(.+?)\*\*/g).forEach((seg, i) => {
+    if (!seg) return;
+    if (i % 2 === 1) {
+      out.push(<strong key={`${kp}b${i}`} style={{ color: "#f1f5f9" }}>{highlightEntities(seg, `${kp}b${i}`)}</strong>);
+    } else {
+      out.push(...highlightEntities(seg, `${kp}p${i}`));
+    }
+  });
+  return out;
+}
 
 export default function DailyNewspaper() {
   const [journal, setJournal] = useState(null);
@@ -194,41 +271,64 @@ export default function DailyNewspaper() {
     if (!content) return null;
     return content.split('\n\n').map((block, i) => {
       const lines = block.split('\n').filter(l => l.trim());
-      return (
-        <div key={i} style={{ marginBottom: 20 }}>
-          {lines.map((line, j) => {
-            const isHeader = line === line.toUpperCase() && line.trim().length > 3
-              && !line.includes('.') && line.trim().length < 80;
+      const nodes = [];
+      let bullets = [];
+      const flush = (k) => {
+        if (bullets.length) {
+          nodes.push(
+            <ul className="rundown" key={`ul${k}`}>
+              {bullets.map((b, bi) => <li key={bi}>{fmtInline(b, `${i}-${k}-${bi}`)}</li>)}
+            </ul>
+          );
+          bullets = [];
+        }
+      };
 
-            if (isHeader) return (
-              <div key={j} style={{
-                fontFamily: "'Playfair Display', Georgia, serif",
-                fontSize: 15, fontWeight: 900, color: '#f1f5f9',
-                letterSpacing: '0.06em', marginTop: i > 0 ? 24 : 0, marginBottom: 10,
-                paddingBottom: 5, borderBottom: '1px solid var(--rule)',
-              }}>{line}</div>
-            );
+      lines.forEach((line, j) => {
+        const t = line.trim();
 
-            const cm = line.match(/(Yumi|Johnnybot|Krash)/);
-            if (cm) {
-              const c = cm[1] === 'Yumi' ? 'var(--yumi)' : cm[1] === 'Johnnybot' ? 'var(--jbot)' : 'var(--krash)';
-              return (
-                <div key={j} className="quote-line" style={{ borderLeft: `3px solid ${c}` }}>
-                  {line.split(/(Yumi|Johnnybot|Krash)/).map((p, k) => {
-                    if (/Yumi|Johnnybot|Krash/.test(p)) {
-                      const cc = p === 'Yumi' ? 'var(--yumi)' : p === 'Johnnybot' ? 'var(--jbot)' : 'var(--krash)';
-                      return <span key={k} className="char-tag" style={{ background: `${cc}15`, color: cc }}>{p}</span>;
-                    }
-                    return <span key={k}>{p}</span>;
-                  })}
-                </div>
-              );
-            }
+        // Section header: **WRAPPED** or an ALL-CAPS short line
+        const hm = t.match(/^\*\*(.+?)\*\*$/);
+        const capsHeader = !hm && t === t.toUpperCase() && t.length > 3 && !t.includes('.') && t.length < 80;
+        if (hm || capsHeader) {
+          flush(j);
+          nodes.push(
+            <div className="section-head" key={`h${j}`}>
+              {(hm ? hm[1] : t).replace(/\*\*/g, '').trim()}
+            </div>
+          );
+          return;
+        }
 
-            return <div key={j} className="body-text" style={{ marginBottom: 4 }}>{line}</div>;
-          })}
-        </div>
-      );
+        // Bullet (Rundown)
+        if (t.startsWith('- ')) { bullets.push(t.slice(2)); return; }
+        flush(j);
+
+        // Voice line: "Yumi: ..." / "Johnnybot: ..." / "Krash: ..."
+        const cm = t.match(/^(Yumi|Johnnybot|Krash)\s*:/);
+        if (cm) {
+          const name = cm[1];
+          const c = name === 'Yumi' ? 'var(--yumi)' : name === 'Johnnybot' ? 'var(--jbot)' : 'var(--krash)';
+          const rest = t.slice(cm[0].length).trim();
+          nodes.push(
+            <div key={`v${j}`} className="quote-line" style={{ borderLeft: `3px solid ${c}` }}>
+              <span className="char-tag" style={{ background: `${c}18`, color: c }}>{name}</span>
+              {fmtInline(rest, `${i}-v${j}`)}
+            </div>
+          );
+          return;
+        }
+
+        // Plain paragraph
+        nodes.push(
+          <div key={`p${j}`} className="body-text" style={{ marginBottom: 6 }}>
+            {fmtInline(t, `${i}-p${j}`)}
+          </div>
+        );
+      });
+      flush('end');
+
+      return <div key={i} style={{ marginBottom: 18 }}>{nodes}</div>;
     });
   }
 
@@ -287,18 +387,9 @@ export default function DailyNewspaper() {
                 }}>{journal.excerpt}</p>
                 <div style={{ height: 1, background: 'var(--rule)', marginBottom: 20 }} />
 
-                {/* Two-column body on desktop */}
+                {/* Content flows into real newspaper columns */}
                 <div className="content-columns">
-                  {(() => {
-                    const blocks = (journal.content || '').split('\n\n');
-                    const mid = Math.ceil(blocks.length / 2);
-                    return (
-                      <>
-                        <div className="col-border-right">{renderContent(blocks.slice(0, mid).join('\n\n'))}</div>
-                        <div>{renderContent(blocks.slice(mid).join('\n\n'))}</div>
-                      </>
-                    );
-                  })()}
+                  {renderContent(journal.content)}
                 </div>
               </>
             ) : (

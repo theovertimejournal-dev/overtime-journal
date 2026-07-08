@@ -856,19 +856,58 @@ export default function NBAJamArcade({ user, profile }) {
     function drawPlayer(p, label, isOnFire, isActive) {
       const col = p.team === "player" ? TEAMS.player.color : TEAMS.cpu.color;
       const acc = p.team === "player" ? TEAMS.player.accent : TEAMS.cpu.accent;
+      const SKIN = "#f5c99b";
+
+      // Active-player ring at the feet
       if (isActive) {
         ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(p.x, p.y+PLAYER_H/2+5, 5, 0, Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(p.x, p.y + 18, 14, 5, 0, 0, Math.PI * 2); ctx.stroke();
       }
-      if (isOnFire) { ctx.shadowColor="#ff6b00"; ctx.shadowBlur=18; }
-      ctx.fillStyle = col; ctx.fillRect(p.x-PLAYER_W/2, p.y-PLAYER_H/2, PLAYER_W, PLAYER_H);
-      ctx.fillStyle = acc; ctx.fillRect(p.x-PLAYER_W/2+3, p.y-PLAYER_H/2+8, PLAYER_W-6, 10);
-      ctx.fillStyle = "#f5d0a9";
-      ctx.beginPath(); ctx.arc(p.x, p.y-PLAYER_H/2-6, 9, 0, Math.PI*2); ctx.fill();
+
+      if (isOnFire) { ctx.shadowColor = "#ff6b00"; ctx.shadowBlur = 18; }
+
+      // ── Muscular body: broad shoulders tapering to the waist ──
+      const shoulderY = p.y - 8, waistY = p.y + 8, half = 16, waistHalf = 9;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(p.x - half, shoulderY);
+      ctx.lineTo(p.x + half, shoulderY);
+      ctx.lineTo(p.x + waistHalf, waistY);
+      ctx.lineTo(p.x - waistHalf, waistY);
+      ctx.closePath();
+      ctx.fill();
+      // chunky arms
+      ctx.fillRect(p.x - half - 4, shoulderY, 6, 15);
+      ctx.fillRect(p.x + half - 2, shoulderY, 6, 15);
+      // jersey stripe
+      ctx.fillStyle = acc;
+      ctx.fillRect(p.x - 7, shoulderY + 3, 14, 4);
+      // shorts
+      ctx.fillStyle = acc;
+      ctx.fillRect(p.x - waistHalf, waistY, waistHalf * 2, 8);
+      // legs
+      ctx.fillStyle = SKIN;
+      ctx.fillRect(p.x - 7, waistY + 8, 5, 9);
+      ctx.fillRect(p.x + 2, waistY + 8, 5, 9);
+
+      // ── BIG head (the whole point) ──
+      const headR = 13, headY = shoulderY - headR + 4;
+      ctx.fillStyle = SKIN;
+      ctx.beginPath(); ctx.arc(p.x, headY, headR, 0, Math.PI * 2); ctx.fill();
+      // 90s headband in team color
+      ctx.fillStyle = col;
+      ctx.fillRect(p.x - headR + 2, headY - 6, headR * 2 - 4, 4);
+      // eyes
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(p.x - 5, headY + 1, 2, 3);
+      ctx.fillRect(p.x + 3, headY + 1, 2, 3);
+
       ctx.shadowBlur = 0;
+
+      // name label under the feet
       ctx.fillStyle = "#fff"; ctx.font = `bold 9px ${PIXEL_FONT}`; ctx.textAlign = "center";
-      ctx.fillText(label, p.x, p.y+PLAYER_H/2+11);
-      if (isOnFire) { ctx.font="13px serif"; ctx.fillText("🔥", p.x+13, p.y-PLAYER_H/2-13); }
+      ctx.fillText(label, p.x, p.y + 30);
+      if (isOnFire) { ctx.font = "14px serif"; ctx.fillText("🔥", p.x + 16, headY - 10); }
     }
 
     function drawBall(ball) {

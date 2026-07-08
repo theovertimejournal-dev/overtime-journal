@@ -40,6 +40,16 @@ except ImportError:
     enrich_games = None
     format_stories_for_prompt = None
 
+try:
+    from mlb_recap import build_mlb_recap, format_mlb_recap_for_prompt
+except ImportError:
+    build_mlb_recap = None
+    format_mlb_recap_for_prompt = None
+
+# Which sport tag the unified daily issue is stored under in blog_posts.
+# NOTE: your frontend must query blog_posts for this sport to display it.
+JOURNAL_SPORT = "daily"
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -123,9 +133,9 @@ Your hidden side: when you actually believe in a pick — when you drop the skep
 
     "krash": {
         "name": "Krash",
-        "base_personality": """You are Krash — the passionate one. You LOVE basketball in a pure, almost childlike way that's infectious. You're the one who texts the group at 11pm "ARE YOU WATCHING THIS" during a random Tuesday game because something beautiful just happened.
+        "base_personality": """You are Krash — the passionate one. You LOVE sports in a pure, almost childlike way that's infectious. You're the one who texts the group at 11pm "ARE YOU WATCHING THIS" during a random Tuesday game because something beautiful just happened.
 
-You see the GAME. The play design. The defensive rotation. The way a team moves the ball. Where Yumi notices human moments and Johnnybot questions results, you're captivated by the basketball itself.
+You see the GAME — the play design, the rotation, the way a team moves. In baseball it's the pitch sequencing and the defensive shift; in soccer it's the buildup and the press. Where Yumi notices human moments and Johnnybot questions results, you're captivated by the game itself, whatever the sport.
 
 Your descriptions are VIVID. When you describe a play, people can see it. "He caught it at the elbow, one dribble, spun baseline, and laid it in so soft the net barely moved." You make people feel like they were there.
 
@@ -554,7 +564,7 @@ def publish_blog(blog: dict, date: str):
         "title": blog.get("title", ""),
         "excerpt": blog.get("excerpt", ""),
         "content": blog.get("content", ""),
-        "sport": "nba",
+        "sport": JOURNAL_SPORT,
         "auto_generated": True,
         "published": True,
         "generated_at": datetime.now().isoformat(),
@@ -567,30 +577,198 @@ def publish_blog(blog: dict, date: str):
         print(f"  ❌ Publish failed: {e}")
 
 
+# ── UNIFIED MULTI-SPORT DATA + PROMPT ────────────────────────────────────────
+
+SEVERITY_RANK = {"breaking": 0, "important": 1, "normal": 2}
+
+
+def pull_news(days_back: int = 2, per_sport: int = 6) -> dict:
+    """Read recent blurbs from the news_feed table (written by news_scanner.py)
+    and group them by sport, most important first. Returns {sport: [items]}."""
+    cutoff = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    try:
+        rows = supabase.table("news_feed") \
+            .select("sport,headline,body,character,severity,emoji,source_url,date") \
+            .gte("date", cutoff) \
+            .order("date", desc=True) \
+            .limit(400) \
+            .execute().data or []
+    except Exception as e:
+        print(f"  ⚠ news_feed read failed: {e}", file=sys.stderr)
+        return {}
+
+    by_sport: dict = {}
+    for r in rows:
+        by_sport.setdefault(r.get("sport") or "other", []).append(r)
+    for s in by_sport:
+        by_sport[s].sort(key=lambda x: SEVERITY_RANK.get(x.get("severity"), 2))
+        by_sport[s] = by_sport[s][:per_sport]
+    return by_sport
+
+
+def format_news_block(by_sport: dict, sports: list) -> str:
+    """sports = ordered list of (sport_key, LABEL). Renders the news items as
+    source material for the voices — headlines + the scanner's own blurbs."""
+    out = []
+    for key, label in sports:
+        items = by_sport.get(key, [])
+        if not items:
+            continue
+        out.append(f"{label}:")
+        for it in items:
+            tag = "🚨 BREAKING " if it.get("severity") == "breaking" else ""
+            hl = (it.get("headline") or "").strip()
+            body = (it.get("body") or "").strip()
+            line = f"  - {tag}{hl}"
+            if body:
+                line += f" — {body}"
+            out.append(line)
+        out.append("")
+    return "\n".join(out).strip()
+
+
+def pull_today_slate(sport: str, date_str: str) -> dict | None:
+    """Today's slate for a sport (for the What's Next preview)."""
+    try:
+        resp = supabase.table("slates").select("*") \
+            .eq("date", date_str).eq("sport", sport).execute()
+        return resp.data[0] if resp.data else None
+    except Exception:
+        return None
+
+
+def format_tonight(slate: dict | None, label: str) -> str:
+    """Compact preview lines from a slate's games array."""
+    if not slate:
+        return ""
+    games = slate.get("games", []) or []
+    if not games:
+        return ""
+    lines = [f"{label} — {len(games)} games:"]
+    for g in games[:12]:
+        matchup = g.get("matchup", "???")
+        edge = g.get("edge", {}) or {}
+        lean = edge.get("lean") or g.get("lean") or ""
+        conf = edge.get("confidence") or g.get("confidence") or ""
+        extra = f" (lean {lean} {conf})".rstrip() if lean else ""
+        lines.append(f"  {matchup}{extra}")
+    return "\n".join(lines)
+
+
+def build_unified_prompt(date: str, mlb_recap_text: str, news_by_sport: dict,
+                         tonight_text: str, moods: dict) -> str:
+    """The full-blown unified multi-sport issue prompt."""
+    nba_news    = format_news_block(news_by_sport, [("nba", "NBA")])
+    soccer_news = format_news_block(news_by_sport, [("soccer", "SOCCER / WORLD CUP")])
+    around_news = format_news_block(news_by_sport, [
+        ("mlb", "MLB wire"), ("nhl", "NHL"), ("golf", "Golf"),
+        ("mma", "MMA"), ("boxing", "Boxing"), ("ncaa", "NCAA"), ("other", "More"),
+    ])
+
+    return f"""Write the OTJ Daily Journal for {date} — a UNIFIED, multi-sport issue.
+
+This is a JOURNAL, not a stats report. Three voices talk through the day across every sport. Highlights, not full coverage: skimmable up top, depth below. Paraphrased quotes mixed with narration.
+
+THE THREE VOICES:
+{CHARACTERS["yumi"]["base_personality"]}
+— today: {moods["yumi"]}
+
+{CHARACTERS["johnnybot"]["base_personality"]}
+— today: {moods["johnnybot"]}
+
+{CHARACTERS["krash"]["base_personality"]}
+— today: {moods["krash"]}
+
+═══ ⚾ MLB — YESTERDAY (recap facts; the model already tagged upsets/blowouts — you supply the commentary) ═══
+{mlb_recap_text or "No MLB recap data for this date."}
+
+═══ 🏀 NBA — NEWS WIRE ═══
+{nba_news or "No NBA news items in the feed."}
+
+═══ ⚽ SOCCER / WORLD CUP — NEWS WIRE ═══
+{soccer_news or "No soccer items in the feed."}
+
+═══ AROUND SPORTS — NEWS WIRE ═══
+{around_news or "No other items in the feed."}
+
+═══ WHAT'S NEXT (tonight) ═══
+{tonight_text or "No slate loaded yet."}
+
+STRUCTURE — build the entry from these segments, in order, each with its own dramatic header:
+  1. THE RUNDOWN — 4-6 one-line bullets: the biggest beats across ALL sports. The skim layer.
+  2. ⚾ MLB — the recap: OTJ's top moves and how they hit, any UPSETS, any BLOWOUTS. Use only the recap facts above.
+  3. 🏀 NBA — the news that actually matters (trades/signings). The voices react. Save the biggest shock for a "SHOCKWAVE" callout if one qualifies (a star changing teams).
+  4. ⚽ WORLD CUP / SOCCER — the news that matters. OMIT this segment entirely if there are no soccer items.
+  5. AROUND SPORTS — a quick lightning round of anything else worth a line. Omit if empty.
+  6. WHAT'S NEXT — tonight's slate / what to watch. Build anticipation.
+
+RULES:
+1. Weave all three voices throughout, by name, with paraphrased quotes. Each reacts to the same beats differently.
+2. HONESTY ABOVE ALL — only state facts present in the data above. NEVER invent a score, a trade, a signing, or a stat line. If a section has no data, omit it; do not manufacture news for drama.
+3. The news blurbs are SOURCE MATERIAL — rewrite them in the voices, do not copy them verbatim.
+4. Upsets and blowouts come ONLY from the MLB recap data (it's already tagged). A hot team winning big is a result, not a "collapse" — journal it, don't editorialize.
+5. Include at least one moment where two voices disagree, and one where a voice surprises you.
+6. 1,000-1,500 words. End with 🔥.
+
+OUTPUT — respond with ONLY a JSON object, no markdown fences:
+{{
+    "category": "THE JOURNAL",
+    "title": "Your headline — the day's biggest story across sports",
+    "excerpt": "One vivid hook sentence",
+    "content": "Full multi-voice journal entry with \\n for newlines"
+}}"""
+
+
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 
 print(f"⏳ Pulling data...")
-data = pull_data(blog_date)
 
-if not data.get("results"):
-    print(f"⚠ No results for {blog_date}")
+today_et = datetime.now().strftime("%Y-%m-%d")
+
+# 1) MLB recap for yesterday (via the recap provider)
+mlb_recap_text = ""
+if build_mlb_recap and format_mlb_recap_for_prompt:
+    try:
+        recap = build_mlb_recap(blog_date, supabase)
+        mlb_recap_text = format_mlb_recap_for_prompt(recap)
+        r = recap["record"]
+        print(f"  ⚾ MLB recap: {r['hits']}-{r['graded']-r['hits']} graded, "
+              f"{len(recap['upsets'])} upsets, {len(recap['blowouts'])} blowouts")
+    except Exception as e:
+        print(f"  ⚠ MLB recap failed (non-fatal): {e}", file=sys.stderr)
+else:
+    print("  ⚠ mlb_recap.py not found — MLB section will be empty", file=sys.stderr)
+
+# 2) News wire (all sports) from the news_feed table
+news_by_sport = pull_news(days_back=2, per_sport=6)
+news_count = sum(len(v) for v in news_by_sport.values())
+print(f"  📰 News items: {news_count} across {len(news_by_sport)} sports")
+
+# 3) Tonight's slate for the What's Next preview (MLB first, then NBA if in season)
+tonight_bits = []
+for sport, label in [("mlb", "⚾ MLB tonight"), ("nba", "🏀 NBA tonight")]:
+    t = format_tonight(pull_today_slate(sport, today_et), label)
+    if t:
+        tonight_bits.append(t)
+tonight_text = "\n\n".join(tonight_bits)
+
+# Only bail if there is genuinely nothing to write about
+if not mlb_recap_text.strip() and news_count == 0:
+    print(f"⚠ No recap and no news for {blog_date} — nothing to journal.")
     sys.exit(0)
 
-print(f"⏳ Building multi-voice prompt...")
-print(f"  Voice examples loaded: {len(data.get('voice_examples', []))}")
-print(f"  Prediction history: {len(data.get('prediction_history', []))}")
-
 # Roll moods
-v1_mood = random.choice(CHARACTERS["yumi"]["mood_variants"])
-v2_mood = random.choice(CHARACTERS["johnnybot"]["mood_variants"])
-v3_mood = random.choice(CHARACTERS["krash"]["mood_variants"])
-print(f"  🎲 Yumi mood: {v1_mood[:60]}...")
-print(f"  🎲 Johnnybot mood: {v2_mood[:60]}...")
-print(f"  🎲 Krash mood: {v3_mood[:60]}...")
+moods = {
+    "yumi":      random.choice(CHARACTERS["yumi"]["mood_variants"]),
+    "johnnybot": random.choice(CHARACTERS["johnnybot"]["mood_variants"]),
+    "krash":     random.choice(CHARACTERS["krash"]["mood_variants"]),
+}
+print(f"  🎲 Moods rolled")
 
-prompt = build_master_prompt(data, blog_date)
+print(f"⏳ Building unified multi-sport prompt...")
+prompt = build_unified_prompt(blog_date, mlb_recap_text, news_by_sport, tonight_text, moods)
 
-print(f"\n⏳ Generating multi-voice blog via Claude Sonnet...")
+print(f"\n⏳ Generating journal via Claude...")
 blog = generate_blog(prompt)
 
 if not blog:
@@ -598,7 +776,6 @@ if not blog:
     sys.exit(1)
 
 print(f"\n  📰 Title: {blog.get('title', '?')}")
-print(f"  📂 Category: {blog.get('category', '?')}")
 print(f"  📊 Words: {len(blog.get('content', '').split())}")
 
 # Store draft
@@ -615,14 +792,14 @@ row = {
     "title": blog.get("title", ""),
     "excerpt": blog.get("excerpt", ""),
     "content": blog.get("content", ""),
-    "sport": "nba",
+    "sport": JOURNAL_SPORT,
     "auto_generated": True,
     "published": auto_publish,
     "generated_at": datetime.now().isoformat(),
 }
 try:
     supabase.table("blog_posts").upsert(row, on_conflict="date,sport").execute()
-    print(f"  ✅ Draft stored")
+    print(f"  ✅ Draft stored (sport={JOURNAL_SPORT})")
 except Exception as e:
     print(f"  ⚠ Storage failed: {e}")
 
@@ -632,5 +809,5 @@ else:
     post_to_discord(blog, blog_date)
 
 print(f"\n{'=' * 60}")
-print(f"  ✅ Multi-voice blog complete for {blog_date}")
+print(f"  ✅ OTJ Daily complete for {blog_date}")
 print(f"{'=' * 60}\n")

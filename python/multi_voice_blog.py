@@ -488,14 +488,23 @@ def generate_blog(prompt: str) -> dict | None:
             },
             json={
                 "model": "claude-sonnet-5",
-                "max_tokens": 2500,
+                "max_tokens": 4000,
                 "messages": [{"role": "user", "content": prompt}],
             },
             timeout=90,
         )
         resp.raise_for_status()
         data = resp.json()
-        text = data["content"][0]["text"]
+        # Robust: join text from whichever content blocks are type "text".
+        # A response can lead with a non-text block, which crashed the old
+        # data["content"][0]["text"] assumption with KeyError: 'text'.
+        text = "".join(
+            b.get("text", "") for b in data.get("content", [])
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+        if not text:
+            print(f"  ❌ No text block in response: {json.dumps(data)[:400]}")
+            return None
 
         clean = text.strip()
         if clean.startswith("```"):

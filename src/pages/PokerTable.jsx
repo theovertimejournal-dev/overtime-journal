@@ -349,10 +349,15 @@ function BettingControls({ gameState, onAction }) {
 
   return (
     <div style={{
-      position: 'fixed', bottom: 0, left: 0, right: 0,
+      position: 'fixed', left: 0, right: 0,
+      // Sit ABOVE the app's bottom nav bar instead of behind it.
+      // Uses --bottom-nav-height if the app defines it; 64px fallback clears a
+      // typical mobile nav. Tune the fallback if your nav is a different height.
+      bottom: 'calc(var(--bottom-nav-height, 64px) + env(safe-area-inset-bottom, 0px))',
       background: 'rgba(8,8,15,0.95)', backdropFilter: 'blur(12px)',
       borderTop: '1px solid rgba(255,255,255,0.08)',
-      padding: `12px 16px max(20px, env(safe-area-inset-bottom, 20px))`, zIndex: 20,
+      borderBottom: '1px solid rgba(255,255,255,0.08)',
+      padding: '12px 16px', zIndex: 40,
     }}>
       {canRaise && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>

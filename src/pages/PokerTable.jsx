@@ -63,71 +63,6 @@ function Card({ card, faceDown = false, small = false }) {
       <div style={{ position: 'absolute', top: 3, left: 5, fontSize: small ? 9 : 11, lineHeight: 1, fontWeight: 800 }}>{val}</div>
       <div style={{ fontSize: small ? 14 : 20, lineHeight: 1 }}>{suitSym}</div>
       <div style={{ position: 'absolute', bottom: 3, right: 5, fontSize: small ? 9 : 11, lineHeight: 1, fontWeight: 800, transform: 'rotate(180deg)' }}>{val}</div>
-
-      {/* Rebuy Modal */}
-      {showRebuy && (
-        <>
-          <div
-            onClick={() => setShowRebuy(false)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 300 }}
-          />
-          <div style={{
-            position: 'fixed', top: '50%', left: '50%',
-            transform: 'translate(-50%,-50%)',
-            zIndex: 301, background: '#0a0e14',
-            border: '1px solid rgba(201,168,76,0.4)', borderRadius: 16,
-            padding: '24px', width: 300,
-            fontFamily: "'JetBrains Mono',monospace",
-            boxShadow: '0 20px 60px rgba(0,0,0,0.9)',
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#f1f5f9', marginBottom: 4 }}>
-              🪙 ADD CHIPS
-            </div>
-            <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
-              Current stack: {(seats?.[mySeat]?.chips || 0).toLocaleString()} OTJ
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-              <input
-                type="range"
-                min={gameState?.blinds?.[1] * 20 || 200}
-                max={Math.min(gameState?.blinds?.[1] * 100 || 1000, 50000)}
-                step={gameState?.blinds?.[1] || 10}
-                value={rebuyAmount}
-                onChange={e => setRebuyAmount(Number(e.target.value))}
-                style={{ flex: 1, accentColor: '#c9a84c' }}
-              />
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#c9a84c', minWidth: 70, textAlign: 'right' }}>
-                {rebuyAmount.toLocaleString()}
-              </span>
-            </div>
-            <div style={{ fontSize: 8, color: '#374151', marginBottom: 20 }}>OTJ Bucks</div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => setShowRebuy(false)}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
-                  background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
-                  color: '#6b7280', fontSize: 11, fontFamily: "'JetBrains Mono',monospace",
-                }}
-              >CANCEL</button>
-              <button
-                onClick={() => {
-                  roomRef.current?.send('add_chips', { amount: rebuyAmount });
-                  setShowRebuy(false);
-                }}
-                style={{
-                  flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
-                  background: 'linear-gradient(135deg, #c9a84c, #a07828)',
-                  border: 'none', color: '#000', fontSize: 11, fontWeight: 900,
-                  fontFamily: "'JetBrains Mono',monospace",
-                }}
-              >ADD CHIPS</button>
-            </div>
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -571,6 +506,8 @@ export default function PokerTable() {
   const seatRefs = useRef({});
   const [projectiles, setProjectiles] = useState([]);
   const [emojiTray, setEmojiTray] = useState(null); // { seatIndex }
+  const [showRebuy, setShowRebuy] = useState(false);
+  const [rebuyAmount, setRebuyAmount] = useState(1000);
   const projectileId = useRef(0);
   const leaveCalledRef = useRef(false);
   const errorTimerRef = useRef(null);
@@ -796,6 +733,71 @@ export default function PokerTable() {
             {gameState.tier?.toUpperCase()} · Blinds: ${blinds?.[0]}/${blinds?.[1]} · Hand #{handNumber} · Code: {code}
           </div>
         </div>
+        {/* Rebuy Modal */}
+        {showRebuy && (
+          <>
+            <div
+              onClick={() => setShowRebuy(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 300 }}
+            />
+            <div style={{
+              position: 'fixed', top: '50%', left: '50%',
+              transform: 'translate(-50%,-50%)',
+              zIndex: 301, background: '#0a0e14',
+              border: '1px solid rgba(201,168,76,0.4)', borderRadius: 16,
+              padding: '24px', width: 300,
+              fontFamily: "'JetBrains Mono',monospace",
+              boxShadow: '0 20px 60px rgba(0,0,0,0.9)',
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: '#f1f5f9', marginBottom: 4 }}>
+                🪙 ADD CHIPS
+              </div>
+              <div style={{ fontSize: 9, color: '#4a5568', marginBottom: 16 }}>
+                Current stack: {(seats?.[mySeat]?.chips || 0).toLocaleString()} OTJ
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <input
+                  type="range"
+                  min={gameState?.blinds?.[1] * 20 || 200}
+                  max={Math.min(gameState?.blinds?.[1] * 100 || 1000, 50000)}
+                  step={gameState?.blinds?.[1] || 10}
+                  value={rebuyAmount}
+                  onChange={e => setRebuyAmount(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: '#c9a84c' }}
+                />
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#c9a84c', minWidth: 70, textAlign: 'right' }}>
+                  {rebuyAmount.toLocaleString()}
+                </span>
+              </div>
+              <div style={{ fontSize: 8, color: '#374151', marginBottom: 20 }}>OTJ Bucks</div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setShowRebuy(false)}
+                  style={{
+                    flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
+                    background: 'transparent', border: '1px solid rgba(255,255,255,0.1)',
+                    color: '#6b7280', fontSize: 11, fontFamily: "'JetBrains Mono',monospace",
+                  }}
+                >CANCEL</button>
+                <button
+                  onClick={() => {
+                    roomRef.current?.send('add_chips', { amount: rebuyAmount });
+                    setShowRebuy(false);
+                  }}
+                  style={{
+                    flex: 1, padding: '10px', borderRadius: 8, cursor: 'pointer',
+                    background: 'linear-gradient(135deg, #c9a84c, #a07828)',
+                    border: 'none', color: '#000', fontSize: 11, fontWeight: 900,
+                    fontFamily: "'JetBrains Mono',monospace",
+                  }}
+                >ADD CHIPS</button>
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Rebuy button — show when seated and chips are low */}
         {(() => {
           const _myPlayer = mySeat != null ? seats?.[mySeat] : null;

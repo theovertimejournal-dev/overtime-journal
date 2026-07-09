@@ -24,6 +24,7 @@ const TIERS = {
 
 const MAX_SEATS = 6;
 const TURN_TIME = 30; // seconds
+const SHOWDOWN_PAUSE = 9000; // ms between hands — long enough to read the board & shown hands
 const RAKE_PCT = 0.05;
 const RAKE_CAP = 250;
 const DISCONNECT_RESERVE = 60000; // 60 seconds
@@ -624,13 +625,22 @@ class PokerRoom extends Room {
         const results = [];
 
         for (const pot of pots) {
-            const eligible = pot.eligible.map(seat => ({
-                seatIndex: seat,
-                holeCards: this.seats[seat].holeCards,
-            }));
+            // Only evaluate seats that actually hold two cards. A disconnected/
+            // folded seat with no holeCards would otherwise crash determineWinners
+            // (the "reading 'hand'" onLeave error).
+            const eligible = pot.eligible
+                .filter(seat => this.seats[seat] &&
+                                Array.isArray(this.seats[seat].holeCards) &&
+                                this.seats[seat].holeCards.length === 2)
+                .map(seat => ({
+                    seatIndex: seat,
+                    holeCards: this.seats[seat].holeCards,
+                }));
+            if (eligible.length === 0) continue;
 
             const winners = determineWinners(eligible, this.communityCards);
-            const winnerSeats = winners.filter(w => w.isWinner);
+            const winnerSeats = winners.filter(w => w.isWinner && w.hand);
+            if (winnerSeats.length === 0) continue;
             const share = Math.floor(pot.amount / winnerSeats.length);
 
             for (const w of winnerSeats) {
@@ -690,7 +700,7 @@ class PokerRoom extends Room {
             }
 
             this.tryStartNewHand();
-        }, 4000); // 4 second pause between hands
+        }, SHOWDOWN_PAUSE); // pause between hands (see SHOWDOWN_PAUSE)
     }
 
     calculateSidePots(inHand) {
@@ -1025,6 +1035,45 @@ class PokerRoom extends Room {
             }
         } catch (err) {
             console.error(`  ❌ Failed to return ${chips} to ${username}:`, err.message);
+        }
+    }
+
+    // Newbie safety net: when a player busts, if their total bankroll has fallen
+    // below the floor, top them back up so they can keep playing. This method was
+    // referenced on bust (line ~688) but never implemented — its absence was the
+    // TypeError that crashed the room and stopped chips from being returned.
+    async applyBankrollFloor(userId, username) {
+        if (!userId) return;
+        const FLOOR = 1000; // OTJ Bucks — tune or remove to disable the floor
+        try {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('bankroll')
+                .eq('user_id', userId)
+                .single();
+            if (!profile) return;
+            const current = profile.bankroll || 0;
+            if (current >= FLOOR) return;
+
+            const topUp = FLOOR - current;
+            await supabase
+                .from('profiles')
+                .update({ bankroll: FLOOR })
+                .eq('user_id', userId);
+
+            try {
+                await supabase.from('bucks_ledger').insert({
+                    user_id: userId,
+                    type: 'bankroll_floor',
+                    amount: topUp,
+                    balance_after: FLOOR,
+                    note: 'Bankroll floor top-up',
+                });
+            } catch (_) {}
+
+            console.log(`  🎁 Bankroll floor: topped ${username} up to ${FLOOR} (+${topUp})`);
+        } catch (err) {
+            console.error(`  ❌ applyBankrollFloor failed for ${username}:`, err.message);
         }
     }
 

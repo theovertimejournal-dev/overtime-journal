@@ -1,4 +1,4 @@
-name: OTJ Resolve MLB Picks 
+name: OTJ Resolve MLB Picks (Morning)
 
 # Grades yesterday's MLB model picks and updates the season record.
 # Runs late-morning ET so all West-coast games are Final first.
@@ -22,7 +22,7 @@ on:
 jobs:
   resolve-mlb:
     runs-on: ubuntu-latest
-    timeout-minutes: 20   # backfill loops the season, give it room
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repo

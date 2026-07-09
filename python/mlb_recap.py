@@ -84,9 +84,11 @@ def get_otj_games(date, supabase):
     except Exception:
         return out
     for row in rows:
-        lean = row.get("lean")
-        pick = row.get("home_team") if lean == "HOME" else \
-               row.get("away_team") if lean == "AWAY" else None
+        lean = (row.get("lean") or "").strip()
+        # lean IS the picked team abbreviation (e.g. "LAD"). Accept it only if
+        # it's one of the two teams playing — this excludes OVER/UNDER totals
+        # picks and blank leans from the moneyline record.
+        pick = lean if lean in (row.get("away_team"), row.get("home_team")) else None
         scores = row.get("scores") or {}
         out[row["matchup"]] = {
             "pick": pick,

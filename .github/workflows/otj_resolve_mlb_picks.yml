@@ -1,0 +1,56 @@
+name: OTJ Resolve MLB Picks (Morning)
+
+# Grades yesterday's MLB model picks and updates the season record.
+# Runs late-morning ET so all West-coast games are Final first.
+
+on:
+  schedule:
+    # 11:05 AM ET = 15:05 UTC (EST) / 16:05 UTC (EDT)
+    - cron: '5 15 * * *'
+    - cron: '5 16 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to grade (YYYY-MM-DD) — blank = yesterday'
+        required: false
+        default: ''
+      backfill:
+        description: 'Rebuild the WHOLE season record (ignores date)'
+        required: false
+        default: 'false'
+
+jobs:
+  resolve-mlb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install supabase python-dotenv requests
+
+      - name: Resolve MLB picks
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          cd python
+          if [ "${{ github.event.inputs.backfill }}" = "true" ]; then
+            python -u resolve_mlb_picks.py --backfill
+          elif [ -n "${{ github.event.inputs.date }}" ]; then
+            python -u resolve_mlb_picks.py --date=${{ github.event.inputs.date }}
+          else
+            python -u resolve_mlb_picks.py
+          fi
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "❌ MLB resolve failed — check logs above"

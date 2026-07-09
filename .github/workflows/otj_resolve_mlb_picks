@@ -1,4 +1,4 @@
-name: OTJ Resolve MLB Picks (Morning)
+name: OTJ Resolve MLB Picks 
 
 # Grades yesterday's MLB model picks and updates the season record.
 # Runs late-morning ET so all West-coast games are Final first.

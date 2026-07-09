@@ -191,10 +191,10 @@ export default function Record() {
       try {
         const { data: slates, error } = await supabase
           .from('slates')
-          .select('date, yesterday_results, cumulative_record, yesterday_record')
-          .eq('sport', 'nba')
+          .select('date, sport, yesterday_results, cumulative_record, yesterday_record')
+          .in('sport', ['nba', 'mlb'])
           .order('date', { ascending: true })
-          .limit(90); // ~3 months of history
+          .limit(400); // both sports, ~season of history
 
         if (error) throw error;
 
@@ -207,7 +207,7 @@ export default function Record() {
             const losses = results.filter(r => r.result === 'L' || r.result === 'loss').length;
             return {
               date: s.date,
-              sport: 'NBA',
+              sport: (s.sport || 'nba').toUpperCase(),
               wins,
               losses,
               record: s.yesterday_record || `${wins}-${losses}`,

@@ -252,6 +252,12 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
     # when current-season sample is too small (Opening Week)
     prior_pitcher_stats = get_prior_season_pitcher_stats(team_id)
 
+    # Fetch CURRENT season stats too (one more call). This is the number that
+    # actually matters mid-season: a 7-day window is noise (one clean inning =
+    # 0.00 ERA, one bad inning = 9.00), and 2025 is a year stale by July.
+    season_now = int(target_date.split("-")[0])
+    season_pitcher_stats = get_prior_season_pitcher_stats(team_id, season=season_now)
+
     if not recent:
         return {"team":team_abbrev,"status":"NO_DATA","relievers":[],"bullpen_era":None,
                 "bullpen_whip":None,"fatigue_score":None,"bullpen_k_per_9":None,
@@ -273,11 +279,14 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
             if sd.get("team",{}).get("id") != team_id: continue
             players = sd.get("players",{})
             pids = sd.get("pitchers",[])
-            starter = pids[0] if pids else None
             for pid in pids:
                 pd_ = players.get(f"ID{pid}",{})
                 ps = pd_.get("stats",{}).get("pitching",{})
-                if not ps or pid == starter: continue
+                if not ps: continue
+                # Exclude the game's STARTER using the boxscore's own flag rather
+                # than assuming pitchers[0]. Array order isn't guaranteed, and the
+                # old pids[0] guess leaked starters (Fedde, Newcomb) into the pen.
+                if int(ps.get("gamesStarted", 0) or 0) > 0: continue
                 ip = _parse_ip(ps.get("inningsPitched","0"))
                 er = int(ps.get("earnedRuns",0)); h = int(ps.get("hits",0))
                 bb = int(ps.get("baseOnBalls",0)); so = int(ps.get("strikeOuts",0))
@@ -320,30 +329,47 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
         tso = sum(a["so"] for a in apps); tbb = sum(a["bb"] for a in apps)
         # Look up prior season stats for this reliever
         prior = prior_pitcher_stats.get(pid, {})
+        # Current-season stats — the real headline number mid-season.
+        seas = season_pitcher_stats.get(pid, {})
+        seas_era = seas.get("prior_era")   # helper's key names; values are season_now
+        seas_ip  = seas.get("prior_ip") or 0
+
+        # Display ERA priority:
+        #   1. Current season (once he has a real sample) — stable + relevant
+        #   2. Prior season — genuine Opening Week fallback
+        #   3. 7-day window — last resort only
+        # Previously this went straight to 2025 whenever the 7d sample was thin,
+        # which in July meant showing a year-old ERA (or a 0.00 from one clean
+        # inning). That's why bullpen ERAs never looked right.
+        if seas_era is not None and seas_ip >= MIN_RELIABLE_IP:
+            disp_era, disp_src = round(seas_era, 2), str(season_now)
+        elif prior.get("prior_era") is not None:
+            disp_era, disp_src = prior.get("prior_era"), str(season_now - 1)
+        elif tip2 > 0:
+            disp_era, disp_src = round(ter/tip2*9, 2), "7d"
+        else:
+            disp_era, disp_src = None, None
+
         reports.append({
             "name":rd["name"],"hand":rd["hand"],"appearances_7d":len(apps),
             "days_pitched_last_5":dp5,"pitches_last_3d":p3d,
             "ip_last_2d":round(ip2d,1),"ip_last_3d":round(ip3d,1),
             "days_rest":rest,
-            "era_7d":round(ter/tip2*9,2) if tip2>0 else 0.0,
+            "era_7d":round(ter/tip2*9,2) if tip2>0 else None,
             "k9_7d":round(tso/tip2*9,1) if tip2>0 else 0.0,
             "bb9_7d":round(tbb/tip2*9,1) if tip2>0 else 0.0,
             "fatigue":fat,
+            # Current season — the meaningful mid-season number
+            "season_era":  round(seas_era, 2) if seas_era is not None else None,
+            "season_ip":   round(seas_ip, 1),
             # Prior season fallback for Opening Week
             "prior_era":   prior.get("prior_era"),
             "prior_whip":  prior.get("prior_whip"),
             "prior_k9":    prior.get("prior_k9"),
             "prior_ip":    prior.get("prior_ip"),
-            # Display ERA — use prior season if current IP is below threshold
-            "display_era": (
-                prior.get("prior_era") if tip2 < MIN_RELIABLE_IP and prior.get("prior_era")
-                else round(ter/tip2*9,2) if tip2 > 0 else None
-            ),
-            "display_era_source": (
-                "2025" if tip2 < MIN_RELIABLE_IP and prior.get("prior_era")
-                else "2026" if tip2 > 0 else None
-            ),
-            "small_sample": tip2 < MIN_RELIABLE_IP,
+            "display_era": disp_era,
+            "display_era_source": disp_src,
+            "small_sample": (seas_ip or 0) < MIN_RELIABLE_IP,
         })
 
     fo = {"HIGH":0,"MODERATE":1,"FRESH":2}

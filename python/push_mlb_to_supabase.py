@@ -795,24 +795,11 @@ for gd in games_raw:
     existing = existing_games.get(matchup)
     is_first_write = existing is None
 
-    # Narrative: generate once on first write, freeze after that.
-    # Prevents regenerating on every odds refresh run (saves tokens + preserves
-    # the pre-game context which is most valuable before first pitch).
-    if is_first_write:
-        print(f"  ✍ Generating narrative for {matchup}...")
-        narrative = generate_narrative(gd)
-    else:
-        narrative = existing.get("narrative") or ""
-        print(f"  ♻ Reusing narrative for {matchup} (odds refresh only)")
-
-    # Analysis blob: frozen after first write.
-    # Bullpen fatigue, pythagorean, TTO are pre-game reads; no value in
-    # overwriting them mid-game with stale same-day data.
-    #
-    # EXCEPTION — TBD starters. If the first push ran before MLB announced the
-    # probable pitchers, "TBD" got frozen in and re-running the model could never
-    # fix it. So: if the stored analysis has a TBD starter and we now have a real
-    # name, rebuild the analysis once. This is the only unfreeze condition.
+    # ── TBD starter resolution ──────────────────────────────────────────────
+    # Narrative and analysis are both frozen after the first write. That breaks
+    # when the early push runs before MLB announces probable pitchers: "TBD" gets
+    # frozen in and re-running could never fix it. So detect the one case worth
+    # unfreezing — stored analysis had a TBD starter, and now we know the names.
     def _is_tbd(starter):
         return (starter or {}).get("name", "TBD") in (None, "", "TBD")
 
@@ -823,8 +810,20 @@ for gd in games_raw:
         now_known = not _is_tbd(g.get("away_starter")) and not _is_tbd(g.get("home_starter"))
         starters_resolved = had_tbd and now_known
         if starters_resolved:
-            print(f"  🔄 {matchup}: starters announced — refreshing frozen analysis")
+            print(f"  🔄 {matchup}: starters announced — refreshing analysis + narrative")
 
+    # Narrative: generate once, freeze after — EXCEPT when starters resolve. A
+    # narrative written around "TBD vs TBD" is worth one regeneration.
+    if is_first_write or starters_resolved:
+        print(f"  ✍ Generating narrative for {matchup}...")
+        narrative = generate_narrative(gd)
+    else:
+        narrative = existing.get("narrative") or ""
+        print(f"  ♻ Reusing narrative for {matchup} (odds refresh only)")
+
+    # Analysis blob: frozen after first write, same TBD exception.
+    # Bullpen fatigue, pythagorean, TTO are pre-game reads; no value in
+    # overwriting them mid-game with stale same-day data.
     if is_first_write or starters_resolved:
         # Enrich starter dicts with profile URLs
         away_starter = g.get("away_starter", {})

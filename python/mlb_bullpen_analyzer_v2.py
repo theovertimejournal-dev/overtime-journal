@@ -76,6 +76,10 @@ def get_todays_games(date=None):
             t = g["teams"]
             games.append({
                 "game_pk": g["gamePk"],
+                # Doubleheader metadata: gameNumber is 1 or 2 when the same teams
+                # play twice on one date. doubleHeader is "N"/"S"/"Y".
+                "game_number": g.get("gameNumber", 1),
+                "doubleheader": g.get("doubleHeader", "N"),
                 "status": g.get("status",{}).get("detailedState","Unknown"),
                 "away_team": t["away"]["team"]["abbreviation"],
                 "away_team_name": t["away"]["team"]["name"],
@@ -601,7 +605,22 @@ def calculate_full_edge(game, abp, hbp, apyth, hpyth, park, atto, htto, alr, hlr
         if bw>=8: conf="HIGH"
         elif bw>=5: conf="MODERATE"
         lean = best
-    return {"matchup":f"{aw} @ {hm}","signals":signals,"lean":lean,"confidence":conf,"scores":scores}
+
+    # Starters unknown => cap confidence. A TBD starter is the biggest unpriced
+    # variable in a baseball game (doubleheaders, bullpen games, late scratches),
+    # so don't advertise MODERATE/HIGH on incomplete information. The lean still
+    # shows — bullpen/pythagorean edges are real — it just isn't dressed up.
+    a_tbd = (game.get("away_starter",{}) or {}).get("name","TBD") in (None,"","TBD")
+    h_tbd = (game.get("home_starter",{}) or {}).get("name","TBD") in (None,"","TBD")
+    if a_tbd or h_tbd:
+        conf = "LOW"
+        who = "Both starters" if (a_tbd and h_tbd) else ("Away starter" if a_tbd else "Home starter")
+        signals.append({"type":"TBD_STARTER",
+                        "detail":f"{who} TBD — confidence capped",
+                        "team":None,"strength":"MODERATE"})
+
+    return {"matchup":f"{aw} @ {hm}","signals":signals,"lean":lean,"confidence":conf,"scores":scores,
+            "starters_tbd": bool(a_tbd or h_tbd)}
 
 
 # ============================================================================

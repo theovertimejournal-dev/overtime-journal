@@ -3,6 +3,7 @@ import { useSlate } from '../../hooks/useSlate';
 import DateNav from '../common/DateNav';
 import { Pill } from '../common/Pill';
 import { LoginModal } from '../common/LoginModal';
+import { supabase } from '../../lib/supabase';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -155,7 +156,257 @@ function RelieverTable({ relievers, team }) {
 
 // ── MLB Game Card ─────────────────────────────────────────────────────────────
 
-function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
+// ── Betting ───────────────────────────────────────────────────────────────────
+// Ported from NBAGameCard's BettingPanel. The place_bet / cancel_bet RPCs are
+// sport-agnostic (no p_sport arg), so MLB reuses them as-is. Payouts are settled
+// by resolve_mlb_picks.py, which grades game_picks against MLB final scores.
+
+function isGameLocked(game_time) {
+  if (!game_time) return false;
+  const firstPitch = new Date(game_time);
+  const fiveMinBefore = new Date(firstPitch.getTime() - 5 * 60 * 1000);
+  return new Date() >= fiveMinBefore;
+}
+
+function formatOdds(n) {
+  if (n == null) return '—';
+  const num = parseInt(n);
+  return num > 0 ? `+${num}` : `${num}`;
+}
+
+function formatBucks(n) {
+  if (n == null) return "$0";
+  return "$" + Math.round(n).toLocaleString();
+}
+
+function MLBBettingPanel({ game, user, profile, userPicks = [], onPickPlaced, onCancelPick }) {
+  const locked = isGameLocked(game.game_time);
+  const FONT = "'JetBrains Mono','SF Mono',monospace";
+
+  const [pickType, setPickType] = useState('moneyline');
+  const [pickSide, setPickSide] = useState(null);
+  const [wager, setWager]       = useState(100);
+  const [placing, setPlacing]   = useState(false);
+  const [error, setError]       = useState('');
+
+  const bankroll = profile?.bankroll || 0;
+  const maxWager = Math.floor(bankroll * 0.9);   // matches place_bet's 90% rule
+
+  function getLockedOdds() {
+    if (pickType === 'moneyline') {
+      return pickSide === 'home' ? parseInt(game.ml_home || 0) : parseInt(game.ml_away || 0);
+    }
+    if (pickType === 'runline') {
+      return pickSide === 'home' ? (game.spread_home_odds || -110) : (game.spread_away_odds || -110);
+    }
+    return -110; // over/under default juice
+  }
+
+  function getLockedLine() {
+    if (pickType === 'runline') {
+      const sp = pickSide === 'home' ? game.spread_home : game.spread_away;
+      if (sp != null) return parseFloat(String(sp).replace(/[^0-9.\-+]/g, ''));
+      return pickSide === 'home' ? -1.5 : 1.5;   // MLB run line is ±1.5
+    }
+    if (pickType === 'over' || pickType === 'under') {
+      return game.total != null ? parseFloat(String(game.total).replace(/[^0-9.]/g, '')) : null;
+    }
+    return null;
+  }
+
+  function getPickedTeam() {
+    if (pickType === 'moneyline' || pickType === 'runline') {
+      return pickSide === 'home' ? game.home_team : game.away_team;
+    }
+    return pickType === 'over' ? `Over ${getLockedLine()}` : `Under ${getLockedLine()}`;
+  }
+
+  function calcPotentialPayout() {
+    const odds = getLockedOdds();
+    if (!odds || !wager) return 0;
+    if (odds > 0) return Math.round(wager + (wager * odds / 100));
+    if (odds < 0) return Math.round(wager + (wager * 100 / Math.abs(odds)));
+    return wager * 2;
+  }
+
+  async function placeBet() {
+    if (!user || !pickSide || placing) return;
+    setPlacing(true); setError('');
+    const { data, error: rpcErr } = await supabase.rpc('place_bet', {
+      p_user_id: user.id,
+      p_game_id: String(game.id || game.game_id || game.matchup),
+      p_slate_date: game.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }),
+      p_matchup: game.matchup,
+      p_picked_team: getPickedTeam(),
+      p_game_time: game.game_time || null,
+      // The resolver understands 'spread' — send that for the run line.
+      p_pick_type: pickType === 'runline' ? 'spread' : pickType,
+      p_pick_side: pickSide,
+      p_locked_odds: getLockedOdds(),
+      p_locked_line: getLockedLine(),
+      p_wager: wager,
+    });
+    if (rpcErr) { setError(rpcErr.message); setPlacing(false); return; }
+    const result = typeof data === 'string' ? JSON.parse(data) : data;
+    if (result?.error) { setError(result.error); setPlacing(false); return; }
+    const { data: pickData } = await supabase.from('game_picks').select('*').eq('id', result.pick_id).single();
+    if (pickData) onPickPlaced(pickData, result.bankroll);
+    setPickSide(null);
+    setPlacing(false);
+  }
+
+  if (!user) return (
+    <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: 8, fontSize: 11, color: "#4a5568", textAlign: "center" }}>
+      🔒 Sign in to place your pick
+    </div>
+  );
+
+  if (locked && userPicks.length === 0) return (
+    <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: 8, fontSize: 11, color: "#4a5568", textAlign: "center" }}>
+      🔒 Picks locked — first pitch
+    </div>
+  );
+
+  const hasML = game.ml_home != null && game.ml_away != null;
+  const hasTotal = game.total != null;
+  const types = [
+    hasML && { id: 'moneyline', label: 'ML' },
+    hasML && { id: 'runline', label: 'RUN LINE' },
+    hasTotal && { id: 'over', label: `O ${getLockedLine() ?? ''}` },
+    hasTotal && { id: 'under', label: `U ${getLockedLine() ?? ''}` },
+  ].filter(Boolean);
+
+  const isTotalPick = pickType === 'over' || pickType === 'under';
+
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 12 }}>
+      {/* Existing bets on this game */}
+      {userPicks.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          {userPicks.map(pick => {
+            const won = pick.result === 'win' || pick.result === 'W';
+            const lost = pick.result === 'loss' || pick.result === 'L';
+            const pending = !won && !lost;
+            const typeLabel = pick.pick_type === 'moneyline' ? 'ML'
+              : pick.pick_type === 'spread' ? `${pick.locked_line > 0 ? '+' : ''}${pick.locked_line}`
+              : pick.pick_type === 'over' ? `O ${pick.locked_line}`
+              : pick.pick_type === 'under' ? `U ${pick.locked_line}` : 'ML';
+            return (
+              <div key={pick.id} style={{
+                padding: "10px 14px", borderRadius: 8, fontFamily: FONT,
+                background: pending ? "rgba(59,130,246,0.06)" : won ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                border: `1px solid ${pending ? "rgba(59,130,246,0.2)" : won ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)"}`,
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: pending ? "#60a5fa" : won ? "#22c55e" : "#ef4444" }}>
+                    {pending ? '⏳' : won ? '✅' : '❌'} {pick.picked_team} {typeLabel} {formatOdds(pick.locked_odds)}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#4a5568", marginTop: 2 }}>
+                    {formatBucks(pick.wager)} wagered
+                    {!pending && pick.net != null && (
+                      <span style={{ color: won ? "#22c55e" : "#ef4444", marginLeft: 6 }}>
+                        {pick.net > 0 ? '+' : ''}{formatBucks(pick.net)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {pending && !locked && (
+                  <button onClick={() => onCancelPick(pick.id)} style={{
+                    background: "transparent", border: "1px solid rgba(255,255,255,0.12)",
+                    color: "#6b7280", borderRadius: 6, padding: "4px 8px",
+                    fontSize: 9, cursor: "pointer", fontFamily: FONT,
+                  }}>CANCEL</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {!locked && types.length > 0 && (
+        <>
+          {/* Bet type */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+            {types.map(t => (
+              <button key={t.id}
+                onClick={() => { setPickType(t.id); setPickSide(t.id === 'over' || t.id === 'under' ? 'over' : null); }}
+                style={{
+                  padding: "5px 10px", borderRadius: 6, cursor: "pointer", fontFamily: FONT, fontSize: 10,
+                  background: pickType === t.id ? "rgba(59,130,246,0.15)" : "transparent",
+                  border: `1px solid ${pickType === t.id ? "rgba(59,130,246,0.4)" : "rgba(255,255,255,0.08)"}`,
+                  color: pickType === t.id ? "#60a5fa" : "#6b7280",
+                }}>{t.label}</button>
+            ))}
+          </div>
+
+          {/* Side */}
+          {!isTotalPick && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              {['away', 'home'].map(side => {
+                const team = side === 'home' ? game.home_team : game.away_team;
+                const odds = pickType === 'moneyline'
+                  ? (side === 'home' ? game.ml_home : game.ml_away)
+                  : (side === 'home' ? (game.spread_home_odds || -110) : (game.spread_away_odds || -110));
+                const rl = pickType === 'runline' ? (side === 'home' ? -1.5 : +1.5) : null;
+                const sel = pickSide === side;
+                return (
+                  <button key={side} onClick={() => setPickSide(side)} style={{
+                    flex: 1, padding: "10px", borderRadius: 8, cursor: "pointer", fontFamily: FONT,
+                    background: sel ? "rgba(59,130,246,0.15)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${sel ? "rgba(59,130,246,0.5)" : "rgba(255,255,255,0.06)"}`,
+                    color: sel ? "#60a5fa" : "#9ca3af",
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>
+                      {team}{rl != null ? ` ${rl > 0 ? '+' : ''}${rl}` : ''}
+                    </div>
+                    <div style={{ fontSize: 10, color: sel ? "#60a5fa" : "#4a5568", marginTop: 2 }}>{formatOdds(odds)}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Wager */}
+          {pickSide && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <input type="range" min={10} max={Math.max(10, maxWager)} step={10}
+                  value={Math.min(wager, Math.max(10, maxWager))}
+                  onChange={e => setWager(Number(e.target.value))}
+                  style={{ flex: 1, accentColor: "#3b82f6" }} />
+                <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 700, color: "#60a5fa", minWidth: 70, textAlign: "right" }}>
+                  {formatBucks(wager)}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT, fontSize: 10, color: "#4a5568", marginBottom: 10 }}>
+                <span>Bankroll {formatBucks(bankroll)} · max {formatBucks(maxWager)}</span>
+                <span style={{ color: "#22c55e" }}>To win {formatBucks(calcPotentialPayout())}</span>
+              </div>
+
+              {error && (
+                <div style={{ fontFamily: FONT, fontSize: 10, color: "#ef4444", marginBottom: 8 }}>{error}</div>
+              )}
+
+              <button onClick={placeBet} disabled={placing || wager > maxWager || wager < 10}
+                style={{
+                  width: "100%", padding: "12px", borderRadius: 8, border: "none",
+                  cursor: placing || wager > maxWager ? "not-allowed" : "pointer",
+                  background: placing || wager > maxWager ? "rgba(255,255,255,0.05)" : "linear-gradient(135deg,#3b82f6,#2563eb)",
+                  color: placing || wager > maxWager ? "#4a5568" : "#fff",
+                  fontFamily: FONT, fontSize: 12, fontWeight: 800,
+                }}>
+                {placing ? "PLACING…" : `PLACE ${formatBucks(wager)} ON ${getPickedTeam()}`}
+              </button>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function MLBGameCard({ game, isExpanded, onToggle, isFree, user, profile }) {
   const analysis = game.analysis || {};
   const ab = analysis.away_bullpen || {};
   const hb = analysis.home_bullpen || {};
@@ -187,6 +438,37 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
   const f5Team = f5HomeProb != null ? (f5HomeProb >= f5AwayProb ? game.home_team : game.away_team) : null;
 
   const hasOdds = game.ml_home != null || game.ml_away != null;
+
+  // ── User bets for this game ──
+  const [userPicks, setUserPicks] = useState([]);
+  const betGameId = game.id || game.game_id || game.matchup;
+
+  useEffect(() => {
+    if (!user || !betGameId) return;
+    let alive = true;
+    supabase
+      .from('game_picks')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('game_id', String(betGameId))
+      .order('created_at', { ascending: false })
+      .then(({ data }) => { if (alive && data) setUserPicks(data); });
+    return () => { alive = false; };
+  }, [user, betGameId]);
+
+  function handlePickPlaced(pick, newBankroll) {
+    setUserPicks(prev => [pick, ...prev]);
+    if (profile) profile.bankroll = newBankroll;
+  }
+
+  async function handleCancelPick(pickId) {
+    const { data } = await supabase.rpc('cancel_bet', { p_user_id: user.id, p_pick_id: pickId });
+    const result = typeof data === 'string' ? JSON.parse(data) : data;
+    if (result?.success) {
+      setUserPicks(prev => prev.filter(p => p.id !== pickId));
+      if (profile) profile.bankroll = result.bankroll;
+    }
+  }
   const awayML = game.ml_away != null ? (game.ml_away > 0 ? `+${game.ml_away}` : `${game.ml_away}`) : null;
   const homeML = game.ml_home != null ? (game.ml_home > 0 ? `+${game.ml_home}` : `${game.ml_home}`) : null;
 
@@ -659,6 +941,16 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
                   ⚾ {game.home_team} — {parkLabel.replace(/_/g, " ")} (PF {park.factor})
                 </div>
               )}
+
+              {/* Betting */}
+              <MLBBettingPanel
+                game={game}
+                user={user}
+                profile={profile}
+                userPicks={userPicks}
+                onPickPlaced={handlePickPlaced}
+                onCancelPick={handleCancelPick}
+              />
             </>
           )}
         </div>
@@ -669,7 +961,7 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user }) {
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
 
-export default function MLBDashboard({ user }) {
+export default function MLBDashboard({ user, profile }) {
   const today = (() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -796,6 +1088,7 @@ export default function MLBDashboard({ user }) {
             onToggle={() => toggle(i)}
             isFree={i === 0}
             user={user}
+            profile={profile}
           />
         ))}
       </div>

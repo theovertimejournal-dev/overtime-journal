@@ -782,9 +782,15 @@ for gd in games_raw:
 
     away    = g.get("away_team", "")
     home    = g.get("home_team", "")
-    matchup = f"{away} @ {home}"
-    odds    = sgo_odds_by_matchup.get(matchup, {})
-    s_info  = series_info.get(matchup, {})
+    base_matchup = f"{away} @ {home}"
+    # DOUBLEHEADER FIX: the games table is keyed on (slate_id, matchup). Both
+    # games of a doubleheader share a base matchup, so game 2 used to OVERWRITE
+    # game 1 and only one ever appeared. Suffix game 2 to keep the key unique.
+    # Odds and series info still look up on the base string.
+    game_no = int(g.get("game_number", 1) or 1)
+    matchup = base_matchup if game_no <= 1 else f"{base_matchup} (G{game_no})"
+    odds    = sgo_odds_by_matchup.get(base_matchup, {})
+    s_info  = series_info.get(base_matchup, {})
 
     existing = existing_games.get(matchup)
     is_first_write = existing is None
@@ -799,10 +805,27 @@ for gd in games_raw:
         narrative = existing.get("narrative") or ""
         print(f"  ♻ Reusing narrative for {matchup} (odds refresh only)")
 
-    # Analysis blob: same logic — freeze after first write.
+    # Analysis blob: frozen after first write.
     # Bullpen fatigue, pythagorean, TTO are pre-game reads; no value in
     # overwriting them mid-game with stale same-day data.
-    if is_first_write:
+    #
+    # EXCEPTION — TBD starters. If the first push ran before MLB announced the
+    # probable pitchers, "TBD" got frozen in and re-running the model could never
+    # fix it. So: if the stored analysis has a TBD starter and we now have a real
+    # name, rebuild the analysis once. This is the only unfreeze condition.
+    def _is_tbd(starter):
+        return (starter or {}).get("name", "TBD") in (None, "", "TBD")
+
+    starters_resolved = False
+    if not is_first_write:
+        old = existing.get("analysis") or {}
+        had_tbd = _is_tbd(old.get("away_starter")) or _is_tbd(old.get("home_starter"))
+        now_known = not _is_tbd(g.get("away_starter")) and not _is_tbd(g.get("home_starter"))
+        starters_resolved = had_tbd and now_known
+        if starters_resolved:
+            print(f"  🔄 {matchup}: starters announced — refreshing frozen analysis")
+
+    if is_first_write or starters_resolved:
         # Enrich starter dicts with profile URLs
         away_starter = g.get("away_starter", {})
         home_starter = g.get("home_starter", {})
@@ -864,7 +887,11 @@ for gd in games_raw:
         # predict_mlb_today.py, which owns them. Omitting them on odds-refresh
         # runs prevents the push from clobbering the ML predictions (robot icon /
         # Kelly units / win prob) that predict writes after the slate push.
-        if is_first_write:
+        # Edge fields are owned by predict_mlb_today.py after the first write —
+        # don't clobber its ML output on odds refreshes. The one exception is
+        # when TBD starters resolve: the analyzer capped confidence at LOW on
+        # incomplete info, so that cap has to be recomputed now that we know.
+        if is_first_write or starters_resolved:
             record["lean"]       = edge.get("lean")
             record["confidence"] = edge.get("confidence", "LOW")
             record["signals"]    = edge.get("signals", [])

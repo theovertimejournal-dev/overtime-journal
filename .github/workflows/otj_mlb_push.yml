@@ -2,8 +2,16 @@ name: OTJ MLB Slate Push (11AM ET)
 
 on:
   schedule:
-    # 11:00 AM ET = 16:00 UTC (EST) / 15:00 UTC (EDT)
-    # MLB games typically start 1:05 PM ET earliest — this gives ~2hr buffer
+    # ── EARLY RUN (~8 AM ET) — creates the slate ────────────────────────────
+    # Moved earlier so the Daily Journal (which chains to this workflow) can
+    # preview today's games at a reasonable morning hour. Some starters may
+    # still be TBD this early — the late run below fixes those.
+    # 8:00 AM ET = 12:00 UTC (EDT) / 13:00 UTC (EST)
+    - cron: '0 12 * * *'
+    - cron: '0 13 * * *'
+    # ── LATE RUN (~11 AM ET) — refresh ─────────────────────────────────────
+    # Picks up announced probable pitchers (unfreezes TBD analysis) and the
+    # latest odds. Still ~2hr before the earliest 1:05 PM ET first pitch.
     - cron: '0 15 * * *'
     - cron: '0 16 * * *'
   workflow_dispatch:
@@ -16,6 +24,11 @@ on:
         description: 'Skip Claude narratives (faster, cheaper)'
         required: false
         default: 'false'
+
+# Runs write the same (slate_id, matchup) rows — never let two overlap.
+concurrency:
+  group: otj-mlb-slate-push
+  cancel-in-progress: false
 
 jobs:
   push-mlb-slate:

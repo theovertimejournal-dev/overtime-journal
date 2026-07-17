@@ -179,6 +179,15 @@ function formatBucks(n) {
   return "$" + Math.round(n).toLocaleString();
 }
 
+// game_time is a raw ISO timestamp from the MLB API (e.g. 2026-07-08T23:40:00Z).
+// Render it in the viewer's own timezone — a first pitch means nothing in UTC.
+function formatStartTime(game_time) {
+  if (!game_time || game_time === "TBD") return null;
+  const d = new Date(game_time);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 function MLBBettingPanel({ game, user, profile, userPicks = [], onPickPlaced, onCancelPick }) {
   const locked = isGameLocked(game.game_time);
   const FONT = "'JetBrains Mono','SF Mono',monospace";
@@ -531,6 +540,11 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user, profile }) {
                          : "#60a5fa",
                   }}>
                     🌡️ {realFeel.score} {realFeel.label || ""}
+                  </span>
+                )}
+                {formatStartTime(game.game_time) && (
+                  <span style={{ fontSize: 9, color: "#6b7280", fontWeight: 600 }}>
+                    🕐 {formatStartTime(game.game_time)}
                   </span>
                 )}
                 {game.status && (

@@ -133,16 +133,21 @@ function RelieverTable({ relievers, team }) {
             <span>{r.pitches_last_3d}p/3d</span>
             <span style={{ color: r.days_rest === 0 ? "#ef4444" : "#6b7280" }}>{r.days_rest}d rest</span>
             {r.display_era != null ? (
-              <span style={{ color: r.display_era > 4.5 ? "#ef4444" : r.display_era < 3.0 ? "#22c55e" : "#94a3b8" }}>
+              <span style={{ color: r.display_era > 4.5 ? "#ef4444" : r.display_era < 3.0 ? "#22c55e" : "#94a3b8" }}
+                    title={
+                      r.display_era_source === "7d" ? "Last 7 days only — small sample"
+                      : r.display_era_source && r.display_era_source !== String(new Date().getFullYear())
+                        ? `${r.display_era_source} season ERA`
+                        : "Season ERA"
+                    }>
                 {fmt(r.display_era)} ERA
-                {r.display_era_source === "2025" && (
-                  <span style={{ fontSize: 9, color: "#4a5568", marginLeft: 2 }}>'25</span>
+                {/* Only tag when it ISN'T the current season — an untagged
+                    number means season-to-date, which is the default read. */}
+                {r.display_era_source && r.display_era_source !== String(new Date().getFullYear()) && (
+                  <span style={{ fontSize: 9, color: "#4a5568", marginLeft: 2 }}>
+                    {r.display_era_source === "7d" ? "7d" : `'${r.display_era_source.slice(2)}`}
+                  </span>
                 )}
-              </span>
-            ) : (r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era) != null ? (
-              <span style={{ color: "#4a5568" }} title="2025 season ERA">
-                {fmt(r.prior_era ?? (PRIOR_BULLPEN_ERA[team] || {}).era)}{" "}
-                <span style={{ fontSize: 9, color: "#374151" }}>'25</span>
               </span>
             ) : (
               <span style={{ color: "#374151" }}>— ERA</span>

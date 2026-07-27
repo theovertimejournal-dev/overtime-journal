@@ -36,7 +36,6 @@ export function LoginModal({ onClose }) {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [wantsEmail, setWantsEmail] = useState(true);
-  const [emailSubmitted, setEmailSubmitted] = useState(false);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [showInAppWarning, setShowInAppWarning] = useState(false);
@@ -76,12 +75,6 @@ export function LoginModal({ onClose }) {
     if (error) setMessage(error.message);
     else setMessage('Password reset email sent!');
     setLoading(false);
-  };
-
-  const handleEmailOnly = async () => {
-    if (!email || !email.includes('@')) return;
-    await subscribeEmail(email, 'login_modal_email_only');
-    setEmailSubmitted(true);
   };
 
   const msgStyle = {
@@ -130,7 +123,10 @@ export function LoginModal({ onClose }) {
                 Model picks, matchup edges, and a daily journal.
               </div>
 
-              <input style={{ ...inputStyle, marginBottom: 18 }} type="email" placeholder="your@email.com (optional)" value={email} onChange={e => setEmail(e.target.value)} />
+              <div style={{ fontSize: 12, color: '#4a5568', lineHeight: 1.8, marginBottom: 24 }}>
+                MLB · NBA · NHL · NFL edge analysis.<br />
+                Model picks, matchup edges, and a daily journal.
+              </div>
 
               <button onClick={() => setMode('signup')} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)', background: 'linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))', color: '#f1f5f9', fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
                 Create Free Account
@@ -146,22 +142,21 @@ export function LoginModal({ onClose }) {
                 <GoogleIcon /> Continue with Google
               </button>
 
-              <button onClick={() => setMode('signin')} style={{ width: '100%', padding: '10px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.05)', background: 'transparent', color: '#6b7280', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 14 }}>
+              <button onClick={() => setMode('signin')} style={{ width: '100%', padding: '10px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.05)', background: 'transparent', color: '#6b7280', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 16 }}>
                 Already have an account? Sign In
               </button>
 
-              {!emailSubmitted ? (
-                <button onClick={handleEmailOnly} style={{ width: '100%', padding: '9px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,0.04)', background: 'transparent', color: '#374151', fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: email ? 'pointer' : 'default', opacity: email ? 1 : 0.4, marginBottom: 14 }}>
-                  Just email me picks — no account needed
-                </button>
-              ) : (
-                <div style={{ marginBottom: 14, fontSize: 11, color: '#22c55e' }}>✓ You're on the list — daily picks incoming</div>
-              )}
-
-              <div onClick={onClose} style={{ fontSize: 11, color: '#1f2937', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                onMouseEnter={e => e.currentTarget.style.color = '#374151'}
-                onMouseLeave={e => e.currentTarget.style.color = '#1f2937'}>
-                <span>↓</span><span>See today's free pick first</span>
+              {/* Browse without an account — bold, with a plain-language note that
+                  it's the limited experience so signing up still feels worth it. */}
+              <div onClick={onClose} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer', paddingTop: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#9ca3af' }}
+                  onMouseEnter={e => e.currentTarget.style.color = '#e2e8f0'}
+                  onMouseLeave={e => e.currentTarget.style.color = '#9ca3af'}>
+                  Continue without signing in
+                </span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#f59e0b', background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 4, padding: '2px 6px', letterSpacing: '0.03em' }}>
+                  🔒 LIMITED ACCESS
+                </span>
               </div>
             </>
           )}

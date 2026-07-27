@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSlate } from '../../hooks/useSlate';
 import DateNav from '../common/DateNav';
 import { Pill } from '../common/Pill';
@@ -612,7 +612,9 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user, profile }) {
               ) : (
                 <span style={{ fontSize: 11, color: "#374151" }}>No lean</span>
               )}
-              <span style={{ fontSize: 12, color: "#374151" }}>{isExpanded ? "▲" : "▼"}</span>
+              <span style={{ fontSize: 12, color: "#374151" }}>
+                {locked ? "🔒" : (isExpanded ? "▲" : "▼")}
+              </span>
             </div>
           </div>
 
@@ -1014,8 +1016,18 @@ export default function MLBDashboard({ user, profile }) {
   });
   const highConf = games.filter(g => g.confidence === "HIGH");
 
+  // One free game for logged-out visitors — a random index, chosen once per
+  // load and stable while they're on the page (a moving target would feel
+  // broken). Everything else prompts signup. Random (not "best") avoids giving
+  // away our strongest lean for free.
+  const freeIndex = useMemo(
+    () => (games.length ? Math.floor(Math.random() * games.length) : 0),
+    [games.length]
+  );
+
   const toggle = (i) => {
-    if (!user) { setShowModal(true); return; }
+    // Logged-out: the one free game opens; any other card prompts signup.
+    if (!user && i !== freeIndex) { setShowModal(true); return; }
     setExpanded(p => ({ ...p, [i]: !p[i] }));
   };
 
@@ -1105,7 +1117,7 @@ export default function MLBDashboard({ user, profile }) {
             game={game}
             isExpanded={!!expanded[i]}
             onToggle={() => toggle(i)}
-            isFree={i === 0}
+            isFree={i === freeIndex}
             user={user}
             profile={profile}
           />

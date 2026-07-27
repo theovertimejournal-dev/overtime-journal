@@ -1052,10 +1052,10 @@ export default function MLBDashboard({ user, profile }) {
           <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: "#f1f5f9", letterSpacing: "-0.03em" }}>
             MLB Bullpen Edge Analyzer
           </h1>
-          <Pill text="v1.0" color="#22c55e" />
+          <Pill text="BETA" color="#fbbf24" />
         </div>
         <p style={{ fontSize: 11, color: "#4a5568", margin: "0 0 12px" }}>
-          Bullpen ERA · Fatigue · Park Factors · Pythagorean · Run Diff · L/R Splits
+          New model, still being tuned — leans are early and improving.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Pill text={`📅 ${slate?.date || selectedDate}`} color="#6b7280" />

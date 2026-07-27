@@ -1508,7 +1508,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
 
 
           <div className="fade-up-3" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button onClick={() => navigate('/nba')} style={{ padding: '10px 22px', borderRadius: 6, cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', fontSize: 11, fontWeight: 700, fontFamily: MONO, letterSpacing: '0.1em', transition: 'opacity 0.15s' }}
+            <button onClick={() => navigate('/mlb')} style={{ padding: '10px 22px', borderRadius: 6, cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', fontSize: 11, fontWeight: 700, fontFamily: MONO, letterSpacing: '0.1em', transition: 'opacity 0.15s' }}
               onMouseEnter={e => e.currentTarget.style.opacity = '0.85'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
               TODAY'S PICKS →
             </button>
@@ -1518,7 +1518,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
               VIEW RECORD
             </button>
             {!user && (
-              <button onClick={() => navigate('/nba')} style={{ padding: '10px 22px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', fontSize: 11, fontWeight: 700, fontFamily: MONO, letterSpacing: '0.1em', transition: 'all 0.15s' }}
+              <button onClick={() => navigate('/mlb')} style={{ padding: '10px 22px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid rgba(239,68,68,0.2)', color: '#ef4444', fontSize: 11, fontWeight: 700, fontFamily: MONO, letterSpacing: '0.1em', transition: 'all 0.15s' }}
                 onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(239,68,68,0.5)'}
                 onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(239,68,68,0.2)'}>
                 CREATE FREE ACCOUNT
@@ -1710,12 +1710,12 @@ export default function LandingPage({ user, profile, sessionValidated }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div style={{ fontSize: 9, letterSpacing: '0.2em', color: '#374151', borderLeft: '2px solid #ef4444', paddingLeft: 10 }}>TODAY'S PICKS</div>
-              <button onClick={() => navigate('/nba')} style={{ fontSize: 9, color: '#1e293b', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em', fontFamily: MONO }}>FULL ANALYSIS →</button>
+              <button onClick={() => navigate('/mlb')} style={{ fontSize: 9, color: '#1e293b', background: 'none', border: 'none', cursor: 'pointer', letterSpacing: '0.1em', fontFamily: MONO }}>FULL ANALYSIS →</button>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {picks.length > 0
-                ? picks.map((pick, i) => <PickCard key={i} pick={pick} onClick={() => navigate('/nba')} />)
+                ? picks.map((pick, i) => <PickCard key={i} pick={pick} onClick={() => navigate('/mlb')} />)
                 : (
                   <div style={{ padding: '24px 16px', textAlign: 'center', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.04)', borderRadius: 8, color: '#374151', fontSize: 11 }}>
                     {loading ? 'Loading picks...' : 'Picks drop at 3PM ET'}
@@ -1732,8 +1732,8 @@ export default function LandingPage({ user, profile, sessionValidated }) {
               <div style={{ fontSize: 9, letterSpacing: '0.2em', color: '#374151', borderLeft: '2px solid #4a5568', paddingLeft: 10, marginBottom: 12 }}>EXPLORE OTJ</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  { label: '🏀 NBA Edge Analyzer', sub: 'Bench ratings, B2B, variance', path: '/nba' },
-                  { label: '🎯 Props', sub: 'Player prop analysis', path: '/props' },
+                  { label: '⚾ MLB Bullpen Edge', sub: 'Bullpen ERA · park · fatigue', path: '/mlb' },
+                  { label: '💣 HR Props', sub: 'Park · wind · pitcher', path: '/mlb-props' },
                   { label: '📊 Record', sub: 'Full pick history + ROI', path: '/record' },
                   { label: '🕹 Arcade', sub: 'OTJ JAM & mini games', path: '/arcade' },
                 ].map(item => (

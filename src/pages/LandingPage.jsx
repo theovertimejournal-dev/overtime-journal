@@ -1327,7 +1327,7 @@ export default function LandingPage({ user, profile, sessionValidated }) {
       const { data: slates, error } = await supabase
         .from('slates')
         .select('date, games, yesterday_record, yesterday_results, cumulative_record, headline, games_count, otj_parlay')
-        .eq('sport', 'nba')
+        .eq('sport', 'mlb')
         .order('date', { ascending: false })
         .limit(30);
 
@@ -1503,16 +1503,9 @@ export default function LandingPage({ user, profile, sessionValidated }) {
           </h1>
 
           <p className="fade-up-2" style={{ fontSize: 13, color: '#4a5568', lineHeight: 1.7, maxWidth: 480, margin: '0 0 28px' }}>
-            Data-driven sports analysis. Bench net ratings, fatigue edges, variance signals — no hype, just numbers.
+            Data-driven picks across every sport — models, matchup edges, and a daily journal. No hype, just numbers.
           </p>
 
-          {/* Record strip — live from Supabase */}
-          <div className="fade-up-3" style={{ display: 'inline-flex', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, overflow: 'hidden', marginBottom: 28 }}>
-            <RecordBadge label="YESTERDAY" value={record.yesterday} accent="#22c55e" />
-            <RecordBadge label="THIS WEEK"  value={record.week} />
-            <RecordBadge label="THIS MONTH" value={record.month} accent="#fbbf24" />
-            <RecordBadge label="ALL TIME"   value={record.allTime} />
-          </div>
 
           <div className="fade-up-3" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button onClick={() => navigate('/nba')} style={{ padding: '10px 22px', borderRadius: 6, cursor: 'pointer', background: '#ef4444', border: 'none', color: '#fff', fontSize: 11, fontWeight: 700, fontFamily: MONO, letterSpacing: '0.1em', transition: 'opacity 0.15s' }}

@@ -18,6 +18,7 @@ import ArcadePage from './pages/ArcadePage';
 import LandingPage from './pages/LandingPage';
 import FAQ from './pages/FAQ';
 import ProfilePage from './pages/ProfilePage';
+import { Analytics } from '@vercel/analytics/react';
 import LeaderboardPage from './pages/LeaderboardPage';
 import DailyNewspaper from './pages/DailyNewspaper';
 import PokerLobby from './pages/PokerLobby';
@@ -927,6 +928,11 @@ export default function App() {
 
         {/* Mobile: bottom tab bar (hidden on desktop via CSS) */}
         <MobileBottomBar user={user} profile={profile} onSignIn={() => setShowWelcome(true)} />
+
+        {/* Vercel Analytics — counts every visitor (signed in or not), page
+            views, and referrer sources. This is how we see promo traffic and
+            which links/memes drive it. Enable it in the Vercel dashboard too. */}
+        <Analytics />
       </div>
     </BrowserRouter>
   );

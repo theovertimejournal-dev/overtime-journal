@@ -181,6 +181,7 @@ export default function Record() {
   const todayStr = getLocalDate();
   const [selectedDay, setSelectedDay] = useState(null);
   const [activeSport, setActiveSport] = useState("ALL");
+  const [showAllMonths, setShowAllMonths] = useState(false);
   const [rawData, setRawData] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -364,8 +365,25 @@ export default function Record() {
           ))}
         </div>
 
+        {/* MLB model is still in beta — say so when the MLB tab is active */}
+        {activeSport === "MLB" && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, marginBottom: 20,
+            padding: "10px 14px", borderRadius: 8,
+            background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.2)",
+            fontFamily: "'JetBrains Mono',monospace",
+          }}>
+            <span style={{ fontSize: 10, fontWeight: 800, color: "#000", background: "#fbbf24", padding: "2px 6px", borderRadius: 4 }}>BETA</span>
+            <span style={{ fontSize: 11, color: "#9ca3af" }}>
+              The MLB model is new and still being tuned — records shown are early and improving.
+            </span>
+          </div>
+        )}
+
         {/* ── Stat Cards ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 24 }}>
+        {/* auto-fit + minmax lets these wrap: ~2 per row on a phone, up to 5 on
+            desktop, instead of all five crushed into a single row on mobile. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 8, marginBottom: 24 }}>
           <StatCard
             label="All Time W-L"
             value={displayCumulative}
@@ -602,15 +620,51 @@ export default function Record() {
           display: "flex", flexDirection: "column", gap: 28,
         }}>
           {(() => {
+            // Show every month from now back to the earliest date with data,
+            // instead of a hardcoded current + previous month. Lets people
+            // fact-check the full season. Collapsed to 6 months by default with
+            // a "show more" so it isn't an endless scroll.
+            const dates = Object.keys(filteredData);
             const now = new Date();
-            const curYear  = now.getFullYear();
-            const curMonth = now.getMonth(); // 0-indexed
-            const prevMonth = curMonth === 0 ? 11 : curMonth - 1;
-            const prevYear  = curMonth === 0 ? curYear - 1 : curYear;
+            const curYM = now.getFullYear() * 12 + now.getMonth();
+
+            // Earliest month present in the data (fallback: 2 months back)
+            let earliestYM = curYM - 1;
+            if (dates.length) {
+              const min = dates.reduce((a, b) => (a < b ? a : b));
+              const [y, m] = min.split('-').map(Number);
+              earliestYM = y * 12 + (m - 1);
+            }
+
+            const allMonths = [];
+            for (let ym = curYM; ym >= earliestYM; ym--) {
+              allMonths.push({ year: Math.floor(ym / 12), month: ym % 12 });
+            }
+            const shown = showAllMonths ? allMonths : allMonths.slice(0, 6);
+
             return (
               <>
-                <CalendarMonth year={curYear}  month={curMonth}  data={filteredData} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
-                <CalendarMonth year={prevYear} month={prevMonth} data={filteredData} onSelectDay={setSelectedDay} selectedDay={selectedDay} />
+                {shown.map(({ year, month }) => (
+                  <CalendarMonth
+                    key={`${year}-${month}`}
+                    year={year} month={month}
+                    data={filteredData}
+                    onSelectDay={setSelectedDay}
+                    selectedDay={selectedDay}
+                  />
+                ))}
+                {allMonths.length > shown.length && (
+                  <button
+                    onClick={() => setShowAllMonths(true)}
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "#9ca3af", borderRadius: 8, padding: "10px",
+                      fontSize: 11, cursor: "pointer", fontFamily: "'JetBrains Mono',monospace",
+                    }}>
+                    ↓ Show all {allMonths.length} months
+                  </button>
+                )}
               </>
             );
           })()}

@@ -125,28 +125,12 @@ export function LoginModal({ onClose }) {
               <div style={{ fontSize: 26, fontWeight: 800, color: '#f1f5f9', lineHeight: 1.2, marginBottom: 8, letterSpacing: '-0.03em' }}>
                 Stop guessing.<br /><span style={{ color: '#ef4444' }}>Start edging.</span>
               </div>
-              <div style={{ fontSize: 12, color: '#4a5568', lineHeight: 1.8, marginBottom: 20 }}>
-                NBA · NHL · MLB · NFL edge analysis.<br />
-                Bench metrics, B2B fatigue, spread mismatches.
+              <div style={{ fontSize: 12, color: '#4a5568', lineHeight: 1.8, marginBottom: 24 }}>
+                MLB · NBA · NHL · NFL edge analysis.<br />
+                Model picks, matchup edges, and a daily journal.
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginBottom: 24 }}>
-                {[{ label: 'THIS MONTH', value: '11-2' }, { label: 'WIN %', value: '84%' }, { label: 'UNITS', value: '+18.3u' }].map((s, i) => (
-                  <div key={i}>
-                    <div style={{ fontSize: 9, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{s.label}</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: '#22c55e' }}>{s.value}</div>
-                  </div>
-                ))}
-              </div>
-
-              <input style={{ ...inputStyle, marginBottom: 10 }} type="email" placeholder="your@email.com (optional)" value={email} onChange={e => setEmail(e.target.value)} />
-
-              <div onClick={() => setWantsEmail(p => !p)} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18, cursor: 'pointer', textAlign: 'left' }}>
-                <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0, border: `1px solid ${wantsEmail ? '#ef4444' : 'rgba(255,255,255,0.15)'}`, background: wantsEmail ? 'rgba(239,68,68,0.2)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {wantsEmail && <span style={{ fontSize: 9, color: '#ef4444' }}>✓</span>}
-                </div>
-                <span style={{ fontSize: 11, color: '#4a5568', lineHeight: 1.4 }}>Email me the daily sharp pick + OTJ updates</span>
-              </div>
+              <input style={{ ...inputStyle, marginBottom: 18 }} type="email" placeholder="your@email.com (optional)" value={email} onChange={e => setEmail(e.target.value)} />
 
               <button onClick={() => setMode('signup')} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)', background: 'linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))', color: '#f1f5f9', fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
                 Create Free Account

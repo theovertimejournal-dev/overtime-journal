@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 async function subscribeEmail(email, source) {
   if (!email || !email.includes('@')) return;

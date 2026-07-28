@@ -123,11 +123,6 @@ export function LoginModal({ onClose }) {
                 Model picks, matchup edges, and a daily journal.
               </div>
 
-              <div style={{ fontSize: 12, color: '#4a5568', lineHeight: 1.8, marginBottom: 24 }}>
-                MLB · NBA · NHL · NFL edge analysis.<br />
-                Model picks, matchup edges, and a daily journal.
-              </div>
-
               <button onClick={() => setMode('signup')} style={{ width: '100%', padding: '13px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,0.15)', background: 'linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.08))', color: '#f1f5f9', fontSize: 14, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', marginBottom: 8 }}>
                 Create Free Account
               </button>

@@ -50,7 +50,7 @@ jobs:
       - name: Download trained models
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: train_mlb_ensemble.yml          # <-- CONFIRM filename
+          workflow: train_ensemble.yml
           workflow_conclusion: success
           name: mlb-trained-models
           path: models/
@@ -58,7 +58,7 @@ jobs:
       - name: Download arsenal cache
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: pull_pitcher_arsenal.yml        # <-- CONFIRM filename
+          workflow: pull_pitcher_arsenal.yml
           workflow_conclusion: success
           name: mlb-arsenal-data
           path: data/
@@ -66,7 +66,7 @@ jobs:
       - name: Download hitter splits cache
         uses: dawidd6/action-download-artifact@v6
         with:
-          workflow: pull_hitter_pitch_splits.yml    # <-- CONFIRM filename
+          workflow: pull_hitter_pitch_splits.yml
           workflow_conclusion: success
           name: mlb-hitter-splits-data
           path: data/

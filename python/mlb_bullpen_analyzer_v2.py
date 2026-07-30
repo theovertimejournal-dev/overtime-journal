@@ -252,11 +252,17 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
     # when current-season sample is too small (Opening Week)
     prior_pitcher_stats = get_prior_season_pitcher_stats(team_id)
 
-    # Fetch CURRENT season stats too (one more call). This is the number that
-    # actually matters mid-season: a 7-day window is noise (one clean inning =
-    # 0.00 ERA, one bad inning = 9.00), and 2025 is a year stale by July.
+    # Per-reliever CURRENT-season ERA. We fetch each reliever individually via
+    # get_pitcher_season_era (same call that makes the STARTER ERAs correct),
+    # because the team-level /teams/stats batch call returns aggregate team
+    # pitching, not per-player rows — so it came back empty and every reliever
+    # fell through to the noisy 7-day window. Cache per pid to avoid refetching.
     season_now = int(target_date.split("-")[0])
-    season_pitcher_stats = get_prior_season_pitcher_stats(team_id, season=season_now)
+    _rel_era_cache = {}
+    def _reliever_season(pid):
+        if pid not in _rel_era_cache:
+            _rel_era_cache[pid] = get_pitcher_season_era(pid, season_now)
+        return _rel_era_cache[pid]
 
     if not recent:
         return {"team":team_abbrev,"status":"NO_DATA","relievers":[],"bullpen_era":None,
@@ -329,20 +335,19 @@ def analyze_bullpen_usage(team_id, team_abbrev, starter_id, target_date):
         tso = sum(a["so"] for a in apps); tbb = sum(a["bb"] for a in apps)
         # Look up prior season stats for this reliever
         prior = prior_pitcher_stats.get(pid, {})
-        # Current-season stats — the real headline number mid-season.
-        seas = season_pitcher_stats.get(pid, {})
-        seas_era = seas.get("prior_era")   # helper's key names; values are season_now
-        seas_ip  = seas.get("prior_ip") or 0
+        # Current-season stats via the per-pitcher call (the working one).
+        seas = _reliever_season(pid)
+        seas_era = seas.get("era")
+        seas_ip  = seas.get("ip") or 0
 
         # Display ERA priority:
         #   1. Current season (once he has a real sample) — stable + relevant
         #   2. Prior season — genuine Opening Week fallback
         #   3. 7-day window — last resort only
-        # Previously this went straight to 2025 whenever the 7d sample was thin,
-        # which in July meant showing a year-old ERA (or a 0.00 from one clean
-        # inning). That's why bullpen ERAs never looked right.
         if seas_era is not None and seas_ip >= MIN_RELIABLE_IP:
             disp_era, disp_src = round(seas_era, 2), str(season_now)
+        elif seas.get("era_source") == str(season_now - 1) and seas_era is not None:
+            disp_era, disp_src = round(seas_era, 2), str(season_now - 1)
         elif prior.get("prior_era") is not None:
             disp_era, disp_src = prior.get("prior_era"), str(season_now - 1)
         elif tip2 > 0:

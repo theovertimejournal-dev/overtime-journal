@@ -134,10 +134,15 @@ def load_all(years):
         lambda n: TEAM_NAME_TO_ID.get(normalize_name(n)))
     df["game_date_str"] = df["game_date"].dt.strftime("%Y-%m-%d")
 
-    bp_cols = ["bp_era_7d", "bp_whip_7d", "bp_k_per_9_7d",
-               "bp_bb_per_9_7d", "bp_hr_per_9_7d",
-               "bp_ip_7d", "bp_reliever_count_7d"]
-    if len(bullpen):
+    # Columns the (updated) bullpen pull emits. Season-shrunk stats are the new
+    # backbone; the 7-day set stays for recent-form + fatigue. We intersect with
+    # what's actually present so an older parquet won't KeyError.
+    _wanted_bp = ["bp_era_season", "bp_whip_season", "bp_k9_season",
+                  "bp_bb9_season", "bp_hr9_season", "bp_ip_season",
+                  "bp_era_7d", "bp_whip_7d", "bp_k_per_9_7d",
+                  "bp_ip_7d", "bp_reliever_count_7d"]
+    bp_cols = [c for c in _wanted_bp if c in bullpen.columns] if len(bullpen) else []
+    if len(bullpen) and bp_cols:
         bp_subset = bullpen[["team_id", "game_date_str"] + bp_cols]
         home_bp = bp_subset.rename(columns={"team_id": "home_team_id",
             **{c: f"home_{c}" for c in bp_cols}})
@@ -217,13 +222,27 @@ def add_pitcher_features(df):
 
 
 def add_bullpen_features(df):
-    if "home_bp_era_7d" not in df.columns: return df
-    df["bp_era_edge"] = df["home_bp_era_7d"] - df["away_bp_era_7d"]
-    df["bp_whip_edge"] = df["home_bp_whip_7d"] - df["away_bp_whip_7d"]
-    df["bp_k9_edge"] = df["home_bp_k_per_9_7d"] - df["away_bp_k_per_9_7d"]
-    df["home_bp_workload"] = df["home_bp_ip_7d"]
-    df["away_bp_workload"] = df["away_bp_ip_7d"]
-    df["bp_workload_edge"] = df["home_bp_ip_7d"] - df["away_bp_ip_7d"]
+    # ── SEASON-SHRUNK edges (the new primary bullpen signal) ──
+    # A negative bp_era_edge_season means the home pen is better (lower ERA).
+    # These are stable and outlier-resistant; the model should lean on them.
+    if "home_bp_era_season" in df.columns:
+        df["bp_era_edge_season"]  = df["home_bp_era_season"]  - df["away_bp_era_season"]
+        df["bp_whip_edge_season"] = df["home_bp_whip_season"] - df["away_bp_whip_season"]
+        if "home_bp_k9_season" in df.columns:
+            df["bp_k9_edge_season"] = df["home_bp_k9_season"] - df["away_bp_k9_season"]
+
+    # ── 7-DAY edges (recent form — kept, model down-weights on its own) ──
+    if "home_bp_era_7d" in df.columns:
+        df["bp_era_edge"] = df["home_bp_era_7d"] - df["away_bp_era_7d"]
+        df["bp_whip_edge"] = df["home_bp_whip_7d"] - df["away_bp_whip_7d"]
+        if "home_bp_k_per_9_7d" in df.columns:
+            df["bp_k9_edge"] = df["home_bp_k_per_9_7d"] - df["away_bp_k_per_9_7d"]
+
+    # ── FATIGUE (recent innings = availability, not skill) ──
+    if "home_bp_ip_7d" in df.columns:
+        df["home_bp_workload"] = df["home_bp_ip_7d"]
+        df["away_bp_workload"] = df["away_bp_ip_7d"]
+        df["bp_workload_edge"] = df["home_bp_ip_7d"] - df["away_bp_ip_7d"]
     return df
 
 
@@ -495,9 +514,15 @@ PITCHER_FEATURES = [
 ]
 
 BULLPEN_FEATURES = [
+    # Season-shrunk (new primary signal — outlier-resistant)
+    "bp_era_edge_season", "bp_whip_edge_season", "bp_k9_edge_season",
+    "home_bp_era_season", "away_bp_era_season",
+    "home_bp_whip_season", "away_bp_whip_season",
+    # 7-day recent form (kept; model down-weights vs season on its own)
     "bp_era_edge", "bp_whip_edge", "bp_k9_edge",
     "home_bp_era_7d", "away_bp_era_7d",
     "home_bp_whip_7d", "away_bp_whip_7d",
+    # Fatigue / availability
     "home_bp_workload", "away_bp_workload", "bp_workload_edge",
 ]
 

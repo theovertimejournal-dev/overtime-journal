@@ -142,6 +142,31 @@ def mlb_get(endpoint, params=None):
         return {}
 
 
+# ── Innings + bullpen shrinkage — MUST MATCH pull_mlb_bullpen.py EXACTLY ─────
+# Any divergence here reintroduces train/serve skew, the bug this whole change
+# exists to kill. parse_ip: "5.2" = 5 innings + 2 outs = 5.667, not 5.2.
+def parse_ip(ip_str):
+    try:
+        s = str(ip_str)
+        if "." in s:
+            whole, frac = s.split(".")
+            return int(whole) + int(frac) / 3.0
+        return float(s)
+    except (ValueError, AttributeError):
+        return 0.0
+
+
+SHRINK_K = 25.0
+LEAGUE_AVG = {"era": 4.10, "whip": 1.30, "k9": 8.6, "bb9": 3.4, "hr9": 1.2}
+
+
+def shrink(observed, ip, stat):
+    prior = LEAGUE_AVG[stat]
+    if ip <= 0:
+        return prior
+    return (ip * observed + SHRINK_K * prior) / (ip + SHRINK_K)
+
+
 def sgo_get(params):
     try:
         r = requests.get(f"{SGO_BASE}/events", headers=SGO_HEADERS,
@@ -201,7 +226,7 @@ def get_pitcher_season_stats(pid, season):
         splits = payload.get("stats", [{}])[0].get("splits", [])
         if not splits: return {}
         s = splits[0].get("stat", {})
-        ip = float(s.get("inningsPitched", 0))
+        ip = parse_ip(s.get("inningsPitched", 0))
         bb = float(s.get("baseOnBalls", 0))
         k = float(s.get("strikeOuts", 0))
         hr = float(s.get("homeRuns", 0))
@@ -220,51 +245,95 @@ def get_pitcher_season_stats(pid, season):
         return {}
 
 
-def get_team_7day_bullpen(team_id, season, end_date):
-    """Rough 7-day bullpen rolling ERA/WHIP/K9."""
-    if not team_id: return {}
-    start_dt = (pd.Timestamp(end_date) - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
-    payload = mlb_get("/schedule", {"sportId": 1, "teamId": team_id,
-                                     "startDate": start_dt, "endDate": end_date,
-                                     "hydrate": "boxscore"})
-    bp = {"ip": 0.0, "er": 0.0, "bb": 0.0, "k": 0.0, "hr": 0.0, "hits": 0.0}
-    for d in payload.get("dates", []):
-        for g in d.get("games", []):
-            if g.get("status", {}).get("codedGameState") not in ("F", "O"): continue
-            box = mlb_get(f"/game/{g['gamePk']}/boxscore") or {}
-            for side in ("home", "away"):
-                team = box.get("teams", {}).get(side, {})
-                if team.get("team", {}).get("id") != team_id: continue
-                # Aggregate relievers (non-starters)
-                starter_id = None
-                for bat in team.get("battingOrder", []) or []:
-                    pass  # not needed
-                pitchers = team.get("pitchers", [])  # order pitched
-                if not pitchers: continue
-                starter_id = pitchers[0]
-                for pid in pitchers[1:]:
-                    stat = team.get("players", {}).get(f"ID{pid}", {})\
-                        .get("stats", {}).get("pitching", {})
-                    try:
-                        bp["ip"] += float(stat.get("inningsPitched", 0))
-                        bp["er"] += float(stat.get("earnedRuns", 0))
-                        bp["bb"] += float(stat.get("baseOnBalls", 0))
-                        bp["k"] += float(stat.get("strikeOuts", 0))
-                        bp["hr"] += float(stat.get("homeRuns", 0))
-                        bp["hits"] += float(stat.get("hits", 0))
-                    except (ValueError, TypeError):
-                        continue
-            time.sleep(0.05)
-    if bp["ip"] < 1:
+def _reliever_line(box, team_id):
+    """One game's aggregate reliever counting stats for team_id. Mirrors the
+    pull's extract_reliever_line (starter = pitchers[0], parse_ip for innings)."""
+    out = {"ip": 0.0, "er": 0.0, "bb": 0.0, "k": 0.0, "hr": 0.0, "hits": 0.0}
+    for side in ("home", "away"):
+        team = box.get("teams", {}).get(side, {})
+        if team.get("team", {}).get("id") != team_id:
+            continue
+        pitchers = team.get("pitchers", [])
+        if not pitchers:
+            continue
+        starter_id = pitchers[0]           # matches pull for train/serve parity
+        for pid in pitchers[1:]:
+            stat = team.get("players", {}).get(f"ID{pid}", {})\
+                .get("stats", {}).get("pitching", {})
+            if not stat:
+                continue
+            try:
+                out["ip"]   += parse_ip(stat.get("inningsPitched", 0))
+                out["er"]   += float(stat.get("earnedRuns", 0))
+                out["bb"]   += float(stat.get("baseOnBalls", 0))
+                out["k"]    += float(stat.get("strikeOuts", 0))
+                out["hr"]   += float(stat.get("homeRuns", 0))
+                out["hits"] += float(stat.get("hits", 0))
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
+def get_team_bullpen(team_id, season, end_date):
+    """Compute BOTH season-to-date (credibility-shrunk) and 7-day bullpen stats,
+    identical to pull_mlb_bullpen.py so training and serving see the same numbers.
+
+    Season = every reliever appearance from opening day to end_date, shrunk.
+    7-day  = raw window (recent form + fatigue).
+    """
+    if not team_id:
         return {}
-    return {
-        "bp_era_7d": round(bp["er"] / bp["ip"] * 9, 2),
-        "bp_whip_7d": round((bp["bb"] + bp["hits"]) / bp["ip"], 2),
-        "bp_k_per_9_7d": round(bp["k"] / bp["ip"] * 9, 2),
-        "bp_bb_per_9_7d": round(bp["bb"] / bp["ip"] * 9, 2),
-        "bp_hr_per_9_7d": round(bp["hr"] / bp["ip"] * 9, 2),
-        "bp_ip_7d": round(bp["ip"], 1),
-    }
+
+    # Full-season schedule up to (but not including) today
+    yr = int(str(end_date)[:4])
+    sched = mlb_get("/schedule", {
+        "sportId": 1, "teamId": team_id,
+        "startDate": f"{yr}-03-01", "endDate": end_date, "gameType": "R",
+    })
+
+    season = {"ip": 0.0, "er": 0.0, "bb": 0.0, "k": 0.0, "hr": 0.0, "hits": 0.0}
+    window = {"ip": 0.0, "er": 0.0, "bb": 0.0, "k": 0.0, "hr": 0.0, "hits": 0.0}
+    cutoff = (pd.Timestamp(end_date) - pd.Timedelta(days=7)).strftime("%Y-%m-%d")
+
+    for d in sched.get("dates", []):
+        gdate = d.get("date", "")
+        for g in d.get("games", []):
+            if g.get("status", {}).get("codedGameState") not in ("F", "O"):
+                continue
+            # don't count the target day itself (features are strictly prior)
+            if gdate >= str(end_date):
+                continue
+            box = mlb_get(f"/game/{g['gamePk']}/boxscore") or {}
+            line = _reliever_line(box, team_id)
+            for k in season:
+                season[k] += line[k]
+            if gdate >= cutoff:
+                for k in window:
+                    window[k] += line[k]
+            time.sleep(0.05)
+
+    out = {}
+    # ── Season-shrunk (primary) ──
+    s_ip = season["ip"]
+    if s_ip > 0:
+        out["bp_era_season"]  = round(shrink(season["er"]/s_ip*9, s_ip, "era"), 2)
+        out["bp_whip_season"] = round(shrink((season["bb"]+season["hits"])/s_ip, s_ip, "whip"), 2)
+        out["bp_k9_season"]   = round(shrink(season["k"]/s_ip*9, s_ip, "k9"), 2)
+    else:
+        out["bp_era_season"]  = round(LEAGUE_AVG["era"], 2)
+        out["bp_whip_season"] = round(LEAGUE_AVG["whip"], 2)
+        out["bp_k9_season"]   = LEAGUE_AVG["k9"]
+    out["bp_ip_season"] = round(s_ip, 1)
+    # ── 7-day window (recent form + fatigue) ──
+    w_ip = window["ip"]
+    if w_ip > 0:
+        out["bp_era_7d"]      = round(window["er"]/w_ip*9, 2)
+        out["bp_whip_7d"]     = round((window["bb"]+window["hits"])/w_ip, 2)
+        out["bp_k_per_9_7d"]  = round(window["k"]/w_ip*9, 2)
+    else:
+        out["bp_era_7d"] = out["bp_whip_7d"] = out["bp_k_per_9_7d"] = None
+    out["bp_ip_7d"] = round(w_ip, 1)
+    return out
 
 
 def get_team_recent_form(team_id, season, end_date, n=30):
@@ -514,8 +583,8 @@ def build_features_for_game(g, season, today, full_feature_list,
     ap = get_pitcher_season_stats(g["away_starter_id"], season)
 
     # Bullpens
-    hbp = get_team_7day_bullpen(g["home_team_id"], season, today)
-    abp = get_team_7day_bullpen(g["away_team_id"], season, today)
+    hbp = get_team_bullpen(g["home_team_id"], season, today)
+    abp = get_team_bullpen(g["away_team_id"], season, today)
 
     # Form
     hf = get_team_recent_form(g["home_team_id"], season, today)
@@ -584,9 +653,17 @@ def build_features_for_game(g, season, today, full_feature_list,
     for k, v in hbp.items(): row[f"home_{k}"] = v
     for k, v in abp.items(): row[f"away_{k}"] = v
     if hbp and abp:
-        row["bp_era_edge"] = hbp["bp_era_7d"] - abp["bp_era_7d"]
-        row["bp_whip_edge"] = hbp["bp_whip_7d"] - abp["bp_whip_7d"]
-        row["bp_k9_edge"] = hbp["bp_k_per_9_7d"] - abp["bp_k_per_9_7d"]
+        # ── SEASON-SHRUNK edges (primary) — must match build_features.py ──
+        if "bp_era_season" in hbp and "bp_era_season" in abp:
+            row["bp_era_edge_season"]  = hbp["bp_era_season"]  - abp["bp_era_season"]
+            row["bp_whip_edge_season"] = hbp["bp_whip_season"] - abp["bp_whip_season"]
+            row["bp_k9_edge_season"]   = hbp["bp_k9_season"]   - abp["bp_k9_season"]
+        # ── 7-day edges (recent form) — only when both windows have data ──
+        if hbp.get("bp_era_7d") is not None and abp.get("bp_era_7d") is not None:
+            row["bp_era_edge"] = hbp["bp_era_7d"] - abp["bp_era_7d"]
+            row["bp_whip_edge"] = hbp["bp_whip_7d"] - abp["bp_whip_7d"]
+            row["bp_k9_edge"] = hbp["bp_k_per_9_7d"] - abp["bp_k_per_9_7d"]
+        # ── Fatigue ──
         row["home_bp_workload"] = hbp["bp_ip_7d"]
         row["away_bp_workload"] = abp["bp_ip_7d"]
         row["bp_workload_edge"] = hbp["bp_ip_7d"] - abp["bp_ip_7d"]

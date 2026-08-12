@@ -384,8 +384,12 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--year", type=int, choices=[2024, 2025, 2026])
     args = p.parse_args()
-    years = [args.year] if args.year else [2024, 2025]
+    # Blank = ALL seasons the model should learn from, including the current one.
+    # (Was [2024, 2025] — silently excluded 2026, so a full retrain missed this
+    # whole season of bullpen data.)
+    years = [args.year] if args.year else [2024, 2025, 2026]
     for y in years:
+        log.info("=== Processing %s ===", y)
         process_year(y)
     log.info("DONE")
 

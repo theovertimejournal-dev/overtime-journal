@@ -1,10 +1,9 @@
 name: Pull MLB Bullpen
-
 on:
   workflow_dispatch:
     inputs:
       year:
-        description: "Year (blank = both 2024 & 2025)"
+        description: "Year (blank = ALL: 2024, 2025 & 2026)"
         required: false
         default: ""
         type: choice
@@ -14,25 +13,20 @@ on:
           - "2025"
           - "2026"
       backfill_run_id:
-        description: "Run ID of Backfill MLB History workflow"
+        description: "Run ID of Backfill MLB History workflow (must be a FULL run, not dry-run)"
         required: true
         type: string
-
 jobs:
   bullpen:
     runs-on: ubuntu-latest
-    timeout-minutes: 240   # 4 hours max — bullpen pull is the long one
-
+    timeout-minutes: 330   # 5.5h — a full 3-season pull with shrinkage is the long one
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install deps
         run: pip install requests pandas pyarrow
-
       - name: Download historical parquets
         uses: actions/download-artifact@v4
         with:
@@ -40,7 +34,22 @@ jobs:
           path: data/
           run-id: ${{ inputs.backfill_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
+      - name: Verify inputs exist (fail fast if backfill was a dry run)
+        run: |
+          echo "Files in data/:"
+          ls -la data/ || true
+          # A dry-run backfill writes *_dryrun.parquet, which this pull can't use.
+          if ls data/*_dryrun.parquet >/dev/null 2>&1; then
+            echo "::error::Found *_dryrun.parquet — that backfill run was a DRY RUN. Re-run the backfill with dry_run OFF and use that run ID."
+            exit 1
+          fi
+          if [ -z "${{ inputs.year }}" ]; then
+            for y in 2024 2025 2026; do
+              if [ ! -f "data/mlb_historical_${y}.parquet" ]; then
+                echo "::warning::data/mlb_historical_${y}.parquet missing — that year will be skipped."
+              fi
+            done
+          fi
       - name: Run bullpen pull
         run: |
           ARGS=""
@@ -48,7 +57,6 @@ jobs:
             ARGS="--year ${{ inputs.year }}"
           fi
           python python/pull_mlb_bullpen.py $ARGS
-
       - name: Upload bullpen parquets
         if: always()   # upload partial results even if timed out
         uses: actions/upload-artifact@v4

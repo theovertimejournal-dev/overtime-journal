@@ -49,7 +49,7 @@ SUPABASE_KEY      = os.environ.get("SUPABASE_SERVICE_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SGO_API_KEY       = os.environ.get("SPORTSGAMEODDS_API_KEY", "")
 
-NARRATIVE_MODEL   = "claude-sonnet-4-20250514"
+NARRATIVE_MODEL   = "claude-sonnet-5"
 SPORT             = "mlb"
 
 # SportsGameOdds endpoint for MLB

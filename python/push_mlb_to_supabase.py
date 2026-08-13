@@ -856,6 +856,7 @@ for gd in games_raw:
             # ── Static fields (set on first write, unchanged after) ──────────
             "slate_id":         slate_id,
             "sport":            SPORT,
+          "date":             game_date, 
             "matchup":          matchup,
             "game_id":          str(g.get("game_pk", "")),
             "away_team":        away,

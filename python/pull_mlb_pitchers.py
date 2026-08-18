@@ -27,6 +27,20 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("pitchers")
 
 
+def _safe_pid(pid):
+    """Convert a pitcher ID to int, returning None for NaN/None/blank.
+    A plain `if pid` check fails here because float('nan') is truthy, so
+    int(NaN) crashes — this is the guard for TBD/unannounced starters."""
+    try:
+        if pid is None:
+            return None
+        if isinstance(pid, float) and pid != pid:   # NaN check
+            return None
+        return int(pid)
+    except (ValueError, TypeError):
+        return None
+
+
 def get(url, params=None):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -222,7 +236,10 @@ def process_year(year):
                       set(starters_df["away_starter_id"].dropna())
     log.info("[%s] fetching season stats for %s starters...", year, len(unique_starters))
     for i, pid in enumerate(unique_starters):
-        fetch_pitcher_season_stats(int(pid), year)
+        _pid = _safe_pid(pid)
+        if _pid is None:
+            continue
+        fetch_pitcher_season_stats(_pid, year)
         if (i + 1) % 50 == 0:
             log.info("  stats: %s/%s", i + 1, len(unique_starters))
         time.sleep(SLEEP)
@@ -231,8 +248,10 @@ def process_year(year):
     def attach(side):
         out = []
         for _, r in starters_df.iterrows():
-            pid = r[f"{side}_starter_id"]
-            stats = _pitcher_stats_cache.get((int(pid), year), {}) if pid else {}
+            pid = _safe_pid(r[f"{side}_starter_id"])
+            # NaN/None pid = TBD or unannounced starter (common in in-progress
+            # 2026 games). Skip the lookup instead of crashing on int(NaN).
+            stats = _pitcher_stats_cache.get((pid, year), {}) if pid is not None else {}
             row = {f"{side}_p_{k}": v for k, v in stats.items()}
             out.append(row)
         return pd.DataFrame(out)
@@ -270,6 +289,7 @@ def main():
     p.add_argument("--year", type=int)
     args = p.parse_args()
     years = [args.year] if args.year else training_seasons()
+    log.info("Seasons to process: %s", years)
     for y in years:
         process_year(y)
     log.info("DONE")

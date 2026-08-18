@@ -398,11 +398,26 @@ def process_year(year):
              year, len(out_df), 100 * cov)
 
 
+def current_season(today=None):
+    """Which MLB season are we in? Season starts late March; before that,
+    'current' is last year. Computed from the date so it never needs updating."""
+    from datetime import date
+    today = today or date.today()
+    return today.year if today.month >= 3 else today.year - 1
+
+
+def training_seasons(n=3):
+    """Last n seasons ending with the current one — auto-rolls every year.
+    Replaces the hardcoded [2024, 2025] that silently excluded new seasons."""
+    cur = current_season()
+    return list(range(cur - n + 1, cur + 1))
+
+
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--year", type=int, choices=[2024, 2025, 2026])
+    p.add_argument("--year", type=int)
     args = p.parse_args()
-    years = [args.year] if args.year else [2024, 2025]
+    years = [args.year] if args.year else training_seasons()
     for y in years:
         process_year(y)
     log.info("DONE")

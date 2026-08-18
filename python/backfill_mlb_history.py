@@ -23,6 +23,21 @@ SEASON_WINDOWS = {
     2026: ("2026-03-19", "2026-11-04"),
 }
 
+def season_window(year):
+    return (f"{year}-03-18", f"{year}-11-10")
+
+
+def current_season(today=None):
+    from datetime import date
+    today = today or date.today()
+    return today.year if today.month >= 3 else today.year - 1
+
+
+def training_seasons(n=3):
+    cur = current_season()
+    return list(range(cur - n + 1, cur + 1))
+
+
 OUTPUT_DIR = Path("data")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -189,7 +204,7 @@ def backfill_season(season, dry_run=False):
         start, end = f"{season}-04-01", f"{season}-04-04"
         log.info("=== DRY RUN %s: %s -> %s ===", season, start, end)
     else:
-        start, end = SEASON_WINDOWS[season]
+        start, end = SEASON_WINDOWS.get(season, season_window(season))
         log.info("=== %s: %s -> %s ===", season, start, end)
 
     rows, skipped = [], 0
@@ -224,10 +239,10 @@ def backfill_season(season, dry_run=False):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--season", type=int, choices=list(SEASON_WINDOWS.keys()))
+    p.add_argument("--season", type=int)
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args()
-    seasons = [args.season] if args.season else list(SEASON_WINDOWS.keys())
+    seasons = [args.season] if args.season else training_seasons()
     for s in seasons:
         backfill_season(s, dry_run=args.dry_run)
     log.info("DONE")

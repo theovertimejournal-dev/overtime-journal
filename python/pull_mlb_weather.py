@@ -70,6 +70,23 @@ SEASON_WINDOWS = {
     2026: ("2026-03-19", "2026-11-04"),
 }
 
+def season_window(year):
+    """Approx MLB season date window for a year. Late-March to early-November
+    covers regular season + playoffs; exact days don't matter for weather pulls."""
+    return (f"{year}-03-18", f"{year}-11-10")
+
+
+def current_season(today=None):
+    from datetime import date
+    today = today or date.today()
+    return today.year if today.month >= 3 else today.year - 1
+
+
+def training_seasons(n=3):
+    cur = current_season()
+    return list(range(cur - n + 1, cur + 1))
+
+
 
 def get_api(url, params=None):
     for attempt in range(1, MAX_RETRIES + 1):
@@ -98,7 +115,7 @@ def fetch_stadium_season(team_id, stadium_info, season):
     if roof == "dome":
         return {}
 
-    start, end = SEASON_WINDOWS[season]
+    start, end = SEASON_WINDOWS.get(season, season_window(season))
     params = {
         "latitude": stadium_info["lat"],
         "longitude": stadium_info["lon"],
@@ -208,9 +225,9 @@ def process_year(year, weather_by_team):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--year", type=int, choices=[2024, 2025])
+    p.add_argument("--year", type=int)
     args = p.parse_args()
-    years = [args.year] if args.year else [2024, 2025]
+    years = [args.year] if args.year else training_seasons()
 
     for y in years:
         log.info("=== fetching weather for %s ===", y)

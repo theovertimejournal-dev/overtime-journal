@@ -116,6 +116,13 @@ def fetch_stadium_season(team_id, stadium_info, season):
         return {}
 
     start, end = SEASON_WINDOWS.get(season, season_window(season))
+    # The archive API only has PAST weather. For the current (in-progress) season
+    # the window's end date is in the future (e.g. 2026-11-04 in August), which
+    # returns a 400. Cap end at yesterday so we only ever request real dates.
+    from datetime import date, timedelta
+    yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+    if end > yesterday:
+        end = yesterday
     params = {
         "latitude": stadium_info["lat"],
         "longitude": stadium_info["lon"],

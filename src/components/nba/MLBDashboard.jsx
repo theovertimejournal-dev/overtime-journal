@@ -430,14 +430,25 @@ function MLBGameCard({ game, isExpanded, onToggle, isFree, user, profile }) {
   const realFeel = analysis.real_feel || {};
   const weather = analysis.weather || {};
 
-  const lean = game.lean;
-  const conf = game.confidence || "LOW";
+  // Predictions killed (see SHOW_ML_PREDICTIONS below). Null out lean/conf so
+  // the confidence glow, header lean badge, and Kelly chip all disappear too —
+  // not just the ensemble panel. This keeps the card free of stale model output.
+  const _SHOW_ML = false;
+  const lean = _SHOW_ML ? game.lean : null;
+  const conf = _SHOW_ML ? (game.confidence || "LOW") : "LOW";
   const signals = game.signals || [];
   const confColor = CONF_COLOR[conf] || "#6b7280";
 
   // ML model data (from predict_mlb_today.py → game.scores)
   const scores = game.scores || {};
-  const isMLPrediction = scores.model_version === "v5_ensemble" || !!scores.base_model_probs;
+  // ── PREDICTIONS TEMPORARILY DISABLED ──
+  // The ensemble stacker is producing bad probabilities (e.g. a road dog at
+  // 96.9%) while the model is being fixed. Set SHOW_ML_PREDICTIONS back to true
+  // once the stacker is corrected and predict is re-run. Everything else on the
+  // card (slate, pitchers, bullpen comparison, betting) stays live.
+  const SHOW_ML_PREDICTIONS = false;
+  const isMLPrediction = SHOW_ML_PREDICTIONS &&
+    (scores.model_version === "v5_ensemble" || !!scores.base_model_probs);
   const fullHomeProb = scores.full_ml_home_prob;
   const fullAwayProb = scores.full_ml_away_prob;
   const f5HomeProb = scores.f5_ml_home_prob;
@@ -1014,7 +1025,7 @@ export default function MLBDashboard({ user, profile }) {
     const timeB = b.game_time || "99:99";
     return timeA.localeCompare(timeB);
   });
-  const highConf = games.filter(g => g.confidence === "HIGH");
+  const highConf = [];  // predictions disabled — no HIGH-confidence callout
 
   // One free game for logged-out visitors — a random index, chosen once per
   // load and stable while they're on the page (a moving target would feel

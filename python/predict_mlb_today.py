@@ -781,6 +781,7 @@ def build_features_for_game(g, season, today, full_feature_list,
 
 # ── Model loading + prediction ──────────────────────────────────────────────
 
+# ── Model loading + prediction ──────────────────────────────────────────────
 def load_model_bundle(variant):
     vdir = MODELS_DIR / variant
     if not vdir.exists():
@@ -788,11 +789,21 @@ def load_model_bundle(variant):
     bundle = {}
     for name in ("lgb", "xgb", "rf", "lr", "cat"):
         p = vdir / f"{name}_classifier.pkl"
-        if p.exists():
-            with open(p, "rb") as f: bundle[name] = pickle.load(f)
-    with open(vdir / "stacker.pkl", "rb") as f: bundle["stacker"] = pickle.load(f)
-    with open(vdir / "calibrator.pkl", "rb") as f: bundle["calibrator"] = pickle.load(f)
-    with open(vdir / "feature_list.json") as f: bundle["features"] = json.load(f)
+        # Skip missing OR 0-byte files (the old CatBoost 0-byte bug produced
+        # garbage predictions like a road dog at 96.9%).
+        if p.exists() and p.stat().st_size > 0:
+            try:
+                with open(p, "rb") as f:
+                    bundle[name] = pickle.load(f)
+            except Exception as e:
+                log.warning("skipping %s in %s — failed to load (%s)", name, variant, e)
+    try:
+        with open(vdir / "stacker.pkl", "rb") as f: bundle["stacker"] = pickle.load(f)
+        with open(vdir / "calibrator.pkl", "rb") as f: bundle["calibrator"] = pickle.load(f)
+        with open(vdir / "feature_list.json") as f: bundle["features"] = json.load(f)
+    except Exception as e:
+        log.warning("no usable %s bundle — skipping variant (%s)", variant, e)
+        return None
     log.info("loaded %s (%s base models + stacker + calibrator)",
              variant, len([k for k in bundle if k in ("lgb","xgb","rf","lr","cat")]))
     return bundle

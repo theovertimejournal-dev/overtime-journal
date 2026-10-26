@@ -49,7 +49,7 @@ HEADERS = {"Authorization": API_KEY}
 # from other scripts without triggering sys.exit at module load time.
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-NARRATIVE_MODEL = "claude-sonnet-4-20250514"
+NARRATIVE_MODEL = "claude-sonnet-5"  # TODO confirm current string (was stale 4-20250514 → 404)
 
 # ── Tank01 RapidAPI ───────────────────────────────────────────────────────────
 TANK01_API_KEY = os.environ.get("TANK01_API_KEY", "")
@@ -214,6 +214,49 @@ def get_all_team_stats(season: int = 2025) -> dict:
             stats[abbr]["ts_pct"] = s.get("ts_pct", 0)
 
     return stats
+
+
+# ── Season rollover + prior→live blend ──────────────────────────────────────
+# Credibility shrinkage: a team's rating = (gp*this_year + K*last_year)/(gp+K).
+# Early season the prior dominates; as games accrue, current data takes over
+# automatically — no hardcoded cutover date. Same method as the MLB bullpen fix.
+K_PSEUDO_GAMES = 11
+_BLEND_RATE_KEYS = ("off_rating_adv", "def_rating_adv", "net_rating_adv",
+                    "pace", "pts", "opp_pts", "fg3_pct")
+
+def current_nba_season(today: datetime | None = None) -> int:
+    """Starting-year convention (2026 = 2026-27). Oct–Dec → this year;
+    Jan–Jun → previous year; Jul–Sep (offseason) → upcoming season's year."""
+    d = today or datetime.now()
+    return d.year if d.month >= 10 else (d.year - 1 if d.month >= 7 else d.year - 1)
+
+def get_blended_team_stats(cur_season: int | None = None,
+                           prior_season: int | None = None,
+                           k: int = K_PSEUDO_GAMES) -> dict:
+    """Pull current + prior season, shrink thin current rates toward the prior.
+    Record fields (wins/losses/win_pct) stay current; rate fields blend."""
+    cur_season = cur_season if cur_season is not None else current_nba_season()
+    prior_season = prior_season if prior_season is not None else cur_season - 1
+    cur = get_all_team_stats(season=cur_season)
+    prior = get_all_team_stats(season=prior_season)
+    for abbr, c in cur.items():
+        gp = (c.get("wins", 0) or 0) + (c.get("losses", 0) or 0)
+        p = prior.get(abbr)
+        c["gp"] = gp
+        c["cur_weight"] = round(gp / (gp + k), 3) if (gp + k) else 0.0
+        if not p:
+            continue  # no prior (e.g. new/relocated team) → keep current as-is
+        for key in _BLEND_RATE_KEYS:
+            cv, pv = c.get(key), p.get(key)
+            if cv is None and pv is None:
+                continue
+            if cv is None:
+                c[key] = pv
+            elif pv is None:
+                continue
+            else:
+                c[key] = round((gp * cv + k * pv) / (gp + k), 2)
+    return cur
 
 
 def get_nba_fast_break_stats(season_str: str = "2025-26") -> dict:
@@ -2794,6 +2837,16 @@ def build_b2b_and_mismatches(all_results: list, game_date: str) -> tuple:
     b2b_tags = []
     spread_mismatches = []
 
+    # League-average offense across tonight's teams — baseline for the
+    # pace-adjusted projection (points/100 = lg_avg + (off-lg) + (opp_def-lg)).
+    _offs = []
+    for _r in all_results:
+        for _side in ("home", "away"):
+            _o = _r[_side].get("off_rating")
+            if _o:
+                _offs.append(_o)
+    lg_avg_off = round(sum(_offs) / len(_offs), 1) if _offs else 114.0
+
     for r in all_results:
         away = r["away"]
         home = r["home"]
@@ -2849,20 +2902,32 @@ def build_b2b_and_mismatches(all_results: list, game_date: str) -> tuple:
         lean_team = r["edge"].get("lean", "")
         confidence = r["edge"].get("confidence", "INFO")
 
-        # Model implied spread — use same formula as gut check for consistency:
-        # fair_spread = net_rating_diff * 0.45 (industry standard conversion)
-        # This ensures INFLATED card and gut check tell the same story to the user.
-        h_net = r["home"].get("net_rating", 0) or 0
-        a_net = r["away"].get("net_rating", 0) or 0
-        raw_net_diff = abs(h_net - a_net)
-        # Fall back to edge_score * 0.5 only if net ratings are unavailable
-        if raw_net_diff >= 1.0:
-            model_implied = round(raw_net_diff * 0.45, 1)
-            # Preserve sign: positive = home favored by that much
-            if h_net < a_net:
-                model_implied = -model_implied
+        # Model implied spread — pace-adjusted projection, not a flat multiplier.
+        # Each team's pts/100 = lg_avg + (its off - lg) + (opp def - lg), scaled
+        # by expected game pace, + home court. Margin = home_pts - away_pts.
+        # Pace matters: two +5 net teams produce a different spread at 105 pace
+        # than at 96. The old net_diff*0.45 threw that away.
+        h, a = r["home"], r["away"]
+        h_off, h_def = h.get("off_rating"), h.get("def_rating")
+        a_off, a_def = a.get("off_rating"), a.get("def_rating")
+        if None not in (h_off, h_def, a_off, a_def):
+            pace = ((h.get("pace") or 100.0) + (a.get("pace") or 100.0)) / 2.0
+            scale = pace / 100.0
+            home_pts = (h_off + a_def - lg_avg_off) * scale
+            away_pts = (a_off + h_def - lg_avg_off) * scale
+            HOME_COURT_ADV = 2.5
+            model_implied = round((home_pts - away_pts) + HOME_COURT_ADV, 1)
         else:
-            model_implied = round(edge_score * 0.5, 1)
+            # No advanced ratings → fall back to net diff, then signal score.
+            h_net = h.get("net_rating", 0) or 0
+            a_net = a.get("net_rating", 0) or 0
+            raw_net_diff = abs(h_net - a_net)
+            if raw_net_diff >= 1.0:
+                model_implied = round(raw_net_diff * 0.45, 1)
+                if h_net < a_net:
+                    model_implied = -model_implied
+            else:
+                model_implied = round(edge_score * 0.5, 1)
         gap = round(abs(spread_val) - abs(model_implied), 1)
 
         # Only flag meaningful gaps (2+ pts) on B2B teams or SHARP/LEAN games
@@ -3279,7 +3344,7 @@ def main():
         print(f"  Found {len(games)} game(s). Pulling team stats...\n")
 
     # Step 2: Pull all team stats
-    all_stats = get_all_team_stats(season=2025)
+    all_stats = get_blended_team_stats()  # current season blended toward prior by games played
 
     if not all_stats:
         msg = "Could not fetch team stats."

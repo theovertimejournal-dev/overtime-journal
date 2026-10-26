@@ -488,13 +488,16 @@ def generate_blog(prompt: str) -> dict | None:
             },
             json={
                 "model": "claude-sonnet-5",
-                "max_tokens": 4000,
+                "max_tokens": 8000,
                 "messages": [{"role": "user", "content": prompt}],
             },
-            timeout=90,
+            timeout=120,
         )
         resp.raise_for_status()
         data = resp.json()
+        stop_reason = data.get("stop_reason", "")
+        if stop_reason == "max_tokens":
+            print("  ⚠ Response hit max_tokens — output truncated. Raise max_tokens.")
         # Robust: join text from whichever content blocks are type "text".
         # A response can lead with a non-text block, which crashed the old
         # data["content"][0]["text"] assumption with KeyError: 'text'.
@@ -516,8 +519,13 @@ def generate_blog(prompt: str) -> dict | None:
         return json.loads(clean)
 
     except json.JSONDecodeError as e:
+        # Print stop_reason + BOTH ends of the text so we can tell truncation
+        # (ends mid-word, stop_reason=max_tokens) from a malformed-JSON char
+        # (ends with a full closing brace but has a bad char mid-string).
         print(f"  ❌ JSON parse error: {e}")
-        print(f"  Raw: {text[:300]}")
+        print(f"  stop_reason: {locals().get('stop_reason', '?')}  len(text)={len(text)}")
+        print(f"  HEAD: {text[:200]}")
+        print(f"  TAIL: {text[-200:]}")
         return None
     except Exception as e:
         print(f"  ❌ Claude API error: {e}")

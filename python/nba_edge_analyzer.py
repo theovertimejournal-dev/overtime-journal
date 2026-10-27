@@ -973,15 +973,26 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Zion Williamson":           ("NOP", 3.5),
     }
 
-    # ── Roster Decimation Check ───────────────────────────────────────────────
-    # When a team's best available player averages ≤ 15 PPG, the roster is
-    # too thin to lean on — kill confidence to INFO regardless of signals.
-    # Based on current season data (updated March 16, 2026).
-    DECIMATED_TEAMS = {
-        "BKN": "Nic Claxton (12.0 PPG) — best available player",
-        "GSW": "Brandin Podziemski (13.0 PPG) — Curry/Butler both out",
-        "MEM": "Cedric Coward (13.3 PPG) — Morant/Edey both out",
-    }
+    # ── Roster Decimation Check (live-driven) ─────────────────────────────────
+    # A team is "decimated" only when 2+ of its franchise stars are actually OUT
+    # on tonight's live injury report — not a hardcoded list. The old static dict
+    # was frozen at March 2026 and kept flagging teams whose stars had since
+    # returned (e.g. GSW with Curry/Butler healthy). Rebuilt fresh per game.
+    def _stars_out_for(team_data: dict) -> list:
+        abbr = team_data["team"]
+        out = []
+        for inj in team_data.get("injuries", []):
+            nm = inj.get("name", "")
+            star = FRANCHISE_STARS.get(nm)
+            if star and star[0] == abbr and inj.get("status") in ("Out", "Doubtful"):
+                out.append(nm)
+        return out
+
+    DECIMATED_TEAMS = {}
+    for _td in (home, away):
+        _out = _stars_out_for(_td)
+        if len(_out) >= 2:
+            DECIMATED_TEAMS[_td["team"]] = f"{len(_out)} stars out — {', '.join(_out)}"
 
     home_decimated = DECIMATED_TEAMS.get(home["team"])
     away_decimated = DECIMATED_TEAMS.get(away["team"])
@@ -1059,52 +1070,15 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     # SEASON_ENDING: players confirmed out for the season — skip boost even
     # if they drop off the daily injury report.
     # Updated: 2026-03-28.
-    SEASON_ENDING = {
-        "Ja Morant",         # MEM — out for season
-        "Jaren Jackson Jr.", # MEM — out for season
-        "Chet Holmgren",     # OKC — out for season
-    }
+    SEASON_ENDING = set()  # was frozen 2026-03-28; live injury feed now handles out-for-season
 
     # STAR_ABSENCE_HISTORY: players who missed 8+ games this season.
     # Updated: 2026-03-28. Source: NBA.com on/off splits + manual tracking.
-    STAR_ABSENCE_HISTORY = {
-        # games_back = games played since returning (0 = still out, 30 = fully integrated no boost)
-        # Last updated: March 31, 2026
-        # Embiid: out since Feb 28 (oblique), back last 10 games avg 31.5 pts
-        "Joel Embiid":       {"team": "PHI", "games_missed": 35, "games_back": 8,  "net_with": 7.2,  "net_without": -4.8, "boost": 5.0},
-        # Paul George: back after 25-game suspension, ~5 games played now
-        "Paul George":       {"team": "PHI", "games_missed": 25, "games_back": 5,  "net_with": 5.8,  "net_without": -1.2, "boost": 3.5},
-        # Maxey: out 10 games (finger), ~5 games back now
-        "Tyrese Maxey":      {"team": "PHI", "games_missed": 10, "games_back": 5,  "net_with": 4.5,  "net_without": -2.1, "boost": 3.0},
-        # Luka: day-to-day hamstring, has been playing but banged up
-        "Luka Doncic":       {"team": "LAL", "games_missed": 20, "games_back": 15, "net_with": 6.5,  "net_without": -3.5, "boost": 5.5},
-        # Giannis: still out as of March 26
-        "Giannis Antetokounmpo": {"team": "MIL", "games_missed": 20, "games_back": 0,  "net_with": 8.0, "net_without": 1.2, "boost": 4.5},
-        # Stephen Curry: out with injury (season-ending)
-        "Stephen Curry":     {"team": "GSW", "games_missed": 25, "games_back": 0,  "net_with": 8.5,  "net_without": 0.0,  "boost": 6.0},
-        # Jimmy Butler: OUT all season at GSW — multiple injuries
-        "Jimmy Butler":      {"team": "GSW", "games_missed": 50, "games_back": 0,  "net_with": 3.5,  "net_without": -5.0, "boost": 3.5},
-        # Ja Morant: only 20 games played (UCL sprain), still out
-        "Ja Morant":         {"team": "MEM", "games_missed": 50, "games_back": 0,  "net_with": 4.0,  "net_without": -6.0, "boost": 4.5},
-        # Banchero: only missed 10 games, been back all season essentially
-        "Paolo Banchero":    {"team": "ORL", "games_missed": 10, "games_back": 30, "net_with": 3.8,  "net_without": -2.1, "boost": 2.0},
-        # Chet Holmgren: out for season
-        "Chet Holmgren":     {"team": "OKC", "games_missed": 50, "games_back": 0,  "net_with": 9.0,  "net_without": 6.5,  "boost": 2.5},
-        # Kawhi: ankle sprain March 14, missed 1 game, back and playing
-        "Kawhi Leonard":     {"team": "LAC", "games_missed": 40, "games_back": 30, "net_with": 2.0,  "net_without": -5.5, "boost": 3.5},
-        # Zion: has been playing all season — remove boost entirely
-        "Zion Williamson":   {"team": "NOP", "games_missed": 5,  "games_back": 30, "net_with": 1.5,  "net_without": -4.0, "boost": 2.0},
-        # De'Aaron Fox: day-to-day back tightness, mostly playing
-        "De'Aaron Fox":      {"team": "SAS", "games_missed": 8,  "games_back": 20, "net_with": 3.0,  "net_without": -1.0, "boost": 2.5},
-        # Siakam: only 2 of last 8 games — load management, questionable nightly
-        "Pascal Siakam":     {"team": "IND", "games_missed": 15, "games_back": 3,  "net_with": 4.5,  "net_without": -3.0, "boost": 3.5},
-        # Jalen Williams: still out OKC
-        "Jalen Williams":    {"team": "OKC", "games_missed": 15, "games_back": 0,  "net_with": 10.0, "net_without": 5.0,  "boost": 3.0},
-        # Ant Edwards: back — returned early April, ~2 games back
-        "Anthony Edwards":   {"team": "MIN", "games_missed": 10, "games_back": 2,  "net_with": 5.5,  "net_without": 0.5,  "boost": 3.5},
-        # Kel'el Ware: back 3 games after 14 missed
-        "Kel'el Ware":       {"team": "MIA", "games_missed": 14, "games_back": 3,  "net_with": 2.0,  "net_without": -3.0, "boost": 2.5},
-    }
+    # Disabled: this was frozen at 2026-03-28 and applied stale return-boosts to
+    # the wrong players months later. Team strength now comes from the prior→live
+    # blend (current-season games already reflect who's on the floor), and
+    # tonight's scratches from the live injury feed. Rebuild live before re-enabling.
+    STAR_ABSENCE_HISTORY = {}
 
     # Boost decay by games back:
     # 0-3 games back  = full boost (just returned, stats still depressed)

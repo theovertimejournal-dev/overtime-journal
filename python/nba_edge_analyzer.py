@@ -692,7 +692,7 @@ def get_tank01_bench(team_abbrev: str, injuries: list = None) -> dict:
               Players with status Out/Doubtful are excluded from bench calc.
     Returns dict with bench_net, bench_ppg, available_bench, removed_bench.
     """
-    fallback = {"bench_net": 0, "bench_ppg": 0, "available_bench": [], "removed_bench": []}
+    fallback = {"bench_net": 0, "bench_ppg": 0, "available_bench": [], "removed_bench": [], "roster": set()}
     if not TANK01_AVAILABLE:
         return fallback
 
@@ -722,6 +722,23 @@ def get_tank01_bench(team_abbrev: str, injuries: list = None) -> dict:
 
         team_entry = body[0] if isinstance(body, list) else body
         depth_chart = team_entry.get("depthChart", {}) if isinstance(team_entry, dict) else {}
+
+        # Live roster (ALL players incl. starters) — the source of truth for who is
+        # actually on THIS team right now. Used to stop a stale hardcoded entry
+        # (e.g. a traded star) from generating a phantom matchup note. Names are
+        # lowercased with a last-name alias, mirroring the scratch-match logic above.
+        roster = set()
+        for _pos, _plist in depth_chart.items():
+            if not isinstance(_plist, list):
+                continue
+            for _pl in _plist:
+                _nm = (
+                    _pl.get("longName") or _pl.get("name") or
+                    f"{_pl.get('firstName','')} {_pl.get('lastName','')}".strip()
+                ).lower().strip()
+                if _nm:
+                    roster.add(_nm)
+                    roster.add(_nm.split()[-1])
 
         for position, players in depth_chart.items():
             if not isinstance(players, list):
@@ -775,6 +792,7 @@ def get_tank01_bench(team_abbrev: str, injuries: list = None) -> dict:
             "bench_ppg": bench_ppg,
             "available_bench": available_bench,
             "removed_bench": removed_bench,
+            "roster": roster,
         }
 
     except Exception as e:
@@ -967,7 +985,7 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Josh Giddey":               ("CHI", 2.5),
         "Stephen Curry":             ("GSW", 5.0),
         "Jimmy Butler":              ("GSW", 3.5),
-        "Ja Morant":                 ("MEM", 4.5),
+        "Ja Morant":                 ("POR", 4.5),
         "Anthony Edwards":           ("MIN", 3.5),
         "Kawhi Leonard":             ("LAC", 3.5),
         "Zion Williamson":           ("NOP", 3.5),
@@ -1450,6 +1468,14 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         for star_name, (star_team, _) in FRANCHISE_STARS.items():
             if star_team != team_abbrev:
                 continue
+            # Roster guard: the hardcoded dict goes stale when a star is traded.
+            # Trust it only if the live depth chart confirms the star is on THIS
+            # team; if roster data is unavailable (Tank01 down), fall back to dict.
+            _roster = team_data.get("roster") or set()
+            if _roster:
+                _sn = star_name.lower()
+                if _sn not in _roster and _sn.split()[-1] not in _roster:
+                    continue
             star_out = any(
                 p.get("name") == star_name and p.get("status") in ("Out", "Doubtful")
                 for p in team_injuries
@@ -2787,6 +2813,7 @@ def build_team_profile(team_abbrev: str, team_id: int, all_stats: dict, game_dat
     bench_data = get_tank01_bench(team_abbrev, injuries=injuries)
     profile["bench_net"] = bench_data["bench_net"]
     profile["bench_ppg"] = bench_data["bench_ppg"]
+    profile["roster"]    = bench_data.get("roster", set())  # live depth-chart names (lowercased + last-name alias)
 
     profile["key_out"] = []
 

@@ -2494,8 +2494,55 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
     # ── End ML Prediction ─────────────────────────────────────────────────────
 
     abs_score = abs(score)
-    confidence = "SHARP" if abs_score >= 14 else "LEAN" if abs_score >= 8 else "INFO"
     lean = home["team"] if score > 0 else away["team"] if score < 0 else None
+
+    # ── Confidence v2 — calibrated on VENUE x STRENGTH (401 graded picks, open lines) ──
+    # Measured ATS cover% (Mar-Nov 2026), lean's perspective on the frozen opening line:
+    #   HOME lean, |score| 3-10 : 60.9%  (n=174)  -> SHARP   (the real edge)
+    #   ROAD lean, |score| <3   : 58.0%  (n=50)   -> LEAN    (small road spots)
+    #   ROAD favorite, |score|>=10: 16.7% (n=12)  -> FADE flag, tier capped to INFO
+    #   everything else         : 48-52%          -> INFO    (no measured edge)
+    # DO NOT tier on abs(score) alone: that put big ROAD favorites (worst bucket) into
+    # SHARP. The SIGN of `score` encodes home(+)/road(-), which is the real driver.
+    # Thresholds are config constants - retune as the sample grows.
+    CONF_HOME_SWEET = (3.0, 10.0)   # home-lean sweet spot [low, high)
+    CONF_ROAD_SMALL = 3.0           # small road leans
+    FADE_ROAD_FAV_MAG = 10.0        # road favorite this strong = model's worst bucket
+
+    lean_is_home = score > 0
+    try:
+        _spread_home_val = float(spread_home or 0)
+    except (TypeError, ValueError):
+        _spread_home_val = 0.0
+    road_favorite = (score < 0) and (_spread_home_val > 0)  # away team laying points
+
+    if lean is None:
+        confidence = "INFO"
+    elif lean_is_home and CONF_HOME_SWEET[0] <= abs_score < CONF_HOME_SWEET[1]:
+        confidence = "SHARP"
+    elif (not lean_is_home) and abs_score < CONF_ROAD_SMALL:
+        confidence = "LEAN"
+    else:
+        confidence = "INFO"
+
+    # Big road favorites cover only 16.7% ATS (n=12) - the model's worst profile.
+    # Don't feature them: cap to INFO and surface a FADE alert with the inverse side
+    # for a small, tracked manual play. Promote to an auto inverse pick once it proves
+    # out forward (Phase 2: needs resolve_picks + UI changes).
+    if road_favorite and abs_score >= FADE_ROAD_FAV_MAG:
+        confidence = "INFO"
+        _fade_side = home["team"]  # the other side of a road-favorite lean
+        signals.append({
+            "type": "FADE_ALERT",
+            "detail": (
+                f"Model strongly leans road favorite {lean} (score {score:+.1f}), "
+                f"but this profile covers only 16.7% ATS historically (n=12). "
+                f"Suggested fade: {_fade_side} +{abs(_spread_home_val):.1f} - SMALL stake, tracking."
+            ),
+            "favors": _fade_side,
+            "strength": "STRONG",
+            "impact": 0,
+        })
 
     # ── Standings Tier override — kill spread lean on TANK teams ──────────────
     # If the lean landed on a TANK team AND the lean is based on spread value,

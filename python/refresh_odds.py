@@ -23,7 +23,7 @@ Usage:
 import sys
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -66,7 +66,44 @@ print(f"{'=' * 50}\n")
 FINAL_STATUSES = {"final", "completed", "complete", "f", "ft", "game over", "official", "post"}
 
 def game_is_over(status: str) -> bool:
-    return bool(status) and status.strip().lower() in FINAL_STATUSES
+    if not status:
+        return False
+    s = status.strip().lower()
+    if s in FINAL_STATUSES:
+        return True
+    # Some feeds dump a JSON blob as the status; detect a finished game inside it.
+    return ('"displaylong":"final"' in s) or ('"completed":true' in s) or ('"ended":true' in s)
+
+# ── Closing-line freeze helpers ─────────────────────────────────────────────
+# A snapshot counts as "pre-game" only until the scheduled tip. While pre-game we
+# keep refreshing close_* on the games table; the LAST pre-game write is the true
+# closing line, and once the game tips we never touch close_* again. This is what
+# stops a live/blowout number (e.g. -21.5) from overwriting the real closing spread.
+PREGAME_STATUSES = {
+    "", "scheduled", "pre-game", "pregame", "tonight", "warmup",
+    "upcoming", "not started", "delayed start", "delayed",
+}
+
+def _parse_status_dt(status):
+    """BDL's pre-game status is often the ISO tip time; parse it, else None."""
+    try:
+        return datetime.fromisoformat(str(status).strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+def is_pregame(status, now_utc) -> bool:
+    """True only while the game has NOT tipped yet — gates the closing-line freeze."""
+    if game_is_over(status):
+        return False
+    s = (status or "").strip().lower()
+    if s in PREGAME_STATUSES:
+        return True
+    tip = _parse_status_dt(status)
+    if tip is not None:
+        if tip.tzinfo is None:
+            tip = tip.replace(tzinfo=timezone.utc)
+        return now_utc < tip          # pre-game only until the scheduled tip time
+    return False                      # quarter / half / OT / in-progress => started
 
 # ── Step 1: Get today's games from Supabase (already pushed this morning) ─────
 print("⏳ Fetching today's slate from Supabase...")
@@ -195,6 +232,7 @@ print("\n⏳ Updating games + logging odds history...")
 logged = 0
 skipped = 0
 now_iso = datetime.now().isoformat()
+now_utc = datetime.now(timezone.utc)   # for the pre-tip comparison in is_pregame()
 
 # Pre-fetch all matchups already logged today in ONE query instead of N queries.
 # is_open = True means this is the first snapshot for that matchup (opening line).
@@ -233,17 +271,35 @@ for game in games:
         print(f"  ⏭ {matchup} — no odds yet")
         continue
 
+    # Phase gate: pre-game snapshots keep refreshing close_*; once the game tips,
+    # close_* is frozen (the last pre-game write is the true closing line).
+    pregame = is_pregame(status, now_utc)
+    phase   = "final" if game_is_over(status) else ("pregame" if pregame else "live")
+
     # ── Update live odds on games table ──────────────────────────────────────
+    games_update = {
+        "ml_home":          int(ml_home)       if ml_home     is not None else None,
+        "ml_away":          int(ml_away)        if ml_away     is not None else None,
+        "spread_home":      float(spread_home)  if spread_home is not None else None,
+        "spread_away":      float(spread_away)  if spread_away is not None else None,
+        "total":            float(total)        if total       is not None else None,
+        "odds_vendor":      vendor,
+        "odds_updated_at":  now_iso,
+    }
+    # Freeze the CLOSING line: write close_* ONLY while still pre-tip. Once the game
+    # is live/final we leave close_* alone, so it holds the last pre-game number.
+    if pregame:
+        games_update.update({
+            "close_spread_home": float(spread_home) if spread_home is not None else None,
+            "close_spread_away": float(spread_away) if spread_away is not None else None,
+            "close_total":       float(total)       if total       is not None else None,
+            "close_ml_home":     int(ml_home)       if ml_home     is not None else None,
+            "close_ml_away":     int(ml_away)       if ml_away     is not None else None,
+            "close_locked_at":   now_iso,
+        })
     try:
-        supabase.table("games").update({
-            "ml_home":          int(ml_home)       if ml_home     is not None else None,
-            "ml_away":          int(ml_away)        if ml_away     is not None else None,
-            "spread_home":      float(spread_home)  if spread_home is not None else None,
-            "spread_away":      float(spread_away)  if spread_away is not None else None,
-            "total":            float(total)        if total       is not None else None,
-            "odds_vendor":      vendor,
-            "odds_updated_at":  now_iso,
-        }).eq("slate_id", slate_id).eq("matchup", matchup).execute()
+        supabase.table("games").update(games_update) \
+            .eq("slate_id", slate_id).eq("matchup", matchup).execute()
     except Exception as e:
         print(f"  ⚠ games update failed ({matchup}): {e}")
 
@@ -253,20 +309,21 @@ for game in games:
 
     try:
         supabase.table("odds_history").insert({
-            "game_id":     matchup,
-            "slate_id":    slate_id,
-            "date":        game_date,
-            "is_open":     is_open,
-            "ml_home":     int(ml_home)       if ml_home     is not None else None,
-            "ml_away":     int(ml_away)        if ml_away     is not None else None,
-            "spread_home": float(spread_home)  if spread_home is not None else None,
-            "spread_away": float(spread_away)  if spread_away is not None else None,
-            "total":       float(total)        if total       is not None else None,
-            "odds_vendor": vendor,
-            "game_status": status,
+            "game_id":      matchup,
+            "slate_id":     slate_id,
+            "date":         game_date,
+            "is_open":      is_open,
+            "ml_home":      int(ml_home)       if ml_home     is not None else None,
+            "ml_away":      int(ml_away)        if ml_away     is not None else None,
+            "spread_home":  float(spread_home)  if spread_home is not None else None,
+            "spread_away":  float(spread_away)  if spread_away is not None else None,
+            "total":        float(total)        if total       is not None else None,
+            "odds_vendor":  vendor,
+            "game_status":  status,
+            "status_phase": phase,
         }).execute()
-        flag = " 🔓 OPENING" if is_open else ""
-        print(f"  ✅ {matchup}{flag}  ML: {ml_home}/{ml_away}  Spread: {spread_home}")
+        tag = " 🔓 OPENING" if is_open else ("  🔒 CLOSE-FROZEN" if not pregame else "")
+        print(f"  ✅ {matchup}{tag}  ML: {ml_home}/{ml_away}  Spread: {spread_home}  [{phase}]")
         logged += 1
     except Exception as e:
         print(f"  ⚠ odds_history insert failed ({matchup}): {e}")

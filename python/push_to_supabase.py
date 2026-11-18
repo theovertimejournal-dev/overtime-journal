@@ -23,6 +23,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from nba_edge_analyzer import build_props_slate
+from kelly_stake import recommend_stake   # fractional-Kelly suggested stake per pick
 
 
 # ── Load env ──────────────────────────────────────────────────────────────────
@@ -278,6 +279,25 @@ if slate_id:
         open_score      = existing["open_score"]      if existing and existing.get("open_score")      is not None else current_score
         open_confidence = existing["open_confidence"] if existing and existing.get("open_confidence") else current_confidence
         open_lean       = existing["open_lean"]       if existing and existing.get("open_lean")       else current_lean
+
+        # ── Kelly suggested stake ────────────────────────────────────────────
+        # Bankroll-independent % (UI multiplies by each user's OTJ Bucks). Sizes
+        # SHARP/LEAN off their measured cover%, returns 0 for INFO (no play), and
+        # a capped sliver when a FADE_ALERT fired. Uses the lean side's spread price.
+        edge_obj   = game.get("edge", {}) or {}
+        home_team  = (game.get("home", {}).get("team", "") or "").replace("_NBA", "")
+        lean_is_home = (current_lean or "").replace("_NBA", "") == home_team
+        spread_price = (game.get("spread_home_odds") if lean_is_home
+                        else game.get("spread_away_odds")) or -110
+        is_fade = any((s or {}).get("type") == "FADE_ALERT" for s in edge_obj.get("signals", []))
+        try:
+            _stake = recommend_stake(10000, current_confidence, odds=spread_price, is_fade=is_fade)
+        except Exception as _e:
+            _stake = {"stake_pct": 0.0, "note": f"stake calc skipped: {_e}"}
+        if isinstance(edge_obj, dict):
+            edge_obj["suggested_stake_pct"] = _stake.get("stake_pct", 0.0)
+            edge_obj["stake_note"]          = _stake.get("note", "")
+        # ── End Kelly stake ──────────────────────────────────────────────────
 
         game_row = {
             "slate_id": slate_id,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -22,6 +22,7 @@ import { createPortal } from "react-dom";
 export default function RosterPanel({ supabase, team, date, onClose }) {
   const [players, setPlayers] = useState(null);
   const [err, setErr] = useState(null);
+  const [openIdx, setOpenIdx] = useState(null);   // expanded player row
 
   useEffect(() => {
     let alive = true;
@@ -70,19 +71,42 @@ export default function RosterPanel({ supabase, team, date, onClose }) {
             </thead>
             <tbody>
               {players.map((p, i) => (
-                <tr key={i} className={p.status === "OUT" ? "is-out" : ""}>
-                  <td style={{ textAlign: "left" }}>
-                    {p.name}
-                    {p.status === "OUT" && <span className="out-badge">OUT</span>}
-                  </td>
-                  <td>{p.pos || "—"}</td>
-                  <td>{p.ppg?.toFixed?.(1) ?? p.ppg}</td>
-                  <td>{p.rpg?.toFixed?.(1) ?? p.rpg}</td>
-                  <td>{p.apg?.toFixed?.(1) ?? p.apg}</td>
-                  <td>{p.fg_pct}%</td>
-                  <td>{p.fg3_pct}%</td>
-                  <td>{p.min ?? "—"}</td>
-                </tr>
+                <Fragment key={i}>
+                  <tr
+                    className={`rp-row${p.status === "OUT" ? " is-out" : ""}`}
+                    onClick={() => setOpenIdx(openIdx === i ? null : i)}
+                  >
+                    <td style={{ textAlign: "left" }}>
+                      <span className="rp-caret">{openIdx === i ? "▾" : "▸"}</span>
+                      {p.name}
+                      {p.status === "OUT" && <span className="out-badge">OUT</span>}
+                    </td>
+                    <td>{p.pos || "—"}</td>
+                    <td>{p.ppg?.toFixed?.(1) ?? p.ppg}</td>
+                    <td>{p.rpg?.toFixed?.(1) ?? p.rpg}</td>
+                    <td>{p.apg?.toFixed?.(1) ?? p.apg}</td>
+                    <td>{p.fg_pct}%</td>
+                    <td>{p.fg3_pct}%</td>
+                    <td>{p.min ?? "—"}</td>
+                  </tr>
+                  {openIdx === i && (
+                    <tr className="rp-detail">
+                      <td colSpan={8}>
+                        <div className="rp-detail-grid">
+                          <div><span>GP</span>{p.gp ?? "—"}</div>
+                          <div><span>MIN</span>{p.min ?? "—"}</div>
+                          <div><span>PTS</span>{p.ppg?.toFixed?.(1) ?? p.ppg}</div>
+                          <div><span>REB</span>{p.rpg?.toFixed?.(1) ?? p.rpg}</div>
+                          <div><span>AST</span>{p.apg?.toFixed?.(1) ?? p.apg}</div>
+                          <div><span>STL</span>{p.spg?.toFixed?.(1) ?? (p.spg ?? "—")}</div>
+                          <div><span>BLK</span>{p.bpg?.toFixed?.(1) ?? (p.bpg ?? "—")}</div>
+                          <div><span>FG%</span>{p.fg_pct}%</div>
+                          <div><span>3P%</span>{p.fg3_pct}%</div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -106,6 +130,15 @@ export default function RosterPanel({ supabase, team, date, onClose }) {
         .out-badge{margin-left:8px;font-size:10px;font-weight:700;color:#ff6b6b;
           border:1px solid #ff6b6b;border-radius:4px;padding:1px 5px;}
         .team-click{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
+        .roster-table tr.rp-row{cursor:pointer;}
+        .roster-table tr.rp-row:hover td{background:rgba(255,255,255,0.03);}
+        .rp-caret{display:inline-block;width:12px;color:#6b7684;font-size:9px;}
+        .rp-detail td{background:rgba(255,255,255,0.02);padding:10px 8px 12px;}
+        .rp-detail-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px 6px;}
+        .rp-detail-grid > div{display:flex;flex-direction:column;align-items:center;
+          font-size:13px;font-weight:700;color:#e8edf2;}
+        .rp-detail-grid > div span{font-size:9px;font-weight:600;letter-spacing:.5px;
+          color:#7f8c9b;margin-bottom:2px;}
       `}</style>
     </div>,
     document.body

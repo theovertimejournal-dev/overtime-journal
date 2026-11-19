@@ -17,6 +17,7 @@ import MLBPropsPage from './components/nba/MLBPropsPage';
 import ArcadePage from './pages/ArcadePage';
 import LandingPage from './pages/LandingPage';
 import FAQ from './pages/FAQ';
+import ResetPassword from './pages/ResetPassword';
 import ProfilePage from './pages/ProfilePage';
 import { Analytics } from '@vercel/analytics/react';
 import LeaderboardPage from './pages/LeaderboardPage';
@@ -923,6 +924,7 @@ export default function App() {
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/props" element={<OTJPropsPage user={user} profile={profile} onShowLogin={() => setShowWelcome(true)} />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
           </Routes>
         </div>
 

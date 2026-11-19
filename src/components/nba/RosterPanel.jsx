@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * RosterPanel — slide-in roster with season averages for one team.
@@ -46,7 +47,7 @@ export default function RosterPanel({ supabase, team, date, onClose }) {
     };
   }, [supabase, team, date]);
 
-  return (
+  return createPortal(
     <div className="roster-overlay" onClick={onClose}>
       <div className="roster-panel" onClick={(e) => e.stopPropagation()}>
         <div className="roster-head">
@@ -106,6 +107,7 @@ export default function RosterPanel({ supabase, team, date, onClose }) {
           border:1px solid #ff6b6b;border-radius:4px;padding:1px 5px;}
         .team-click{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }

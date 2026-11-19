@@ -3,6 +3,7 @@ import { Pill } from '../common/Pill';
 import { NBATeamColumn } from './NBATeamColumn';
 import { NBAEdgeSignals } from './NBAEdgeSignals';
 import { supabase } from '../../lib/supabase';
+import RosterPanel from './RosterPanel';
 
 const CONFIDENCE_COLORS = { SHARP: "#ef4444", LEAN: "#f59e0b", INFO: "#6b7280" };
 
@@ -412,6 +413,7 @@ function BettingPanel({ game, user, profile, userPicks = [], onPickPlaced, onCan
 
 export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user, profile }) {
   const [userPicks, setUserPicks] = useState([]);
+  const [rosterTeam, setRosterTeam] = useState(null);   // which team's roster panel is open
 
   if (!game || !game.away || !game.home || !game.edge) return null;
 
@@ -463,11 +465,31 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
       border: "1px solid rgba(255,255,255,0.06)",
       borderRadius: 12, overflow: "hidden"
     }}>
+      {rosterTeam && (
+        <RosterPanel
+          supabase={supabase}
+          team={rosterTeam}
+          date={slateDate}
+          onClose={() => setRosterTeam(null)}
+        />
+      )}
       {/* Header row */}
       <div onClick={onToggle} style={{ padding: "14px 18px", cursor: "pointer", userSelect: "none" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9" }}>{matchup}</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: "#f1f5f9" }}>
+              <span
+                onClick={(e) => { e.stopPropagation(); setRosterTeam(away.team); }}
+                style={{ cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 3 }}
+                title={`View ${away.team} roster`}
+              >{away.team}</span>
+              {" @ "}
+              <span
+                onClick={(e) => { e.stopPropagation(); setRosterTeam(home.team); }}
+                style={{ cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 3 }}
+                title={`View ${home.team} roster`}
+              >{home.team}</span>
+            </span>
             <Pill text={formatGameTime(game_time)} color="#6b7280" />
             {(away?.b2b || home?.b2b) && (
               <Pill text={`${away?.b2b ? away.team : home.team} B2B`} color="#f59e0b" />

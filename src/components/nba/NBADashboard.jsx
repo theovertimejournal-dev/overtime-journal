@@ -7,6 +7,7 @@ import { NBAGameCard } from './NBAGameCard';
 import { B2BTierCard, SpreadMismatchCard } from './B2BTierCard';
 import { LoginModal } from '../common/LoginModal';
 import { RecordWidget } from '../common/RecordWidget';
+import SlateLegend from './SlateLegend';
 
 // ── Parlay Builder ────────────────────────────────────────────────────────────
 
@@ -308,6 +309,8 @@ export default function NBADashboard({ user, profile }) {
 
       {/* Date navigation */}
       <DateNav selectedDate={selectedDate} onDateChange={setSelectedDate} />
+
+      <SlateLegend />
 
       {slate?.headline && (
         <div style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 10, padding: "14px 18px", marginBottom: 14 }}>

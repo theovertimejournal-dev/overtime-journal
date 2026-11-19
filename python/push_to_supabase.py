@@ -465,6 +465,32 @@ except Exception as e:
     print(f"⚠ Props push failed (non-fatal): {e}")
 
 
+# ── Step 4c: Team rosters (season averages for the clickable roster view) ─────
+# Reuses the players already fetched by the props feed, grouped by team, with
+# live OUT flags. One row per team per day in team_rosters (see migration).
+try:
+    from build_rosters import build_team_rosters
+    from nba_edge_analyzer import current_nba_season
+    print(f"\n⏳ Building team rosters...")
+    rosters = build_team_rosters(raw_games, todays_injuries=todays_injuries,
+                                 season=current_nba_season())
+    pushed = 0
+    for team, players in rosters.items():
+        try:
+            supabase.table("team_rosters").upsert({
+                "date":       game_date,
+                "team":       team,
+                "players":    players,
+                "updated_at": datetime.now().isoformat(),
+            }, on_conflict="date,team").execute()
+            pushed += 1
+        except Exception as _re:
+            print(f"  ⚠ roster upsert failed ({team}): {_re}")
+    print(f"✅ Rosters pushed — {pushed} teams")
+except Exception as e:
+    print(f"⚠ Roster push failed (non-fatal): {e}")
+
+
 print(f"\n{'=' * 60}")
 print(f"  ✅ OTJ push complete for {game_date}")
 print(f"  Live at: overtimejournal.com/nba")

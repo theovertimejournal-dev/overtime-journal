@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from nba_edge_analyzer import build_props_slate
 from kelly_stake import recommend_stake   # fractional-Kelly suggested stake per pick
+from su_ml_layer import evaluate_su_ml    # straight-up / moneyline archetype tagger
 
 
 # ── Load env ──────────────────────────────────────────────────────────────────
@@ -298,6 +299,22 @@ if slate_id:
             edge_obj["suggested_stake_pct"] = _stake.get("stake_pct", 0.0)
             edge_obj["stake_note"]          = _stake.get("note", "")
         # ── End Kelly stake ──────────────────────────────────────────────────
+
+        # ── SU / moneyline archetype tag (elite-vs-tank ballast, dog VALUE, etc.) ──
+        try:
+            _su_ml = evaluate_su_ml(
+                current_lean,
+                game.get("home", {}).get("team", ""),
+                game.get("away", {}).get("team", ""),
+                game.get("home", {}).get("net_rating"),
+                game.get("away", {}).get("net_rating"),
+                game.get("ml_home"), game.get("ml_away"),
+            )
+            if _su_ml and isinstance(edge_obj, dict):
+                edge_obj["su_ml"] = _su_ml
+        except Exception as _se:
+            pass
+        # ── End SU/ML tag ────────────────────────────────────────────────────
 
         game_row = {
             "slate_id": slate_id,

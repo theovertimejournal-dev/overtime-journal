@@ -48,39 +48,50 @@ function calcEV(game, isHome) {
   return edgeScore * (1 + Math.max(0, edge) * 2);
 }
 
-// Pick the best spread leg, ML leg, and prop leg
-function buildParlay(games, props) {
-  const allGames = (games || []).filter(g => g.edge?.lean);
-  if (!allGames.length) return null;
+// Pick the best spread leg, ML leg, and prop leg — v2 rules (match the cheat sheet):
+// spread legs only from real edges (SHARP/LEAN, no INFO / big favs / FADE); the ML
+// leg only from a su_ml VALUE or un-juiced BALLAST, never a TRAP or a juiced favorite.
+const isFadeGame = (g) => (g.edge?.signals || []).some(s => s?.type === 'FADE_ALERT');
 
-  // ── Spread leg: highest EV across all games ──
-  const spreadCandidates = allGames.map(g => {
-    const isHome = g.edge.lean === g.home?.team;
-    const ev = calcEV(g, isHome);
-    const ml = isHome ? g.ml_home : g.ml_away;
-    const spread = isHome ? g.spread_home : g.spread_away;
-    const spreadStr = spread != null ? `${g.edge.lean} ${parseFloat(spread) > 0 ? '+' : ''}${parseFloat(spread).toFixed(1)}` : g.edge.lean;
-    const spreadOdds = isHome ? g.spread_home_odds : g.spread_away_odds;
-    return { game: g, ev, ml, isHome, type: 'spread', spreadOdds, label: spreadStr, matchup: g.matchup, score: g.edge?.score || 0 };
-  }).sort((a, b) => b.ev - a.ev);
+function buildParlay(games, props) {
+  const allGames = games || [];
+
+  // ── Spread leg: SHARP first, then LEAN. Never INFO, never a FADE spot. ──
+  const spreadCandidates = allGames
+    .filter(g => g.edge?.lean && ['SHARP', 'LEAN'].includes(g.edge?.confidence) && !isFadeGame(g))
+    .map(g => {
+      const isHome = g.edge.lean === g.home?.team;
+      const ev = calcEV(g, isHome);
+      const ml = isHome ? g.ml_home : g.ml_away;
+      const spread = isHome ? g.spread_home : g.spread_away;
+      const spreadStr = spread != null ? `${g.edge.lean} ${parseFloat(spread) > 0 ? '+' : ''}${parseFloat(spread).toFixed(1)}` : g.edge.lean;
+      const spreadOdds = isHome ? g.spread_home_odds : g.spread_away_odds;
+      const tierRank = g.edge.confidence === 'SHARP' ? 1 : 0;
+      return { game: g, tierRank, ev, ml, isHome, type: 'spread', spreadOdds, label: spreadStr, matchup: g.matchup, score: g.edge?.score || 0 };
+    })
+    .sort((a, b) => (b.tierRank - a.tierRank) || (b.ev - a.ev));
   const spreadLeg = spreadCandidates[0] || null;
 
-  // ── ML leg: best value, prefer underdogs, different game if possible ──
+  // ── ML leg: su_ml VALUE (dog/coin-flip) or un-juiced BALLAST. No TRAP, no chalk. ──
   const mlCandidates = allGames
     .filter(g => g !== spreadLeg?.game)
     .map(g => {
-      const isHome = g.edge.lean === g.home?.team;
-      const ml = isHome ? g.ml_home : g.ml_away;
-      if (!ml) return null;
-      const n = parseInt(ml);
-      if (isNaN(n)) return null;
-      const ev = calcEV(g, isHome);
-      const underdogBonus = n > 0 ? n / 100 : 0;
-      return { game: g, ev: ev + underdogBonus * 3, ml, isHome, type: 'ml', label: `${g.edge.lean} ML ${n > 0 ? `+${n}` : n}`, matchup: g.matchup, score: g.edge?.score || 0 };
+      const su = g.edge?.su_ml;
+      if (!su || !su.tag || su.ml_value === 'TRAP') return null;
+      if (!['VALUE', 'BALLAST'].includes(su.tag)) return null;
+      const n = parseInt(su.pick_ml);
+      if (isNaN(n) || n <= -250) return null;   // juice eats the edge
+      const isValue = su.ml_value === 'VALUE';
+      return {
+        game: g, type: 'ml', ml: n, isValue,
+        roi: su.ml_roi_hist || 0, suwin: su.su_win_hist || 0, archetype: su.archetype,
+        label: `${su.su_pick} ML ${n > 0 ? `+${n}` : n}`,
+        matchup: g.matchup, score: g.edge?.score || 0,
+      };
     })
     .filter(Boolean)
-    .sort((a, b) => b.ev - a.ev);
-  const mlLeg = mlCandidates[0] || (spreadLeg ? { ...spreadLeg, type: 'ml', label: spreadLeg.ml ? `${spreadLeg.game.edge.lean} ML` : spreadLeg.label } : null);
+    .sort((a, b) => (Number(b.isValue) - Number(a.isValue)) || (b.roi - a.roi) || (b.suwin - a.suwin));
+  const mlLeg = mlCandidates[0] || null;
 
   // ── Prop leg: highest scored prop ──
   const propLeg = props?.length
@@ -88,7 +99,7 @@ function buildParlay(games, props) {
     : null;
 
   const legs = [spreadLeg, mlLeg, propLeg].filter(Boolean);
-  if (!legs.length) return null;
+  if (legs.length < 2) return null;   // not enough disciplined edges — no parlay
 
   // ── Composite confidence: average score across all 3 legs ──
   const avgScore = legs.reduce((sum, leg) => sum + (leg.score || 0), 0) / legs.length;

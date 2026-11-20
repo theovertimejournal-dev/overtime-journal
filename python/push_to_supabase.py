@@ -96,6 +96,52 @@ games = data.get("games", [])
 print(f"✅ Analyzer complete — {len(games)} games found\n")
 
 
+# ── Step 1b: Enrich each edge with Kelly stake % + SU/ML tag BEFORE the slate push
+# These used to be written only in the Step 4 games-table loop below, which runs
+# AFTER the slate upsert — so the slates JSONB the frontend reads never got them.
+# Enriching here (before format_slate) puts them in the slate the cards render.
+def _enrich_edges(game_list: list) -> None:
+    for g in game_list:
+        edge = g.get("edge")
+        if not isinstance(edge, dict):
+            continue
+        conf = edge.get("confidence")
+        lean = (edge.get("lean") or "")
+        home_team = g.get("home", {}).get("team", "")
+        away_team = g.get("away", {}).get("team", "")
+
+        # Kelly suggested stake — bankroll-independent %, priced off the lean
+        # side's spread odds. INFO/no-lean -> 0. FADE_ALERT -> capped sliver.
+        is_fade = any((s or {}).get("type") == "FADE_ALERT"
+                      for s in edge.get("signals", []))
+        lean_is_home = lean.replace("_NBA", "") == home_team.replace("_NBA", "")
+        spread_price = (g.get("spread_home_odds") if lean_is_home
+                        else g.get("spread_away_odds")) or -110
+        try:
+            _stake = recommend_stake(10000, conf, odds=float(spread_price),
+                                     is_fade=is_fade)
+        except Exception as _e:
+            _stake = {"stake_pct": 0.0, "note": f"stake calc skipped: {_e}"}
+        edge["suggested_stake_pct"] = _stake.get("stake_pct", 0.0)
+        edge["stake_note"] = _stake.get("note", "")
+
+        # SU / moneyline archetype tag (BALLAST / VALUE / TRAP / SOLID)
+        try:
+            _su = evaluate_su_ml(
+                lean, home_team, away_team,
+                g.get("home", {}).get("net_rating"),
+                g.get("away", {}).get("net_rating"),
+                g.get("ml_home"), g.get("ml_away"),
+            )
+            if _su:
+                edge["su_ml"] = _su
+        except Exception:
+            pass
+
+_enrich_edges(games)
+print("✅ Edges enriched with Kelly stake % + SU/ML tags (pre-slate)\n")
+
+
 # ── Step 2: Format slate for Supabase ─────────────────────────────────────────
 def get_cumulative_record() -> str:
     """Pull the most recent cumulative record from Supabase instead of hardcoding."""

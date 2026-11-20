@@ -3075,91 +3075,44 @@ def build_b2b_and_mismatches(all_results: list, game_date: str) -> tuple:
 
 def build_parlay(all_results: list, spread_mismatches: list) -> dict | None:
     """
-    Build the nightly OTJ 3-leg parlay.
-      Leg 1 SHARP      — highest score >= 14
-      Leg 2 LEAN       — highest score 8-13
-      Leg 3 BEST VALUE — largest spread mismatch gap (different game)
-    Falls back to next best scored game if no mismatch available.
-    Returns parlay dict or None if < 2 legs found.
+    Build the nightly OTJ parlay — v2 rules (aligned to the backtested cheat sheet).
+
+    OLD logic bet raw score magnitude + chalk: it would take a big home favorite
+    (INFO, ~48% ATS) or a juiced favorite ML (-598, TRAP archetype) just because
+    the number was loud. That is the inverted-calibration trap we fixed in the
+    edge tiers — this applies the same fix to the pick rules.
+
+    New selection (quality, not magnitude):
+      • Spread legs  — ONLY real edges: SHARP (home lean, edge 3-10) and LEAN
+                       (road lean, edge <3). Never INFO, never a FADE_ALERT game,
+                       never a big home favorite.
+      • ML value leg — ONLY su_ml VALUE (dogs/coin-flips, +ROI) or a BALLAST that
+                       isn't juiced. NEVER a TRAP (elite-vs-bad) and NEVER a juiced
+                       favorite (ML <= -250) — the price eats the edge.
+      • Fewer legs beats a bad leg. 1 qualifying play -> no parlay (None).
+
+    Returns parlay dict or None if < 2 disciplined legs are available.
     """
-    sharp_games = sorted(
-        [r for r in all_results if r["edge"]["confidence"] == "SHARP"],
-        key=lambda r: abs(r["edge"]["score"]), reverse=True
-    )
-    lean_games = sorted(
-        [r for r in all_results if r["edge"]["confidence"] == "LEAN"],
-        key=lambda r: abs(r["edge"]["score"]), reverse=True
-    )
+    # Lazy import so a missing module never breaks the whole analyzer run.
+    try:
+        from su_ml_layer import evaluate_su_ml
+    except Exception:
+        evaluate_su_ml = None
 
-    leg1_result = sharp_games[0] if sharp_games else None
-    leg2_result = lean_games[0] if lean_games else None
-    used = {r["matchup"] for r in [leg1_result, leg2_result] if r}
+    def _is_fade(r):
+        return any((s or {}).get("type") == "FADE_ALERT"
+                   for s in r["edge"].get("signals", []))
 
-    # Leg 3: biggest mismatch gap on a different game
-    value_candidates = sorted(
-        [m for m in spread_mismatches if m["matchup"] not in used],
-        key=lambda m: float(str(m.get("gap", "0")).replace(" pts", "")), reverse=True
-    )
-    leg3_mismatch = value_candidates[0] if value_candidates else None
-    leg3_result = next(
-        (r for r in all_results if r["matchup"] == leg3_mismatch["matchup"]),
-        None
-    ) if leg3_mismatch else None
-
-    # If still no leg 3, take next best scored game
-    if not leg3_result:
-        remaining = sorted(
-            [r for r in all_results if r["matchup"] not in used],
-            key=lambda r: abs(r["edge"]["score"]), reverse=True
-        )
-        leg3_result = remaining[0] if remaining else None
-
-    legs_raw = [
-        (leg1_result, "SHARP 🔴", None),
-        (leg2_result, "LEAN 🟡", None),
-        (leg3_result, "BEST VALUE 💰", leg3_mismatch),
-    ]
-
-    def build_leg(result, label, mismatch):
-        if not result:
-            return None
+    def _spread_leg(result, label):
         edge = result["edge"]
         lean_team = edge.get("lean")
         if not lean_team:
             return None
         is_home = lean_team == result["home"]["team"]
-
-        # ── Gut check override ────────────────────────────────────────────────
-        # Pick logic — no gut check override, ML model handles edge detection
-        pick_team = lean_team
         spread = result.get("spread_home") if is_home else result.get("spread_away")
-        ml = result.get("ml_home") if is_home else result.get("ml_away")
-        spread_odds = result.get("spread_home_odds") if is_home else result.get("spread_away_odds")
-
-        pick_type, pick_line = "spread", None
-        if mismatch and spread is not None:
-            pick_type = "spread"
-            pick_line = f"{pick_team} {float(spread):+.1f}" if spread else pick_team
-        elif ml is not None:
-            try:
-                ml_val = int(ml)
-                if ml_val > 0 or ml_val >= -150:
-                    pick_type = "ml"
-                    pick_line = f"{pick_team} {ml_val:+d}"
-                elif spread is not None:
-                    pick_type = "spread"
-                    pick_line = f"{pick_team} {float(spread):+.1f}"
-                else:
-                    pick_type = "ml"
-                    pick_line = f"{pick_team} {ml_val:+d}"
-            except (ValueError, TypeError):
-                pick_line = f"{pick_team} {spread}" if spread else pick_team
-        elif spread is not None:
-            pick_line = f"{pick_team} {float(spread):+.1f}"
-        else:
-            pick_line = pick_team
-        # ── End pick logic ─────────────────────────────────────────────────
-
+        spread_odds = (result.get("spread_home_odds") if is_home
+                       else result.get("spread_away_odds"))
+        pick_line = f"{lean_team} {float(spread):+.1f}" if spread not in (None, "") else lean_team
         signals = edge.get("signals", [])
         return {
             "label": label,
@@ -3167,23 +3120,92 @@ def build_parlay(all_results: list, spread_mismatches: list) -> dict | None:
             "game_time": result.get("game_time", "TBD"),
             "lean_team": lean_team,
             "pick": pick_line,
-            "pick_type": pick_type,
+            "pick_type": "spread",
             "spread_odds": spread_odds,
             "confidence": edge["confidence"],
             "score": round(edge["score"], 1),
             "top_signal": signals[0]["detail"] if signals else "Model edge",
         }
 
-    legs = [build_leg(r, lbl, mm) for r, lbl, mm in legs_raw]
-    legs = [l for l in legs if l]
+    used = set()
+    legs = []
+
+    # ── Spread legs: SHARP first, then LEAN. Real edges only, no FADE. ─────────
+    sharp = sorted(
+        [r for r in all_results
+         if r["edge"]["confidence"] == "SHARP" and r["edge"].get("lean") and not _is_fade(r)],
+        key=lambda r: abs(r["edge"]["score"]), reverse=True)
+    lean = sorted(
+        [r for r in all_results
+         if r["edge"]["confidence"] == "LEAN" and r["edge"].get("lean") and not _is_fade(r)],
+        key=lambda r: abs(r["edge"]["score"]), reverse=True)
+
+    for r in sharp + lean:
+        if len(legs) >= 2:
+            break
+        if r["matchup"] in used:
+            continue
+        leg = _spread_leg(r, "SHARP 🔴" if r["edge"]["confidence"] == "SHARP" else "LEAN 🟡")
+        if leg:
+            legs.append(leg)
+            used.add(r["matchup"])
+
+    # ── One ML value leg: VALUE dog/coin-flip or un-juiced BALLAST. No TRAP. ───
+    if evaluate_su_ml:
+        ml_cands = []
+        for r in all_results:
+            if r["matchup"] in used:
+                continue
+            su = evaluate_su_ml(
+                r["edge"].get("lean"), r["home"]["team"], r["away"]["team"],
+                r["home"].get("net_rating"), r["away"].get("net_rating"),
+                r.get("ml_home"), r.get("ml_away"))
+            if not su or su.get("ml_value") == "TRAP":
+                continue
+            if su.get("tag") not in ("VALUE", "BALLAST"):
+                continue
+            try:
+                pml = int(su.get("pick_ml")) if su.get("pick_ml") is not None else None
+            except (ValueError, TypeError):
+                pml = None
+            if pml is None or pml <= -250:   # need a real price; juice kills the edge
+                continue
+            ml_cands.append((r, su, pml))
+
+        # Rank: VALUE (by ML ROI) ahead of BALLAST (by SU%).
+        ml_cands.sort(
+            key=lambda x: (1 if x[1].get("ml_value") == "VALUE" else 0,
+                           x[1].get("ml_roi_hist", 0), x[1].get("su_win_hist", 0)),
+            reverse=True)
+
+        if ml_cands:
+            r, su, pml = ml_cands[0]
+            edge = r["edge"]
+            signals = edge.get("signals", [])
+            is_value = su.get("ml_value") == "VALUE"
+            legs.append({
+                "label": "ML VALUE 💰" if is_value else "BALLAST 🔒",
+                "matchup": r["matchup"],
+                "game_time": r.get("game_time", "TBD"),
+                "lean_team": su.get("su_pick"),
+                "pick": f"{su.get('su_pick')} ML {pml:+d}",
+                "pick_type": "ml",
+                "spread_odds": pml,
+                "confidence": edge.get("confidence", "INFO"),
+                "score": round(edge.get("score", 0), 1),
+                "archetype": su.get("archetype"),
+                "top_signal": su.get("note") or (signals[0]["detail"] if signals else "SU value"),
+            })
+            used.add(r["matchup"])
+
     if len(legs) < 2:
-        return None
+        return None   # not enough disciplined edges tonight — straights only
 
     return {
         "legs": legs,
         "leg_count": len(legs),
         "generated_at": datetime.now().isoformat(),
-        "note": "OTJ Parlay — Sharp edge + Model lean + Best value play",
+        "note": "OTJ Parlay — real spread edges + one ML value play (no chalk traps)",
     }
 
 

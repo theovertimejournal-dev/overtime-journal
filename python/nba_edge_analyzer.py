@@ -971,6 +971,8 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Trey Murphy III":           ("NOP", 3.0),
         "Jalen Brunson":             ("NYK", 4.5),
         "Shai Gilgeous-Alexander":   ("OKC", 6.0),
+        "Jalen Williams":            ("OKC", 4.5),
+        "Chet Holmgren":             ("OKC", 4.0),
         "Paolo Banchero":            ("ORL", 4.0),
         "Joel Embiid":               ("PHI", 5.0),
         "Paul George":               ("PHI", 3.5),
@@ -991,6 +993,35 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         "Zion Williamson":           ("NOP", 3.5),
     }
 
+    # ── Dynamic impact penalty ───────────────────────────────────────────────
+    # The frozen star map above is now only a FALLBACK. The primary driver is the
+    # out player's actual season scoring load (ppg) when the injury record carries
+    # it, so we never again miss a real scorer (Chet, JWill, etc.) just because
+    # nobody hand-added his name. ppg/mpg are populated upstream by the injury
+    # enrichment step; when absent, we fall back to the star map below.
+    def _ppg_to_penalty(ppg):
+        if ppg is None or ppg < 15:
+            return 0.0
+        if ppg >= 28: return 6.0
+        if ppg >= 24: return 5.0
+        if ppg >= 21: return 4.5
+        if ppg >= 18: return 3.5
+        return 2.5  # 15–18 ppg
+
+    def _impact_penalty(inj, name, abbr):
+        # Live scoring load wins when we have it (real rotation player only).
+        ppg = inj.get("ppg")
+        mpg = inj.get("mpg")
+        if ppg is not None and (mpg is None or mpg >= 15):
+            p = _ppg_to_penalty(ppg)
+            if p > 0:
+                return p
+        # Fallback: the hardcoded star map (SGA, Luka, etc.).
+        star = FRANCHISE_STARS.get(name)
+        if star and star[0] == abbr:
+            return star[1]
+        return 0.0
+
     # ── Roster Decimation Check (live-driven) ─────────────────────────────────
     # A team is "decimated" only when 2+ of its franchise stars are actually OUT
     # on tonight's live injury report — not a hardcoded list. The old static dict
@@ -1001,8 +1032,7 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         out = []
         for inj in team_data.get("injuries", []):
             nm = inj.get("name", "")
-            star = FRANCHISE_STARS.get(nm)
-            if star and star[0] == abbr and inj.get("status") in ("Out", "Doubtful"):
+            if inj.get("status") in ("Out", "Doubtful") and _impact_penalty(inj, nm, abbr) >= 3.0:
                 out.append(nm)
         return out
 
@@ -1020,8 +1050,9 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
         team_abbrev = team_data["team"]
         for inj in team_injuries:
             player_name = inj.get("name", "")
-            if player_name in FRANCHISE_STARS:
-                star_team, base_penalty = FRANCHISE_STARS[player_name]
+            base_penalty = _impact_penalty(inj, player_name, team_abbrev)
+            if base_penalty > 0:
+                star_team = team_abbrev
                 if star_team == team_abbrev and inj.get("status") in ("Out", "Doubtful"):
                     original_net = team_data.get("net_rating", 0)
                     team_wpct = team_data.get("win_pct", 0.5)

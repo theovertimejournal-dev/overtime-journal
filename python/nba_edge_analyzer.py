@@ -1016,9 +1016,13 @@ def calculate_edge(home: dict, away: dict, spread_home=0) -> dict:
             p = _ppg_to_penalty(ppg)
             if p > 0:
                 return p
-        # Fallback: the hardcoded star map (SGA, Luka, etc.).
+        # Fallback: the hardcoded star map (SGA, Luka, etc.). Use the MAGNITUDE
+        # only — the team field in the map goes stale (trades), and the player is
+        # already on THIS team's live injury list, so the feed is authoritative on
+        # who he plays for. This fixes stars whose map team is wrong (e.g. a player
+        # the map still lists under his old team).
         star = FRANCHISE_STARS.get(name)
-        if star and star[0] == abbr:
+        if star:
             return star[1]
         return 0.0
 

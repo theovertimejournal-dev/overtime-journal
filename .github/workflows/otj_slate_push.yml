@@ -1,10 +1,11 @@
-name: OTJ Slate Push (7AM ET)
+name: OTJ Slate Push (7AM AZ)
 
 on:
   schedule:
-    # 7:00 AM ET = 12:00 UTC (EST) / 11:00 UTC (EDT)
-    - cron: '0 11 * * *'
-    - cron: '0 12 * * *'
+    # 7:00 AM Arizona (MST, UTC-7, no DST) = 14:00 UTC.
+    # Fire at 13:45 UTC (6:45 AM AZ) on a non-:00 minute so GitHub's top-of-hour
+    # cron congestion doesn't push it late — it's then done BY 7 AM AZ.
+    - cron: '45 13 * * *'
   workflow_dispatch:
     inputs:
       date:

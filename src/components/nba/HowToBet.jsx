@@ -82,6 +82,39 @@ export default function HowToBet() {
               can't beat that price, so the model won't let you overbet it.
             </p>
 
+            {/* MONEYLINE TAGS */}
+            <div className="htb-section">MONEYLINE TAGS</div>
+            <p className="htb-p" style={{ marginBottom: 10 }}>
+              A separate read on the <b>straight-up moneyline</b> (who wins the game, not the
+              spread). The model picks winners even when it can't beat a number — these say
+              where the ML is actually worth it.
+            </p>
+            <div className="htb-row">
+              <span className="htb-tag value">💰&nbsp;VALUE</span>
+              <div>
+                <b>Play the moneyline.</b> Underdogs &amp; coin-flips that win more often than
+                the price implies — the real ML money-makers.
+              </div>
+            </div>
+            <div className="htb-row">
+              <span className="htb-tag ballast">🔒&nbsp;BALLAST</span>
+              <div>
+                <b>Reliable, low payout.</b> A near-lock that pays little on its own. Good as a
+                parlay anchor, not a standalone bet.
+              </div>
+            </div>
+            <div className="htb-row">
+              <span className="htb-tag trap">⚠️&nbsp;TRAP</span>
+              <div>
+                <b>Skip the moneyline.</b> A favorite priced way too high for how often it
+                actually wins. Looks safe, bleeds money.
+              </div>
+            </div>
+            <div className="htb-row">
+              <span className="htb-tag solid">✅&nbsp;SOLID</span>
+              <div>A fine winner with no special moneyline edge either way.</div>
+            </div>
+
             {/* HOW TO BET */}
             <div className="htb-section">THE SHORT VERSION</div>
             <ul className="htb-list">
@@ -89,6 +122,7 @@ export default function HowToBet() {
               <li>Size with the <b>suggested %</b> — don't flat-bet everything the same.</li>
               <li>Bigger score ≠ better bet. Trust the <b>moderate</b> edges.</li>
               <li>Straights beat parlays. If you parlay, keep it light.</li>
+              <li><b>💰 VALUE</b> = play the moneyline · <b>⚠️ TRAP</b> = skip it.</li>
               <li>Tap a team name to see its <b>roster + averages</b> and who's OUT.</li>
             </ul>
 
@@ -123,6 +157,10 @@ export default function HowToBet() {
         .htb-tag.lean{background:#2a2410;color:#f5c451;border:1px solid #f5c451;}
         .htb-tag.info{background:#1a2230;color:#8aa0b8;border:1px solid #3a4a5e;}
         .htb-tag.fade{background:#2a1530;color:#d08bff;border:1px solid #d08bff;}
+        .htb-tag.value{background:#12301d;color:#34d17f;border:1px solid #34d17f;min-width:74px;}
+        .htb-tag.ballast{background:#122238;color:#60a5fa;border:1px solid #60a5fa;min-width:74px;}
+        .htb-tag.trap{background:#2e1414;color:#ff6b6b;border:1px solid #ff6b6b;min-width:74px;}
+        .htb-tag.solid{background:#1b222c;color:#9fb0c0;border:1px solid #3a4a5e;min-width:74px;}
         .htb-foot{margin:18px 0 0;font-size:12px;color:#7f8c9b;}
         b{color:#f1f5f9;}
       `}</style>

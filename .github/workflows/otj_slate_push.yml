@@ -61,6 +61,21 @@ jobs:
             python -u push_to_supabase.py --date=$ET_DATE
           fi
 
+      - name: Post slate drop to Discord
+        if: success()
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          OTJ_ALERT_WEBHOOK:    ${{ secrets.OTJ_ALERT_WEBHOOK }}
+        run: |
+          cd python
+          ET_DATE=$(TZ="America/New_York" date +%Y-%m-%d)
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -u otj_slate_drop.py --date=${{ github.event.inputs.date }}
+          else
+            python -u otj_slate_drop.py --date=$ET_DATE
+          fi
+
       - name: Notify on failure
         if: failure()
         run: echo "❌ Slate push failed — check logs above"

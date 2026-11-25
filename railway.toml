@@ -1,10 +1,10 @@
 # railway.toml — tells Railway how to build and run the server
 [build]
 builder = "nixpacks"
-buildCommand = "cd server && npm install"
+buildCommand = "if [ -d server ]; then cd server && npm install; else echo 'OTJ worker - no build'; fi"
 
 [deploy]
-startCommand = "cd server && npm start"
+startCommand = "if [ -d server ]; then cd server && npm start; else /opt/venv/bin/python otj_prechecks_worker.py; fi"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 

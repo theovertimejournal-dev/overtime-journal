@@ -25,6 +25,7 @@ from pathlib import Path
 from nba_edge_analyzer import build_props_slate
 from kelly_stake import recommend_stake   # fractional-Kelly suggested stake per pick
 from su_ml_layer import evaluate_su_ml    # straight-up / moneyline archetype tagger
+from otj_matchup_signals import matchup_signals  # on-card matchup-quality edge tags
 
 
 # ── Load env ──────────────────────────────────────────────────────────────────
@@ -135,6 +136,21 @@ def _enrich_edges(game_list: list) -> None:
             )
             if _su:
                 edge["su_ml"] = _su
+        except Exception:
+            pass
+
+        # On-card matchup-quality tags: paper-tiger / defense-backed spreads,
+        # chalk trap, home-dog value. Appended to the signals the cards render,
+        # computed from off/def rating + spread + moneyline already on the game.
+        try:
+            _sigs = edge.get("signals")
+            if not isinstance(_sigs, list):
+                _sigs = []
+                edge["signals"] = _sigs
+            _sigs.extend(matchup_signals(
+                g.get("home", {}), g.get("away", {}),
+                g.get("spread_home"), g.get("ml_home"), g.get("ml_away"),
+            ))
         except Exception:
             pass
 

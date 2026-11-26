@@ -426,10 +426,22 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
     VALUE:    { emoji: "💰", color: "#22c55e", label: "VALUE" },
     BALLAST:  { emoji: "🔒", color: "#60a5fa", label: "BALLAST" },
     TRAP:     { emoji: "⚠️", color: "#ef4444", label: "TRAP" },
-    SOLID:    { emoji: "✅", color: "#94a3b8", label: "SOLID" },
+    SOLID:    { emoji: "➖", color: "#94a3b8", label: "SOLID" },
     COINFLIP: { emoji: "🪙", color: "#94a3b8", label: "COINFLIP" },
   };
   const suStyle = suMl && suMl.tag ? SU_ML_STYLE[suMl.tag] : null;
+
+  // Pull the named CAUTION tags (chalk trap, paper tiger, backdoor risk) out of
+  // the edge signals so they ride up top — a warning should never be buried
+  // below the fold while a neutral SOLID badge sits in plain view.
+  const WARN_LABELS = { "CHALK TRAP": 1, "PAPER TIGER": 1, "BACKDOOR RISK": 1 };
+  const warnTags = [...new Set(
+    (edge.signals || []).filter(s => s && s.label && WARN_LABELS[s.label]).map(s => s.label)
+  )];
+  // Dim the SCORE when there's no play (INFO) so the number can't read as a signal.
+  const headlineConf = game.open_confidence || edge.confidence;
+  const scoreColor = headlineConf === "INFO" ? "#6b7280" : "#e2e8f0";
+
   const chip = (bg, border, color) => ({
     display: "inline-flex", alignItems: "center", gap: 5,
     fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 7,
@@ -523,14 +535,14 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
             <div style={{ textAlign: "right" }}>
               {/* Score — open score frozen, live score shown if different */}
               <div style={{ fontSize: 10, color: "#4a5568" }}>SCORE</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#e2e8f0" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: scoreColor }}>
                 {game.open_score ?? edge.score}
                 {game.open_score != null && edge.score != null && game.open_score !== edge.score && (
                   <span style={{ fontSize: 10, color: "#f59e0b", marginLeft: 4 }}>→ {edge.score} <span style={{ color: "#4a5568" }}>📡</span></span>
                 )}
               </div>
             </div>
-            <span style={{ fontSize: 14, color: "#4a5568" }}>{isExpanded ? "▲" : "▼"}</span>
+            <span style={{ fontSize: 14, color: "#4a5568" }}>{isExpanded ? "â–²" : "â–¼"}</span>
           </div>
         </div>
 
@@ -566,8 +578,8 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
                 <span style={{ color: "#a855f7", marginLeft: 6 }}>
                   {Math.abs(away.pace - home.pace) >= 3
                     ? (away.pace > home.pace
-                        ? `⚡ ${away.team} pushes pace`
-                        : `⚡ ${home.team} pushes pace`)
+                        ? `âš¡ ${away.team} pushes pace`
+                        : `âš¡ ${home.team} pushes pace`)
                     : "· similar pace"}
                 </span>
               )}
@@ -581,8 +593,13 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
         </div>
 
         {/* v2 badge strip — Kelly stake size + SU/ML archetype (always visible) */}
-        {(stakePct > 0 || suStyle) && (
+        {(stakePct > 0 || suStyle || warnTags.length > 0) && (
           <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+            {warnTags.map(label => (
+              <span key={label} style={chip("rgba(239,68,68,0.12)", "rgba(239,68,68,0.45)", "#ef4444")}>
+                ⚠️ {label}
+              </span>
+            ))}
             {stakePct > 0 && (
               <span
                 style={chip("rgba(34,197,94,0.10)", "rgba(34,197,94,0.35)", "#22c55e")}
@@ -790,7 +807,7 @@ export function NBAGameCard({ game, isExpanded, onToggle, betLog, onLogBet, user
           {/* Contrarian flag */}
           {narrativeContrarian && (
             <div style={{ marginTop: 10, padding: "10px 14px", background: "rgba(168,85,247,0.06)", borderRadius: 8, borderLeft: "3px solid #a855f7" }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#a855f7", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>⚡ Contrarian Flag</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#a855f7", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>âš¡ Contrarian Flag</div>
               <p style={{ fontSize: 12, color: "#c4b5fd", lineHeight: 1.7, margin: 0 }}>{narrativeContrarian}</p>
             </div>
           )}
